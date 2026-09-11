@@ -1,10 +1,761 @@
 ---
 title: Typed và dynamic forms
-description: Tận dụng kiểu dữ liệu và sinh biểu mẫu động.
+description: Mô hình hóa metadata, giữ an toàn kiểu dữ liệu và sinh Reactive Form động có thể kiểm thử, mở rộng và nâng cấp schema.
 ---
 
-Trang này sẽ trình bày **Typed và dynamic forms** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi và điều kiện tiên quyết">
+  Trang này tiếp nối [Reactive Forms](/docs/routing-forms/reactive-forms). Ví dụ dùng standalone component, control-flow syntax (`@for`, `@switch`) và Reactive Forms đã có typed mặc định từ Angular 14. Mục tiêu là form có **cấu trúc thay đổi theo metadata đáng tin cậy**, không phải một form builder tổng quát cho mọi loại giao diện.
 </Callout>
+
+## Mục lục
+
+- [Bài toán: typed form gặp dữ liệu động](#bài-toán-typed-form-gặp-dữ-liệu-động)
+  - [Hai nghĩa của dynamic](#hai-nghĩa-của-dynamic)
+  - [Luồng dữ liệu nên đi qua đâu](#luồng-dữ-liệu-nên-đi-qua-đâu)
+- [Thiết kế metadata như một contract](#thiết-kế-metadata-như-một-contract)
+  - [Schema tối thiểu, phân biệt theo kind](#schema-tối-thiểu-phân-biệt-theo-kind)
+  - [Dữ liệu từ server là input không đáng tin](#dữ-liệu-từ-server-là-input-không-đáng-tin)
+  - [Chọn FormGroup, FormArray hay FormRecord](#chọn-formgroup-formarray-hay-formrecord)
+- [Giữ an toàn kiểu cho form model](#giữ-an-toàn-kiểu-cho-form-model)
+  - [Form tĩnh: để TypeScript suy luận](#form-tĩnh-để-typescript-suy-luận)
+  - [Schema biết trước: suy ra control từ metadata](#schema-biết-trước-suy-ra-control-từ-metadata)
+  - [Key thật sự không biết trước: giới hạn của FormRecord](#key-thật-sự-không-biết-trước-giới-hạn-của-formrecord)
+- [Xây factory tạo form](#xây-factory-tạo-form)
+  - [Đặt validator gần metadata](#đặt-validator-gần-metadata)
+  - [Factory cho schema key cố định](#factory-cho-schema-key-cố-định)
+  - [Factory cho trường tùy biến](#factory-cho-trường-tùy-biến)
+- [Render form từ schema](#render-form-từ-schema)
+  - [Component và template mẫu](#component-và-template-mẫu)
+  - [Hiển thị lỗi và accessibility](#hiển-thị-lỗi-và-accessibility)
+- [Validation, submit và payload](#validation-submit-và-payload)
+  - [Validation client không thay thế server](#validation-client-không-thay-thế-server)
+  - [Map raw value sang command](#map-raw-value-sang-command)
+- [Nâng cấp schema và migrate dữ liệu](#nâng-cấp-schema-và-migrate-dữ-liệu)
+  - [Version thuộc về dữ liệu lưu trữ](#version-thuộc-về-dữ-liệu-lưu-trữ)
+  - [Hàm migration thuần](#hàm-migration-thuần)
+  - [Nạp dữ liệu cũ vào form mới](#nạp-dữ-liệu-cũ-vào-form-mới)
+- [Kiểm thử chiến lược dynamic form](#kiểm-thử-chiến-lược-dynamic-form)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Dùng any để dập lỗi kiểu](#dùng-any-để-dập-lỗi-kiểu)
+  - [Tin metadata từ API ngay lập tức](#tin-metadata-từ-api-ngay-lập-tức)
+  - [Dùng index làm định danh](#dùng-index-làm-định-danh)
+  - [Đổi schema nhưng giữ form cũ](#đổi-schema-nhưng-giữ-form-cũ)
+  - [Xây schema engine quá sớm](#xây-schema-engine-quá-sớm)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Bài toán: typed form gặp dữ liệu động
+
+Typed Reactive Forms làm TypeScript biết `price` là `FormControl<number>` và `name` là `FormControl<string>`. Nhờ đó, `form.controls.price.setValue('mười')` bị chặn khi biên dịch. Lợi ích này rõ nhất khi key và kiểu của form đã biết trong mã nguồn.
+
+Dynamic form xuất hiện khi giao diện không cố định hoàn toàn. Ví dụ, trang cấu hình hồ sơ có thể nhận danh sách câu hỏi từ cấu hình feature; một tenant bật thêm trường “mã nhân viên”; hoặc người dùng thêm các thuộc tính nhãn–giá trị. Thay vì viết sẵn từng `<input>`, component đọc **metadata** (còn gọi là schema giao diện), tạo controls tương ứng rồi render theo metadata đó.
+
+Điểm khó là không nên đánh đổi an toàn kiểu chỉ vì một phần cấu trúc động. Hãy tách hai câu hỏi:
+
+1. Key nào và kiểu nào đã biết khi lập trình?
+2. Dữ liệu nào chỉ xuất hiện khi ứng dụng đang chạy?
+
+Câu trả lời quyết định dùng `FormGroup` có typed controls, `FormArray`, hay `FormRecord`.
+
+### Hai nghĩa của dynamic
+
+“Dynamic” thường bị dùng cho hai trường hợp khác nhau.
+
+| Trường hợp | Ví dụ | Cấu trúc nên ưu tiên | Mức an toàn kiểu |
+| --- | --- | --- | --- |
+| **Schema cấu hình nhưng biết khi build** | Một mảng `PROFILE_QUESTIONS` nằm trong source code. | `FormGroup` và mapped type từ schema. | Cao: key và kiểu control có thể suy ra. |
+| **Schema tải khi chạy** | Backend trả các câu hỏi theo tenant hoặc theo phiên bản workflow. | Metadata được parse ở runtime; `FormGroup` hẹp nếu có contract, hoặc `FormRecord` cho key mở. | TypeScript chỉ bảo vệ phần contract biết trước. |
+| **Danh sách phần tử cùng cấu trúc** | Người dùng thêm nhiều địa chỉ hoặc kỹ năng. | `FormArray<FormGroup<...>>`. | Cao cho từng phần tử; độ dài động. |
+| **Tập key tự do cùng một kiểu value** | Thuộc tính `color`, `material`, `origin` do người dùng tự thêm. | `FormRecord<FormControl<string>>`. | Kiểu value an toàn, nhưng không biết trước key. |
+
+Không phải cứ render bằng `@for` là cần `FormRecord`. Nếu danh sách câu hỏi có key hữu hạn, ví dụ `fullName`, `age`, `role`, `FormGroup` vẫn mô hình hóa chính xác hơn. Ngược lại, ép TypeScript giả vờ biết key backend sẽ gửi vào tuần sau tạo cảm giác an toàn sai.
+
+### Luồng dữ liệu nên đi qua đâu
+
+Metadata không nên đi thẳng từ HTTP response vào template. Nó cần qua một ranh giới parse/normalize để UI không phải đoán loại input, default value hoặc validator có tồn tại hay không.
+
+```text
+Schema thô từ source code / API
+              │
+              ▼
+┌─────────────────────────────────────────────┐
+│ Parse + normalize                           │
+│ - kiểm tra kind, key, option, giới hạn      │
+│ - áp default và schemaVersion               │
+└──────────────────┬──────────────────────────┘
+                   │ Question[] hợp lệ
+                   ▼
+┌─────────────────────────────────────────────┐
+│ Form factory                                │
+│ metadata → FormControl → FormGroup/Record   │
+└──────────────────┬──────────────────────────┘
+                   │
+                   ▼
+Renderer Angular ──► input/select + lỗi + a11y
+                   │
+                   ▼
+raw value ──► map thành command ──► API validate lại
+```
+
+Một schema nhỏ có thể nằm trong component. Khi schema được dùng lại, hãy đưa type, parser, factory và mapper vào các file riêng theo feature. Điều quan trọng là mỗi lớp có trách nhiệm rõ ràng: parser tin cậy dữ liệu ở runtime, factory tạo cây control, renderer chỉ hiển thị, còn mapper tạo payload nghiệp vụ.
+
+## Thiết kế metadata như một contract
+
+Metadata là contract giữa nơi định nghĩa form và nơi render form. Nó phải chứa đủ thông tin để renderer quyết định UI, nhưng không nên chứa callback tùy ý, HTML thô hoặc quy tắc nghiệp vụ khó kiểm soát.
+
+Ví dụ dưới đây có ba loại câu hỏi: text, number và select. `kind` là discriminant — field giúp TypeScript thu hẹp type sau `switch` hoặc `if`.
+
+### Schema tối thiểu, phân biệt theo kind
+
+```ts
+export type BaseQuestion = {
+  key: string;
+  label: string;
+  required?: boolean;
+  hint?: string;
+};
+
+export type TextQuestion = BaseQuestion & {
+  kind: 'text';
+  defaultValue: string;
+  inputType?: 'text' | 'email' | 'tel';
+  maxLength?: number;
+};
+
+export type NumberQuestion = BaseQuestion & {
+  kind: 'number';
+  defaultValue: number;
+  min?: number;
+  max?: number;
+};
+
+export type SelectOption = {
+  value: string;
+  label: string;
+};
+
+export type SelectQuestion = BaseQuestion & {
+  kind: 'select';
+  defaultValue: string;
+  options: readonly SelectOption[];
+};
+
+export type Question = TextQuestion | NumberQuestion | SelectQuestion;
+```
+
+`defaultValue` thuộc từng biến thể thay vì dùng `unknown`. Nhờ vậy factory biết text và select tạo `FormControl<string>`, còn number tạo `FormControl<number>`. `inputType` chỉ cho phép danh sách nhỏ mà ứng dụng hỗ trợ; không cần biến metadata thành bản sao toàn bộ thuộc tính HTML.
+
+Một schema do source code sở hữu có thể được kiểm tra ngay tại nơi khai báo. `satisfies` xác nhận mỗi phần tử tuân theo `Question`, nhưng vẫn giữ literal type cho `key` và `kind`.
+
+```ts
+export const PROFILE_QUESTIONS = [
+  {
+    key: 'fullName',
+    kind: 'text',
+    label: 'Họ và tên',
+    defaultValue: '',
+    required: true,
+    maxLength: 100,
+  },
+  {
+    key: 'age',
+    kind: 'number',
+    label: 'Tuổi',
+    defaultValue: 18,
+    min: 18,
+    max: 120,
+  },
+  {
+    key: 'role',
+    kind: 'select',
+    label: 'Vai trò',
+    defaultValue: 'member',
+    required: true,
+    options: [
+      { value: 'member', label: 'Thành viên' },
+      { value: 'manager', label: 'Quản lý' },
+    ],
+  },
+] as const satisfies readonly Question[];
+```
+
+<Callout type="idea" title="Metadata là UI contract, không phải domain model">
+  `label`, `hint` và `inputType` phục vụ trải nghiệm biểu mẫu. Quyền được chọn vai trò, giới hạn tuổi theo chính sách, hay biến đổi dữ liệu để lưu là quy tắc domain/API. Có thể cùng dùng một số hằng số, nhưng đừng để template trở thành nơi thực thi quy tắc nghiệp vụ.
+</Callout>
+
+### Dữ liệu từ server là input không đáng tin
+
+TypeScript không kiểm tra nội dung JSON nhận qua mạng. Ép `response as Question[]` chỉ thay đổi niềm tin của compiler, không làm response hợp lệ. Một response có `kind: 'date'`, key rỗng hoặc select không có options vẫn vượt qua assertion đó và có thể làm renderer lỗi.
+
+Hãy parse schema ở biên HTTP bằng một schema validator runtime như Zod, Valibot, hoặc một type guard tự viết. Ví dụ rút gọn sau không thay thế đầy đủ thư viện validation, nhưng minh họa nguyên tắc: chỉ trả `Question` sau khi đã kiểm tra shape và normalize giá trị.
+
+```ts
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export function parseQuestion(value: unknown): Question | null {
+  if (typeof value !== 'object' || value === null) return null;
+
+  const raw = value as Record<string, unknown>;
+  if (!isNonEmptyString(raw['key']) || !isNonEmptyString(raw['label'])) {
+    return null;
+  }
+
+  const base = {
+    key: raw['key'].trim(),
+    label: raw['label'].trim(),
+    required: raw['required'] === true,
+  };
+
+  if (raw['kind'] === 'text' && typeof raw['defaultValue'] === 'string') {
+    return {
+      ...base,
+      kind: 'text',
+      defaultValue: raw['defaultValue'],
+      inputType: raw['inputType'] === 'email' || raw['inputType'] === 'tel'
+        ? raw['inputType']
+        : 'text',
+      maxLength: typeof raw['maxLength'] === 'number' ? raw['maxLength'] : undefined,
+    };
+  }
+
+  if (raw['kind'] === 'number' && typeof raw['defaultValue'] === 'number') {
+    return {
+      ...base,
+      kind: 'number',
+      defaultValue: raw['defaultValue'],
+      min: typeof raw['min'] === 'number' ? raw['min'] : undefined,
+      max: typeof raw['max'] === 'number' ? raw['max'] : undefined,
+    };
+  }
+
+  // Parser production cần kiểm tra cả mảng options và từng value/label.
+  return null;
+}
+```
+
+Parser thật nên kiểm tra thêm key không trùng, số hữu hạn cho `min`, `max`, và `defaultValue`, cũng như `min <= max`. Nếu schema không hợp lệ, hiển thị lỗi cấu hình có thể quan sát được hoặc dùng fallback an toàn; đừng render một nửa form rồi chờ lỗi runtime.
+
+### Chọn FormGroup, FormArray hay FormRecord
+
+Ba container đều có thể “động”, nhưng động theo trục khác nhau.
+
+- `FormGroup` giữ object có key đã biết. Nó phù hợp cho schema version được phát hành cùng frontend, hay contract API đã được client parse thành một tập key hữu hạn.
+- `FormArray` giữ danh sách có thứ tự. Dùng nó cho nhiều địa chỉ, câu trả lời lặp lại, hoặc dòng hóa đơn. Key của phần tử là vị trí, không phải tên field.
+- `FormRecord` là `FormGroup` cho các key mở, trong đó mọi control có cùng kiểu. Nó phù hợp cho dictionary thuộc tính text; không phù hợp để giấu một form nhiều loại value dưới `FormControl<unknown>`.
+
+Chọn container theo **hình dạng dữ liệu**, không theo cách HTML đang được lặp. Một người dùng thêm nhiều “kỹ năng” là `FormArray`. Một người dùng thêm `github`, `linkedin` hoặc một key tùy ý cùng giá trị chuỗi là `FormRecord`.
+
+## Giữ an toàn kiểu cho form model
+
+Typed Forms kiểm tra quan hệ giữa controls và lời gọi API trong TypeScript. Chúng không thể chứng minh một JSON runtime có đúng schema không. Vì vậy, phần này vừa tận dụng inference nơi có thể, vừa nêu rõ nơi phải dựa vào validation runtime.
+
+### Form tĩnh: để TypeScript suy luận
+
+Với form có field ổn định, cách an toàn nhất vẫn là viết `FormGroup` trực tiếp và để Angular suy ra controls.
+
+```ts
+import { FormControl, FormGroup, Validators } from '@angular/forms';
+
+const accountForm = new FormGroup({
+  email: new FormControl('', {
+    nonNullable: true,
+    validators: [Validators.required, Validators.email],
+  }),
+  marketingEnabled: new FormControl(false, { nonNullable: true }),
+});
+
+accountForm.controls.email.setValue('linh@example.com');
+accountForm.controls.marketingEnabled.setValue(true);
+
+// accountForm.controls.marketingEnabled.setValue('true'); // lỗi TypeScript
+```
+
+Đừng thêm generic annotation dài nếu inference đã biểu diễn đúng model. Annotation hữu ích khi public API của factory cần ổn định; nếu chỉ để ép compiler im lặng, nó có thể che một schema hoặc factory sai.
+
+### Schema biết trước: suy ra control từ metadata
+
+Với `PROFILE_QUESTIONS`, key là literal union `'fullName' | 'age' | 'role'`. Có thể map mỗi biến thể `Question` thành đúng loại control.
+
+```ts
+import { FormControl, FormGroup } from '@angular/forms';
+
+type ControlFor<Q extends Question> =
+  Q extends NumberQuestion
+    ? FormControl<number>
+    : FormControl<string>;
+
+type ControlsFor<Qs extends readonly Question[]> = {
+  [Q in Qs[number] as Q['key']]: ControlFor<Q>;
+};
+
+type ProfileControls = ControlsFor<typeof PROFILE_QUESTIONS>;
+// {
+//   fullName: FormControl<string>;
+//   age: FormControl<number>;
+//   role: FormControl<string>;
+// }
+```
+
+Kết quả là factory có thể trả `FormGroup<ProfileControls>`. Code dùng form nhận được autocomplete và kiểm tra kiểu có ích:
+
+```ts
+const profileForm: FormGroup<ProfileControls> = createQuestionForm(PROFILE_QUESTIONS);
+
+profileForm.controls.age.setValue(25);
+profileForm.controls.role.setValue('manager');
+// profileForm.controls.age.setValue('25'); // lỗi TypeScript
+// profileForm.controls.unknown.setValue('x'); // lỗi TypeScript
+```
+
+Mapped type này chỉ hoạt động tốt khi key là literal. Nếu viết `const questions: Question[] = ...`, TypeScript mở rộng `key` thành `string` và không thể còn biết chính xác key nào tồn tại. Đây là lý do `as const satisfies readonly Question[]` đáng giá với schema thuộc source code.
+
+### Key thật sự không biết trước: giới hạn của FormRecord
+
+Khi backend hoặc người dùng tự do tạo key, không có type-level trick nào khiến TypeScript biết các key chưa tồn tại lúc biên dịch. Hãy dùng `FormRecord` để diễn đạt trung thực giới hạn đó.
+
+```ts
+import { FormControl, FormRecord, Validators } from '@angular/forms';
+
+const attributes = new FormRecord<FormControl<string>>({});
+
+attributes.addControl(
+  'material',
+  new FormControl('', { nonNullable: true, validators: Validators.maxLength(50) }),
+);
+
+const material = attributes.get('material');
+if (material) {
+  material.setValue('cotton');
+}
+```
+
+`attributes.get('material')` có thể là `null`, vì control có thể chưa được tạo hoặc vừa bị xóa. Điều đó là một tín hiệu tốt: code phải xử lý lifecycle của key động thay vì truy cập `attributes.controls.material` như thể key được đảm bảo.
+
+Giữ `FormRecord<FormControl<string>>` khi value cùng kiểu. Nếu field runtime có thể là string, number, date, file và object lồng nhau, đừng “giải quyết” bằng `FormRecord<FormControl<unknown>>`. Hãy thu hẹp tập `kind` được hỗ trợ, parse từng biến thể, hoặc chia form thành các vùng có cấu trúc rõ hơn.
+
+## Xây factory tạo form
+
+Factory biến metadata đã hợp lệ thành controls. Nó là nơi tập trung default value, validator và chính sách `nonNullable`; renderer không nên tự tạo `FormControl` trong lúc template render.
+
+### Đặt validator gần metadata
+
+Validator factory dưới đây là hàm thuần. Nó đọc một `Question`, trả một mảng `ValidatorFn`, và không gọi HTTP hay thay đổi control khác.
+
+```ts
+import { ValidatorFn, Validators } from '@angular/forms';
+
+function validatorsFor(question: Question): ValidatorFn[] {
+  const validators: ValidatorFn[] = [];
+
+  if (question.required) {
+    validators.push(Validators.required);
+  }
+
+  if (question.kind === 'text' && question.maxLength !== undefined) {
+    validators.push(Validators.maxLength(question.maxLength));
+  }
+
+  if (question.kind === 'number') {
+    if (question.min !== undefined) validators.push(Validators.min(question.min));
+    if (question.max !== undefined) validators.push(Validators.max(question.max));
+  }
+
+  return validators;
+}
+```
+
+`required` không làm số `0` trở thành invalid; Angular coi `0` là một giá trị có mặt. Nếu nghiệp vụ yêu cầu tuổi phải lớn hơn 0, đó là trách nhiệm của `Validators.min(1)`. Tương tự, `nonNullable` chỉ điều khiển hành vi `reset()` và type `null`; nó không thay thế `required`.
+
+### Factory cho schema key cố định
+
+Trong vòng lặp, TypeScript không thể luôn theo dõi quan hệ giữa một key runtime và mapped type kết quả. Vì thế factory cần một assertion nhỏ, cục bộ tại điểm xây object. Đừng để assertion lan ra component, template và payload mapper.
+
+```ts
+import { FormControl, FormGroup } from '@angular/forms';
+
+function controlFor(question: Question): FormControl<string | number> {
+  return new FormControl(question.defaultValue, {
+    nonNullable: true,
+    validators: validatorsFor(question),
+  });
+}
+
+export function createQuestionForm<const Qs extends readonly Question[]>(
+  questions: Qs,
+): FormGroup<ControlsFor<Qs>> {
+  const controls: Record<string, FormControl<string | number>> = {};
+
+  for (const question of questions) {
+    if (controls[question.key]) {
+      throw new Error(`Duplicate form key: ${question.key}`);
+    }
+    controls[question.key] = controlFor(question);
+  }
+
+  // Assertion được cô lập: runtime parser và test chịu trách nhiệm cho schema.
+  return new FormGroup(controls as unknown as ControlsFor<Qs>);
+}
+```
+
+`controlFor()` trả union `FormControl<string | number>` vì nó nhận một `Question` union ở runtime. `ControlsFor<Qs>` phục hồi kiểu chính xác ở biên public của factory khi `Qs` là tuple literal. Runtime vẫn phải chặn key trùng; hai object properties có cùng key không thể cùng tồn tại dù TypeScript thấy tuple hợp lệ.
+
+Đừng tạo lại form trong mỗi lần đổi detection. Tạo form khi schema đã ổn định, giữ reference đó và cập nhật bằng API control. Khi schema thay đổi thật sự, chủ động migrate rồi tạo cây form mới; phần migration bên dưới giải thích lý do.
+
+### Factory cho trường tùy biến
+
+`FormRecord` cần factory nhỏ khác vì key có thể được thêm hoặc xóa từng cái. Validate key trước khi dùng nó làm property để tránh key rỗng, quá dài hoặc đụng key đã tồn tại.
+
+```ts
+import { FormControl, FormRecord, Validators } from '@angular/forms';
+
+const ATTRIBUTE_KEY = /^[a-z][a-z0-9-]{0,29}$/;
+
+export function addTextAttribute(
+  record: FormRecord<FormControl<string>>,
+  key: string,
+  initialValue = '',
+): boolean {
+  const normalizedKey = key.trim().toLowerCase();
+
+  if (!ATTRIBUTE_KEY.test(normalizedKey) || record.contains(normalizedKey)) {
+    return false;
+  }
+
+  record.addControl(
+    normalizedKey,
+    new FormControl(initialValue, {
+      nonNullable: true,
+      validators: [Validators.maxLength(100)],
+    }),
+  );
+  return true;
+}
+```
+
+Cần một policy rõ cho thao tác đổi tên key: hoặc cấm sửa và chỉ cho xóa/thêm, hoặc copy value sang control mới rồi `removeControl` key cũ. Không mutate trực tiếp `record.controls`; hãy dùng `addControl`, `removeControl` và `setControl` để Angular cập nhật parent, validator và observable đúng cách.
+
+## Render form từ schema
+
+Renderer nhận schema và form đã được factory tạo. Nó không cần biết factory dùng `FormGroup` hay service nào tải schema. Ví dụ này đặt `questions` là schema thuộc source code để form có typed controls đầy đủ.
+
+### Component và template mẫu
+
+```ts
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ReactiveFormsModule } from '@angular/forms';
+
+import { createQuestionForm, PROFILE_QUESTIONS } from './profile-questions';
+
+@Component({
+  selector: 'app-profile-form',
+  imports: [ReactiveFormsModule],
+  templateUrl: './profile-form.component.html',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class ProfileFormComponent {
+  readonly questions = PROFILE_QUESTIONS;
+  readonly form = createQuestionForm(this.questions);
+
+  submit(): void {
+    if (this.form.invalid || this.form.pending) {
+      this.form.markAllAsTouched();
+      return;
+    }
+
+    console.log(this.form.getRawValue());
+  }
+}
+```
+
+Trong template, `track question.key` giữ identity của một câu hỏi khi metadata được cập nhật. Đừng track theo `$index`: chèn một câu hỏi ở đầu danh sách có thể khiến Angular tái sử dụng DOM/control view của câu hỏi khác.
+
+```html
+<form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+  @for (question of questions; track question.key) {
+    @let control = form.controls[question.key];
+    @let errorId = question.key + '-error';
+
+    <div>
+      <label [for]="question.key">{{ question.label }}</label>
+
+      @switch (question.kind) {
+        @case ('text') {
+          <input
+            [id]="question.key"
+            [type]="question.inputType ?? 'text'"
+            [formControl]="control"
+            [attr.maxlength]="question.maxLength ?? null"
+            [attr.aria-describedby]="control.invalid ? errorId : null"
+          />
+        }
+        @case ('number') {
+          <input
+            [id]="question.key"
+            type="number"
+            [formControl]="control"
+            [attr.min]="question.min ?? null"
+            [attr.max]="question.max ?? null"
+            [attr.aria-describedby]="control.invalid ? errorId : null"
+          />
+        }
+        @case ('select') {
+          <select
+            [id]="question.key"
+            [formControl]="control"
+            [attr.aria-describedby]="control.invalid ? errorId : null"
+          >
+            @for (option of question.options; track option.value) {
+              <option [value]="option.value">{{ option.label }}</option>
+            }
+          </select>
+        }
+      }
+
+      @if (question.hint) {
+        <p>{{ question.hint }}</p>
+      }
+
+      @if (control.invalid && (control.touched || control.dirty)) {
+        <p [id]="errorId" role="alert">
+          @if (control.hasError('required')) {
+            {{ question.label }} là bắt buộc.
+          } @else if (control.hasError('min')) {
+            Giá trị nhỏ hơn giới hạn cho phép.
+          } @else if (control.hasError('max')) {
+            Giá trị lớn hơn giới hạn cho phép.
+          } @else if (control.hasError('maxlength')) {
+            Nội dung dài hơn giới hạn cho phép.
+          }
+        </p>
+      }
+    </div>
+  }
+
+  <button type="submit" [disabled]="form.invalid || form.pending">Lưu hồ sơ</button>
+</form>
+```
+
+`[formControl]` liên kết trực tiếp một instance control, nên renderer không cần xây chuỗi path hay gọi `form.get()` trong template. Với form key mở, có thể lấy control bằng `record.get(question.key)` trong component, xử lý trường hợp `null`, rồi truyền control hiện có vào một component field con.
+
+### Hiển thị lỗi và accessibility
+
+Metadata nên có `label` đọc được, không chỉ placeholder. Mỗi field cần một `id` ổn định và `<label [for]>` tương ứng. Khi hiện lỗi, `role="alert"` và `aria-describedby` giúp người dùng screen reader nhận được ngữ cảnh; với UI lớn hơn, nối cả `hint` lẫn error vào `aria-describedby` bằng các id riêng.
+
+Không đưa chuỗi lỗi HTML do server trả về vào `[innerHTML]`. Map error code đã biết sang message địa phương hóa, hoặc hiển thị text đã được escape qua interpolation `{{ message }}`. Nếu metadata được quản trị ngoài frontend, cũng cần kiểm soát độ dài label/hint để một cấu hình lỗi không làm vỡ layout.
+
+<Callout type="warn" title="Template không phải nơi thực thi schema">
+  Không gọi `new FormControl()`, `addControl()` hoặc service HTTP trong template hay trong hàm được template gọi mỗi lần render. Các thao tác này tạo side effect trong change detection và có thể sinh controls/subscription lặp lại. Template chỉ đọc metadata và control đã tồn tại.
+</Callout>
+
+## Validation, submit và payload
+
+Schema validation và form validation là hai lớp khác nhau. Schema validation kiểm tra “có thể tạo UI an toàn từ metadata này không”. Form validation kiểm tra “giá trị người dùng đang nhập có hợp lệ không”. Cả hai đều xảy ra ở client, nên không thay thế kiểm tra ở server.
+
+### Validation client không thay thế server
+
+Các validator trong factory phản hồi nhanh cho người dùng. Server vẫn cần validate key được phép, kiểu dữ liệu, phạm vi và quy tắc phụ thuộc dữ liệu hiện tại. Ví dụ, select `role: 'manager'` hợp lệ về mặt form không có nghĩa người đang submit có quyền cấp vai trò đó.
+
+Async validator cũng cần contract riêng. Tránh để metadata từ API mang theo URL hoặc biểu thức để client tự thực thi một validator bất kỳ. Thay vào đó, metadata chỉ mang một code đã biết như `uniqueUsername`; factory ánh xạ code đó đến validator do frontend sở hữu. Khi submit, chặn `form.pending` nếu kết quả async validator ảnh hưởng điều kiện lưu.
+
+### Map raw value sang command
+
+`getRawValue()` lấy cả control disabled. Với typed schema biết trước, output có shape rõ ràng; vẫn nên map nó sang command trước khi gọi API. Mapping là nơi trim text, đổi đơn vị hoặc bỏ field UI-only.
+
+```ts
+type UpdateProfileCommand = {
+  fullName: string;
+  age: number;
+  role: 'member' | 'manager';
+};
+
+function toUpdateProfileCommand(value: {
+  fullName: string;
+  age: number;
+  role: string;
+}): UpdateProfileCommand {
+  if (value.role !== 'member' && value.role !== 'manager') {
+    throw new Error('Unsupported role in form value');
+  }
+
+  return {
+    fullName: value.fullName.trim(),
+    age: value.age,
+    role: value.role,
+  };
+}
+```
+
+Với `FormRecord`, payload thường là dictionary, ví dụ `Record<string, string>`. Hãy whitelist hoặc validate keys trên server, kể cả khi client đã dùng regex. Client validation là UX; server mới là ranh giới tin cậy.
+
+## Nâng cấp schema và migrate dữ liệu
+
+Form động thường có schema đổi theo thời gian: đổi key `phone` thành `contactPhone`, tách `fullName`, hoặc bỏ option cũ. Nếu giá trị được lưu ở local storage, draft, database hoặc queue, hãy version hóa dữ liệu. Không thể chỉ cập nhật metadata rồi hy vọng `patchValue()` tự hiểu dữ liệu cũ.
+
+### Version thuộc về dữ liệu lưu trữ
+
+Lưu version cạnh payload, không suy đoán từ việc một field có tồn tại. Việc suy đoán mơ hồ khi người dùng thật sự bỏ trống field đó.
+
+```ts
+type ProfileDraftV1 = {
+  schemaVersion: 1;
+  fullName: string;
+  phone: string;
+};
+
+type ProfileDraftV2 = {
+  schemaVersion: 2;
+  fullName: string;
+  contactPhone: string;
+  role: 'member' | 'manager';
+};
+
+type StoredProfileDraft = ProfileDraftV1 | ProfileDraftV2;
+```
+
+Schema UI cũng có thể có version, nhưng đừng gộp version UI và version payload nếu chúng thay đổi độc lập. Version payload bảo vệ dữ liệu đã lưu. Version UI cho biết renderer/factory hỗ trợ những `kind` và quy tắc nào.
+
+### Hàm migration thuần
+
+Migration nên là hàm thuần: input cũ vào, output version mới ra, không đọc DOM, không gọi HTTP và không mutate input. Điều này làm nó dễ unit test và chạy lại an toàn.
+
+```ts
+function migrateV1ToV2(draft: ProfileDraftV1): ProfileDraftV2 {
+  return {
+    schemaVersion: 2,
+    fullName: draft.fullName,
+    contactPhone: draft.phone,
+    role: 'member',
+  };
+}
+
+function migrateToLatest(draft: StoredProfileDraft): ProfileDraftV2 {
+  switch (draft.schemaVersion) {
+    case 1:
+      return migrateV1ToV2(draft);
+    case 2:
+      return draft;
+  }
+}
+```
+
+Migration không được tự tạo thông tin không thể suy ra. Trong ví dụ, `role` nhận default `member`; nếu dữ liệu thật cần quyết định role từ quyền hiện tại, hãy dừng để người dùng hoặc server quyết định. Takeaway: migration chỉ bảo toàn hoặc biến đổi dữ liệu có quy tắc xác định.
+
+### Nạp dữ liệu cũ vào form mới
+
+Sau khi parse và migrate, map draft mới sang đúng form value rồi dùng `reset()` để đặt cả value lẫn trạng thái tương tác ban đầu. Đừng gọi `patchValue()` với object v1 rồi để `contactPhone` còn default mà không biết; đó là mất dữ liệu im lặng.
+
+```ts
+const latest = migrateToLatest(storedDraft);
+
+profileForm.reset({
+  fullName: latest.fullName,
+  age: 18,
+  role: latest.role,
+});
+```
+
+Ví dụ form minh họa không có `contactPhone`; trong ứng dụng thật, schema hiện hành và form value phải cùng chứa field này trước khi `reset`. Nếu payload có key động, migration cần làm việc trên dictionary đã parse và áp whitelist cho version đích. Khi một field bị xóa, quyết định giữ nó trong dữ liệu lịch sử, chuyển sang field khác, hay loại bỏ phải được ghi rõ trong migration và release note.
+
+## Kiểm thử chiến lược dynamic form
+
+Dynamic form có nhiều ranh giới hơn form tĩnh, nên test theo ranh giới thay vì chỉ snapshot HTML.
+
+| Tầng | Assert chính | Ví dụ |
+| --- | --- | --- |
+| Parser schema | Dữ liệu xấu bị từ chối hoặc normalize. | `kind` lạ, key trùng, `min > max`, select rỗng. |
+| Factory | Mỗi question tạo đúng control, default và validators. | `age` là number control và lỗi `min` dưới 18. |
+| Migration | Version cũ đi đến version mới không mất field có thể bảo toàn. | `phone` được đổi sang `contactPhone`. |
+| Renderer | Input đúng loại, label liên kết và lỗi hiện đúng thời điểm. | select có options; submit invalid đánh dấu controls touched. |
+| Submit mapper | Chỉ command đúng shape đi qua service. | text được trim; role không thuộc union bị chặn. |
+
+Ví dụ test factory không cần render template. Ví dụ này dùng Vitest, nhất quán với
+bài [Unit testing](/docs/testing-performance-deploy/unit-testing); nếu workspace dùng
+Jasmine/Karma, giữ cùng hành vi nhưng dùng matcher tương ứng của runner đó.
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { createQuestionForm, PROFILE_QUESTIONS, type Question } from './profile-questions';
+
+describe('createQuestionForm', () => {
+  it('tạo control đúng default và validator từ metadata', () => {
+    const form = createQuestionForm(PROFILE_QUESTIONS);
+
+    expect(form.getRawValue()).toEqual({
+      fullName: '',
+      age: 18,
+      role: 'member',
+    });
+
+    form.controls.age.setValue(17);
+    expect(form.controls.age.hasError('min')).toBe(true);
+  });
+
+  it('từ chối key trùng thay vì ghi đè control', () => {
+    const duplicate = [
+      { key: 'name', kind: 'text', label: 'Tên', defaultValue: '' },
+      { key: 'name', kind: 'text', label: 'Tên khác', defaultValue: '' },
+    ] as const satisfies readonly Question[];
+
+    expect(() => createQuestionForm(duplicate)).toThrow('Duplicate form key: name');
+  });
+});
+```
+
+Một test template ngắn nên xác nhận binding then chốt: nhập value vào `input`, phát event `input`, rồi submit để kiểm tra mapper/service. Không cần test Angular đã gọi nội bộ bao nhiêu lần `updateValueAndValidity()`; đó là implementation detail. Chi tiết về validator async và thông báo lỗi nằm ở bài [Validation](/docs/routing-forms/validation).
+
+## Lỗi thường gặp và trade-off
+
+Dynamic form tăng tính cấu hình, nhưng mỗi khả năng cấu hình đều tăng bề mặt cần validate, migrate và test. Các lỗi sau thường biến lợi ích đó thành độ phức tạp không cần thiết.
+
+### Dùng any để dập lỗi kiểu
+
+`FormGroup<any>`, `as any` trên toàn form, hoặc `FormControl<any>` cho mọi field làm mất autocomplete và che lỗi payload. Một assertion cục bộ trong factory có thể hợp lý vì TypeScript khó theo vòng lặp runtime; assertion rải khắp nơi là tín hiệu thiết kế chưa có ranh giới rõ.
+
+Hãy giữ union `Question` nhỏ, parser runtime chặt và generic ở public API của factory. Nếu không thể biểu diễn type chính xác vì schema thật sự mở, dùng `FormRecord` hoặc `Record<string, string>` một cách thành thật thay vì giả vờ có type key cụ thể.
+
+### Tin metadata từ API ngay lập tức
+
+Metadata ảnh hưởng trực tiếp đến input, label, validator và payload. Đưa JSON chưa parse vào renderer có thể gây UI sai, validator vô nghĩa hoặc expose một kind chưa được frontend hỗ trợ. Đây là lỗi contract, không phải lỗi giao diện nhỏ.
+
+Parse ở biên HTTP, log/telemetry schema bị từ chối với thông tin không nhạy cảm, và xác định UX fallback. Không thực thi JavaScript, regex không kiểm soát, URL hay HTML tùy ý mà metadata cung cấp.
+
+### Dùng index làm định danh
+
+`@for (...; track $index)` chỉ ổn khi danh sách không thể chèn, xóa hoặc sắp xếp lại. Với câu hỏi động, index làm identity thay đổi theo vị trí. Một câu trả lời đang gõ có thể gắn vào node DOM của câu hỏi khác sau khi schema chèn phần tử.
+
+Dùng key ổn định, duy nhất như `question.key` để track và làm key form. Nếu key có thể đổi tên, coi đó là migration schema chứ không phải chỉ đổi nhãn hiển thị.
+
+### Đổi schema nhưng giữ form cũ
+
+Thay `questions` nhưng giữ `FormGroup` cũ tạo hai nguồn sự thật: renderer theo schema mới, controls theo schema cũ. Field mới có thể không có control; field xóa có thể còn trong payload.
+
+Khi schema đổi, hãy quyết định rõ chiến lược: cấm đổi trong phiên chỉnh sửa, migrate value và dựng form mới, hoặc thêm/xóa controls qua factory có chủ đích. Với workflow phức tạp, giữ schema snapshot cùng draft để người dùng tiếp tục phiên cũ một cách nhất quán.
+
+### Xây schema engine quá sớm
+
+Schema-driven form có chi phí: nhiều type, parser, renderer theo `kind`, migration, a11y, test và quy trình phát hành schema. Một màn hình ổn định sáu fields thường dễ đọc hơn khi dùng `FormGroup` trực tiếp.
+
+Hãy bắt đầu với form tĩnh typed. Trích factory khi nhiều phần tử cùng quy tắc lặp lại. Chỉ đưa schema tải runtime khi sản phẩm thật sự cần cấu hình thay đổi độc lập với frontend. Nói ngắn gọn: dynamic là một năng lực sản phẩm, không phải mặc định kiến trúc.
+
+## Checklist và tóm tắt
+
+Trước khi đưa dynamic form vào feature, kiểm tra:
+
+- [ ] Metadata dùng discriminated union có `kind`, `key`, label, default và giới hạn cần thiết.
+- [ ] Schema từ mạng hoặc storage được parse/normalize ở runtime; key trùng và kind không hỗ trợ bị từ chối.
+- [ ] Schema thuộc source code dùng `as const satisfies readonly Question[]` để bảo toàn literal keys.
+- [ ] `FormGroup` dùng cho key biết trước, `FormArray` cho danh sách có thứ tự, `FormRecord` cho key mở cùng loại value.
+- [ ] Factory là nơi duy nhất tạo controls và validators; template không có side effect tạo form.
+- [ ] Renderer track theo key ổn định, có label, id và thông báo lỗi có ngữ cảnh.
+- [ ] Submit kiểm tra cả `invalid` và `pending`, rồi map raw form value thành command rõ ràng.
+- [ ] Payload/draft lưu trữ có version; migration là hàm thuần, được test và không làm mất dữ liệu im lặng.
+- [ ] Server kiểm tra schema/payload, quyền và quy tắc nghiệp vụ độc lập với client.
+
+Tóm lại, typed dynamic forms không phải là chọn giữa type safety và cấu hình. Giữ type safety tối đa ở phần schema/key biết trước; dùng runtime validation cho phần dữ liệu chỉ xuất hiện khi chạy; và biểu diễn phần không thể biết trước bằng `FormRecord` hoặc `FormArray` phù hợp. Một metadata contract nhỏ, factory tập trung, renderer không side effect và migration có version sẽ giúp form động vẫn dễ thay đổi và kiểm thử.
+
+<Cards>
+  <Card title="Reactive Forms" href="/docs/routing-forms/reactive-forms" description="Củng cố FormControl, FormGroup, FormArray, state và submit." />
+  <Card title="Validation" href="/docs/routing-forms/validation" description="Đào sâu validator đồng bộ, bất đồng bộ và trải nghiệm lỗi." />
+  <Card title="Routing & Forms" href="/docs/routing-forms" description="Quay lại lộ trình Router và Forms." />
+</Cards>

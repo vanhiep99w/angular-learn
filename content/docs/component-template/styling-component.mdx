@@ -1,10 +1,443 @@
 ---
 title: Styling component
-description: Encapsulation, style cục bộ, style toàn cục và tổ chức CSS.
+description: Hiểu phạm vi CSS, View Encapsulation, host/context, biến CSS và cách phối hợp style cục bộ với style toàn cục trong Angular.
 ---
 
-Trang này sẽ trình bày **Styling component** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu trang">
+  Sau trang này, bạn có thể chọn đúng nơi đặt CSS, dự đoán selector sẽ tác động đến đâu và tạo component có thể tùy biến giao diện mà không làm rò rỉ style.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+- [Style của component được khai báo ở đâu](#style-của-component-được-khai-báo-ở-đâu)
+- [Encapsulation và phạm vi selector](#encapsulation-và-phạm-vi-selector)
+  - [Emulated: lựa chọn mặc định](#emulated-lựa-chọn-mặc-định)
+  - [ShadowDom: ranh giới thật của trình duyệt](#shadowdom-ranh-giới-thật-của-trình-duyệt)
+  - [None: CSS toàn cục](#none-css-toàn-cục)
+- [Styling host và theo ngữ cảnh](#styling-host-và-theo-ngữ-cảnh)
+- [CSS custom properties: API theme cho component](#css-custom-properties-api-theme-cho-component)
+- [Style toàn cục](#style-toàn-cục)
+- [Chiến lược styling thực tế](#chiến-lược-styling-thực-tế)
+- [Ví dụ hoàn chỉnh: thẻ thông báo có thể tùy biến](#ví-dụ-hoàn-chỉnh-thẻ-thông-báo-có-thể-tùy-biến)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Tổng quan
+
+Mỗi Angular component có template và có thể có stylesheet riêng. CSS trong stylesheet đó thường phục vụ **view** của component: phần tử HTML do template của chính component tạo ra. Đây là điểm bắt đầu tốt vì người sở hữu component cũng sở hữu giao diện của nó.
+
+Tuy nhiên, “CSS nằm trong file component” không luôn đồng nghĩa với “CSS bị cô lập hoàn toàn”. Mức cô lập do `encapsulation` trong `@Component` quyết định. Angular có ba chế độ: `Emulated` (mặc định), `ShadowDom` và `None`.
+
+```text
+AppComponent
+│
+├── styles.css                         CSS dùng chung toàn ứng dụng
+│
+└── AlertComponent
+    ├── alert.component.ts              khai báo metadata component
+    ├── alert.component.html            template
+    └── alert.component.css             CSS cục bộ của AlertComponent
+```
+
+<Callout type="idea" title="Nguyên tắc khởi đầu">
+  Đặt CSS mô tả cấu trúc và trạng thái nội tại vào component. Đặt reset, token theme, font, utility class và quy tắc thật sự dùng chung vào stylesheet toàn cục. Chỉ thay đổi `encapsulation` khi hiểu rõ phạm vi selector mong muốn.
+</Callout>
+
+## Style của component được khai báo ở đâu
+
+Khai báo `styleUrl` để Angular lấy stylesheet ngoài. Đây là lựa chọn dễ bảo trì nhất cho hầu hết component vì template, logic và CSS được đặt cạnh nhau.
+
+```ts
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-product-card',
+  templateUrl: './product-card.component.html',
+  styleUrl: './product-card.component.css',
+})
+export class ProductCardComponent {}
+```
+
+CSS trong `product-card.component.css` có thể dùng CSS thuần hoặc cú pháp của preprocessor mà dự án đã cấu hình, chẳng hạn SCSS. Với đoạn CSS ngắn hoặc ví dụ, dùng `styles` để đặt trực tiếp trong metadata cũng hợp lệ:
+
+```ts
+@Component({
+  selector: 'app-status-dot',
+  template: `<span class="dot" aria-label="Đang hoạt động"></span>`,
+  styles: [`
+    .dot {
+      display: inline-block;
+      width: 0.75rem;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: #16a34a;
+    }
+  `],
+})
+export class StatusDotComponent {}
+```
+
+`styleUrl` và `styles` là metadata tĩnh. Angular biết chúng khi biên dịch, nên không dùng một biểu thức runtime để quyết định URL stylesheet. Nếu cần đổi màu, khoảng cách hoặc biến thể khi ứng dụng đang chạy, hãy dùng class, binding style có chủ đích hoặc CSS custom properties thay vì tạo stylesheet động.
+
+## Encapsulation và phạm vi selector
+
+`ViewEncapsulation` trả lời câu hỏi: stylesheet của component được áp dụng vào phần nào, và stylesheet bên ngoài có thể đi vào view đó đến mức nào? Nó không phải cơ chế bảo mật. Người dùng vẫn có thể xem DOM và CSS bằng DevTools.
+
+```text
+Selector trong CSS component
+          │
+          ├── Emulated  ──► Angular thêm thuộc tính để mô phỏng phạm vi
+          ├── ShadowDom ──► Trình duyệt tạo shadow root thật
+          └── None      ──► Selector trở thành CSS toàn cục
+```
+
+### Emulated: lựa chọn mặc định
+
+`ViewEncapsulation.Emulated` là mặc định. Khi biên dịch, Angular thêm các thuộc tính sinh tự động vào host và các node trong template, rồi viết lại selector để selector chỉ khớp các node mang thuộc tính tương ứng.
+
+```ts
+@Component({
+  selector: 'app-profile-card',
+  template: `<h2 class="title">Hồ sơ</h2>`,
+  styles: [`.title { color: rebeccapurple; }`],
+  encapsulation: ViewEncapsulation.Emulated,
+})
+export class ProfileCardComponent {}
+```
+
+Mô hình DOM sau đây chỉ để minh họa; hậu tố thực tế do Angular sinh ra và không phải API ổn định:
+
+```html
+<app-profile-card _nghost-c42>
+  <h2 class="title" _ngcontent-c42>Hồ sơ</h2>
+</app-profile-card>
+```
+
+Selector `.title` được Angular biến đổi theo tinh thần thành `.title[_ngcontent-c42]`. Vì vậy, nó không vô tình đổi màu một `.title` trong component khác. Ngược lại, selector trong component cha không tự động đi sâu để style các node do template của component con tạo ra.
+
+**Điều cần nhớ về `Emulated`:**
+
+- Nó cô lập selector theo template component, không tạo Shadow DOM thật.
+- Style toàn cục vẫn có thể ảnh hưởng vào các phần tử bên trong component nếu selector và độ ưu tiên CSS khớp.
+- CSS kế thừa tự nhiên như `color`, `font-family` và CSS custom properties vẫn chảy từ tổ tiên xuống.
+- Nội dung được chiếu bằng `<ng-content>` thuộc template của component cha. Vì thế selector của component chứa có thể không khớp trực tiếp các node đó theo cách bạn mong đợi; hãy thiết kế API class hoặc custom property rõ ràng.
+
+### ShadowDom: ranh giới thật của trình duyệt
+
+Với `ViewEncapsulation.ShadowDom`, Angular gắn template vào một **shadow root** do trình duyệt cung cấp. Selector bên ngoài không đi vào các node trong shadow tree, và selector trong shadow tree không đi ra ngoài nó. Đây là sự cô lập CSS mạnh hơn `Emulated`.
+
+```ts
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+  selector: 'app-rating-stars',
+  template: `<span class="stars">★★★★★</span>`,
+  styleUrl: './rating-stars.component.css',
+  encapsulation: ViewEncapsulation.ShadowDom,
+})
+export class RatingStarsComponent {}
+```
+
+```text
+<app-rating-stars>
+  #shadow-root
+  └── <span class="stars">★★★★★</span>
+</app-rating-stars>
+```
+
+Chế độ này phù hợp khi component cần đóng gói mạnh, ví dụ thư viện widget được nhúng vào nhiều ứng dụng. Đổi lại, các selector CSS toàn cục thông thường không còn dễ dàng tùy chỉnh các node bên trong. Hãy cung cấp custom properties, `part` hoặc API component có chủ đích cho nhu cầu tùy biến.
+
+<Callout type="warn" title="Cân nhắc trước khi dùng ShadowDom">
+  Shadow DOM thay đổi cách style toàn cục, testing và content projection tương tác. Không nên bật chỉ để “sửa” một xung đột CSS; trước hết hãy xem selector có quá rộng hay component có thiếu API theme hay không.
+</Callout>
+
+### None: CSS toàn cục
+
+`ViewEncapsulation.None` không viết lại selector. CSS khai báo cùng component sẽ được đưa vào style toàn cục của ứng dụng, nên selector có thể tác động đến bất kỳ phần tử khớp nào sau khi component đó được tải.
+
+```ts
+@Component({
+  selector: 'app-legacy-theme',
+  template: '',
+  styles: [`button { border-radius: 0; }`],
+  encapsulation: ViewEncapsulation.None,
+})
+export class LegacyThemeComponent {}
+```
+
+Ví dụ này có thể đổi bo góc của mọi `button`, không chỉ button trong `app-legacy-theme`. Chế độ `None` hữu ích khi tích hợp CSS của thư viện cũ hoặc tạo một theme toàn cục có kiểm soát, nhưng `styles.css` hoặc cấu hình global styles thường biểu đạt ý định đó rõ hơn.
+
+## Styling host và theo ngữ cảnh
+
+**Host element** là phần tử mang selector component trong template cha. Với `app-product-card`, host là `<app-product-card>`, không phải `<article>` đầu tiên nằm trong template của nó. Selector `:host` cho phép stylesheet component style chính phần tử host này.
+
+```css
+/* product-card.component.css */
+:host {
+  display: block;
+  max-inline-size: 22rem;
+}
+
+:host(.is-featured) {
+  outline: 2px solid var(--product-card-accent, #7c3aed);
+}
+
+:host([data-size='compact']) .summary {
+  display: none;
+}
+```
+
+Component cha dùng API này mà không cần biết cấu trúc DOM bên trong:
+
+```html
+<app-product-card class="is-featured" data-size="compact" />
+```
+
+`:host(.is-featured)` có nghĩa “host đồng thời có class `is-featured`”. Nó không có nghĩa “một phần tử con có class đó”. Cách này phù hợp để biểu diễn biến thể do bên ngoài quyết định, như `compact`, `selected` hoặc `disabled`.
+
+`:host-context(...)` cho phép style thay đổi khi một tổ tiên của host khớp selector. Ví dụ dưới đây hỗ trợ một vùng giao diện tối:
+
+```css
+:host-context(.dark) {
+  --card-surface: #18181b;
+  --card-text: #f4f4f5;
+}
+```
+
+Dù tiện lợi, `:host-context()` khiến component phụ thuộc vào cấu trúc bên ngoài và class của tổ tiên. Với theme, custom property thường minh bạch và linh hoạt hơn. Dùng `:host-context()` cho một integration đã biết rõ; không dùng nó như đường tắt để component con “đoán” mọi trạng thái của ứng dụng.
+
+<Callout type="warn" title="Không xuyên thủng component tùy tiện">
+  `::ng-deep` đã bị deprecate. Tránh dùng nó để ép style vào component con vì selector khó kiểm soát và có thể rò rỉ toàn cục. Ưu tiên input, class được công bố, CSS custom properties hoặc API theme của component/thư viện đó.
+</Callout>
+
+## CSS custom properties: API theme cho component
+
+CSS custom property (thường gọi là CSS variable) là biến có tên dạng `--tên-biến`. Giá trị của nó được kế thừa qua DOM, kể cả qua ranh giới Shadow DOM. Đây là cầu nối tốt giữa component đóng gói và theme bên ngoài.
+
+Component nên đặt giá trị mặc định ngay tại host, rồi dùng `var()` ở các node bên trong:
+
+```css
+/* alert.component.css */
+:host {
+  --alert-background: #eff6ff;
+  --alert-border: #2563eb;
+  --alert-text: #1e3a8a;
+
+  display: block;
+}
+
+.alert {
+  border-inline-start: 4px solid var(--alert-border);
+  padding: 1rem;
+  color: var(--alert-text);
+  background: var(--alert-background);
+}
+```
+
+Component cha hoặc stylesheet global chỉ cần đặt lại token trên host. Cấu trúc HTML nội bộ của `app-alert` có thể thay đổi mà hợp đồng theme vẫn giữ nguyên.
+
+```html
+<app-alert
+  style="--alert-background: #fff7ed; --alert-border: #ea580c; --alert-text: #7c2d12"
+>
+  Máy chủ sẽ bảo trì lúc 02:00.
+</app-alert>
+```
+
+Với theme cấp ứng dụng, đặt token ở `:root` hoặc ở một wrapper như `.theme-dark`, rồi để component lấy token chung với fallback:
+
+```css
+/* styles.css */
+:root {
+  --color-surface: #ffffff;
+  --color-text: #18181b;
+  --color-primary: #2563eb;
+}
+
+.theme-dark {
+  --color-surface: #18181b;
+  --color-text: #fafafa;
+  --color-primary: #93c5fd;
+}
+
+/* button.component.css */
+:host {
+  --button-background: var(--color-primary, #2563eb);
+}
+```
+
+Lưu ý thứ tự fallback: `var(--color-primary, #2563eb)` dùng `#2563eb` khi `--color-primary` chưa tồn tại. Đặt một fallback cho token thiết yếu giúp component vẫn đọc được khi được dùng độc lập, trong Storybook hoặc trong một ứng dụng khác.
+
+## Style toàn cục
+
+Stylesheet toàn cục là nơi phù hợp cho các quyết định có phạm vi toàn ứng dụng. Trong một dự án Angular CLI thông thường, mục `styles` trong `angular.json` trỏ đến file như `src/styles.css` hoặc `src/styles.scss`. File này được nạp cho toàn ứng dụng.
+
+```css
+/* src/styles.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #18181b;
+  background: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+```
+
+Nên đặt vào global styles:
+
+- reset hoặc baseline (`box-sizing`, margin mặc định, typography gốc);
+- font, token thiết kế, light/dark theme;
+- class utility dùng có chủ ý trên nhiều template;
+- stylesheet của thư viện hoặc CSS yêu cầu phạm vi toàn cục;
+- selector cho phần tử nằm ngoài view component, chẳng hạn nội dung do một overlay service tạo ra.
+
+Không nên dùng global styles làm bãi chứa CSS “cho nhanh”. Selector như `.title`, `button` hoặc `div > p` quá tổng quát sẽ cạnh tranh với component styles bằng specificity và thứ tự nạp CSS. Hãy namespace chúng, ví dụ `.app-markdown-content h2`, hoặc chuyển quy tắc về component sở hữu markup.
+
+## Chiến lược styling thực tế
+
+Không có một chiến lược duy nhất phù hợp mọi ứng dụng. Bảng sau giúp chọn nơi đặt style theo mục đích.
+
+| Nhu cầu | Nơi nên đặt | Lý do |
+| --- | --- | --- |
+| Layout, trạng thái, animation chỉ thuộc một component | stylesheet của component với `Emulated` | Gần template, ít rò rỉ selector |
+| Màu và spacing thay đổi theo theme hoặc theo nơi dùng | CSS custom properties trên host/wrapper | Giữ encapsulation nhưng vẫn mở API tùy biến |
+| Reset, typography, token thiết kế, utility | global stylesheet | Bản chất là chính sách toàn ứng dụng |
+| Widget thư viện cần không bị CSS host can thiệp | `ShadowDom` | Có ranh giới CSS thực của trình duyệt |
+| CSS legacy bắt buộc tác động rộng | global stylesheet, hoặc `None` được giới hạn | Thể hiện rõ phạm vi và dễ kiểm toán |
+
+Một quy trình thực dụng:
+
+1. Bắt đầu bằng stylesheet của component với encapsulation mặc định.
+2. Dùng class hoặc state của component để biểu diễn biến thể nội bộ.
+3. Khi consumer cần thay đổi token trực quan, công bố custom property có tên theo component, ví dụ `--alert-border`.
+4. Chỉ đưa quy tắc lên global khi nhiều khu vực thật sự dùng chung cùng một ý nghĩa.
+5. Chỉ dùng `ShadowDom` khi ranh giới DOM/CSS thật sự là yêu cầu sản phẩm hoặc thư viện.
+
+Điều quan trọng là API styling phải có chủ sở hữu. Nếu consumer phải dò selector nội bộ như `.alert > .icon + .message`, component đang để lộ cấu trúc thay vì cung cấp một hợp đồng ổn định.
+
+## Ví dụ hoàn chỉnh: thẻ thông báo có thể tùy biến
+
+Ví dụ này kết hợp encapsulation mặc định, `:host`, class state và custom properties. Consumer chọn loại thông báo bằng input. CSS bên trong chỉ quan tâm đến markup của `AlertComponent`; màu có thể được thay từ bên ngoài qua token.
+
+```ts
+import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+
+@Component({
+  selector: 'app-alert',
+  template: `
+    <section class="alert" [class.alert--danger]="variant() === 'danger'" role="alert">
+      <strong class="alert__title">{{ title() }}</strong>
+      <div class="alert__content"><ng-content /></div>
+    </section>
+  `,
+  styleUrl: './alert.component.css',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class AlertComponent {
+  title = input.required<string>();
+  variant = input<'info' | 'danger'>('info');
+}
+```
+
+```css
+/* alert.component.css */
+:host {
+  --alert-background: #eff6ff;
+  --alert-border: #2563eb;
+  --alert-text: #1e3a8a;
+
+  display: block;
+}
+
+.alert {
+  border-inline-start: 0.25rem solid var(--alert-border);
+  border-radius: 0.375rem;
+  padding: 1rem;
+  color: var(--alert-text);
+  background: var(--alert-background);
+}
+
+.alert--danger {
+  --alert-background: #fef2f2;
+  --alert-border: #dc2626;
+  --alert-text: #991b1b;
+}
+
+.alert__title {
+  display: block;
+  margin-block-end: 0.25rem;
+}
+```
+
+```html
+<!-- settings-page.component.html -->
+<app-alert title="Không thể lưu thay đổi" variant="danger">
+  Kiểm tra lại kết nối mạng rồi thử lại.
+</app-alert>
+
+<app-alert
+  title="Bảo trì"
+  style="--alert-background: #fffbeb; --alert-border: #d97706; --alert-text: #78350f"
+>
+  Hệ thống ngừng phục vụ từ 02:00 đến 02:15.
+</app-alert>
+```
+
+Dòng đầu dùng biến thể mà component công bố. Dòng thứ hai không cần selector xuyên vào `.alert`; nó chỉ ghi đè ba token công khai trên host. Đây là cách mở rộng an toàn hơn việc consumer phụ thuộc vào DOM nội bộ.
+
+## Lỗi thường gặp và trade-off
+
+### Đặt selector quá chung trong global stylesheet
+
+```css
+/* Tránh: ảnh hưởng mọi button trong ứng dụng. */
+button {
+  padding: 1rem;
+  background: purple;
+}
+```
+
+Quy tắc này có thể làm vỡ button của thư viện hoặc component khác. Nếu đó không phải design-system rule đã được thống nhất, hãy chuyển nó vào component hoặc namespace nó bằng một class có ý nghĩa.
+
+### Hiểu nhầm Emulated là bức tường tuyệt đối
+
+`Emulated` ngăn CSS component này khớp template component khác theo selector đã được rewrite. Nó không ngăn `body { color: ... }`, `* { box-sizing: ... }` hoặc custom property từ global stylesheet được kế thừa vào bên trong. Điều này hữu ích cho theme, nhưng cần được tính đến khi debug CSS.
+
+### Lạm dụng specificity hoặc `!important`
+
+Tăng specificity để thắng một selector khác thường tạo vòng lặp: selector sau lại cần mạnh hơn. Hãy tìm quy tắc cạnh tranh bằng DevTools, sau đó sửa phạm vi hoặc thứ tự kiến trúc CSS. Chỉ dùng `!important` cho utility có chủ đích hoặc tình huống tích hợp không thể kiểm soát, và ghi rõ lý do.
+
+### Dùng `::ng-deep` để sửa component của bên thứ ba
+
+`::ng-deep` phá mô hình cô lập và đã bị deprecate. Với thư viện, tìm theme API, class input, token CSS hoặc property mà thư viện hỗ trợ. Nếu không có, đặt một override global có namespace và tài liệu hóa nó là giải pháp tạm thời dễ tìm hơn một selector sâu bị ẩn trong component.
+
+### Chọn ShadowDom khi cần style nội dung được chiếu
+
+Shadow DOM đem lại cô lập mạnh, nhưng yêu cầu bạn thiết kế kỹ API cho projected content và theme. Nếu component là một phần nội bộ của cùng ứng dụng và chỉ cần tránh xung đột selector, `Emulated` thường ít ma sát hơn. Chọn ranh giới thật khi lợi ích cô lập lớn hơn chi phí tích hợp.
+
+## Checklist và tóm tắt
+
+Trước khi hoàn tất một component, hãy tự kiểm tra:
+
+- [ ] CSS mô tả markup nội bộ nằm cùng component sở hữu markup đó.
+- [ ] Selector global có phạm vi hẹp và có lý do dùng chung rõ ràng.
+- [ ] Biến thể do consumer điều khiển đi qua input, class host hoặc custom property, không qua selector nội bộ.
+- [ ] Token CSS có giá trị mặc định hoặc fallback hợp lý.
+- [ ] Không dùng `::ng-deep`; override legacy được cô lập và ghi chú.
+- [ ] `ShadowDom` hoặc `None` được chọn vì yêu cầu cụ thể, không phải mặc định thay thế cho `Emulated`.
+
+Tóm lại, `Emulated` là lựa chọn an toàn cho đa số component Angular. `:host` giúp style phần tử đại diện của component. CSS custom properties tạo một API theme nhẹ, hoạt động tốt cả khi có Shadow DOM. Global styles vẫn cần thiết cho các quy tắc dùng chung, nhưng phải được giữ có chủ đích. Khi ranh giới và API styling rõ ràng, CSS dễ mở rộng hơn và ít tạo hiệu ứng phụ hơn.
+
+<Cards>
+  <Card title="Data binding" href="/docs/component-template/data-binding" description="Truyền dữ liệu và xử lý sự kiện trong template Angular." />
+  <Card title="Content projection" href="/docs/component-template/content-projection" description="Tạo component linh hoạt với ng-content và các slot." />
+</Cards>

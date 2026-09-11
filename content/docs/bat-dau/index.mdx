@@ -1,23 +1,92 @@
 ---
 title: Bắt đầu
-description: Thiết lập môi trường và tạo ứng dụng Angular đầu tiên.
+description: Lộ trình thiết lập môi trường, tạo ứng dụng Angular đầu tiên và xây dựng thói quen phát triển cơ bản.
 ---
 
-Đây là trang khung cho nhóm **Bắt đầu**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+<Callout type="info" title="Dành cho người mới">
+  Đi theo các bài theo thứ tự bên dưới. Bạn không cần biết Angular trước đó, nhưng nên có kiến thức JavaScript cơ bản và sẵn sàng sử dụng terminal.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Bạn sẽ đạt được gì](#bạn-sẽ-đạt-được-gì)
+- [Lộ trình học](#lộ-trình-học)
+  - [Điểm xuất phát và đích đến](#điểm-xuất-phát-và-đích-đến)
+  - [Năm chặng học](#năm-chặng-học)
+- [Cách đi qua nhóm bài này](#cách-đi-qua-nhóm-bài-này)
+- [Chuẩn bị trước khi bắt đầu](#chuẩn-bị-trước-khi-bắt-đầu)
+- [Bắt đầu ngay](#bắt-đầu-ngay)
 
-## Phạm vi dự kiến
+## Bạn sẽ đạt được gì
 
-Thiết lập môi trường và tạo ứng dụng Angular đầu tiên. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+Nhóm **Bắt đầu** giúp bạn biến một máy tính có trình duyệt thành môi trường làm việc Angular tối thiểu. Kết thúc lộ trình, bạn có thể tạo một dự án, chạy nó ở chế độ phát triển, nhận biết các tệp quan trọng và dùng các công cụ cơ bản để quan sát, giữ mã nguồn nhất quán.
 
-## Các bài trong nhóm
+Đây là nền móng thực hành cho các nhóm bài tiếp theo. Mục tiêu không phải học hết mọi lệnh hay mọi cấu hình ngay từ đầu. Bạn cần có một dự án chạy được và hiểu nơi để tìm câu trả lời khi cần thay đổi nó.
 
-- **[Cài đặt môi trường](/docs/bat-dau/cai-dat-moi-truong)** — Chuẩn bị Node.js, package manager, trình soạn thảo và trình duyệt.
-- **[Angular CLI](/docs/bat-dau/angular-cli)** — Các lệnh CLI quan trọng để tạo, chạy và quản lý dự án.
-- **[Ứng dụng đầu tiên](/docs/bat-dau/ung-dung-dau-tien)** — Tạo và chạy một ứng dụng Angular tối giản.
-- **[Cấu trúc workspace](/docs/bat-dau/cau-truc-workspace)** — Vai trò của các thư mục và tệp cấu hình trong workspace Angular.
-- **[Công cụ phát triển](/docs/bat-dau/cong-cu-phat-trien)** — Angular DevTools, linting, formatting và quy trình làm việc đề xuất.
+## Lộ trình học
+
+### Điểm xuất phát và đích đến
+
+```text
+Máy tính mới
+     │
+     ▼
+Môi trường sẵn sàng
+     │
+     ▼
+Biết dùng Angular CLI
+     │
+     ▼
+Ứng dụng đầu tiên chạy được
+     │
+     ▼
+Hiểu workspace và công cụ hằng ngày
+```
+
+Mỗi chặng giải quyết một câu hỏi thực tế. Học xong một chặng, hãy thực hiện thao tác tương ứng trên máy của bạn trước khi chuyển tiếp. Ví dụ, sau bài cài đặt môi trường, hãy xác nhận các công cụ cần thiết thực sự hoạt động; đừng chỉ đọc lướt qua.
+
+### Năm chặng học
+
+1. **[Cài đặt môi trường](/docs/bat-dau/cai-dat-moi-truong)** — Chuẩn bị Node.js, package manager, trình soạn thảo và trình duyệt. Đây là bước đầu tiên vì Angular cần môi trường JavaScript ổn định để cài phụ thuộc và chạy dự án.
+2. **[Angular CLI](/docs/bat-dau/angular-cli)** — Làm quen với Angular CLI, công cụ dòng lệnh dùng để tạo, chạy và quản lý ứng dụng. Hiểu các lệnh cơ bản sẽ giúp bạn lặp lại công việc nhanh và ít sai hơn.
+3. **[Ứng dụng đầu tiên](/docs/bat-dau/ung-dung-dau-tien)** — Tạo một ứng dụng Angular tối giản và chạy nó trên máy cục bộ. Đây là mốc kiểm tra quan trọng: môi trường, CLI và dự án phải phối hợp được với nhau.
+4. **[Cấu trúc workspace](/docs/bat-dau/cau-truc-workspace)** — Đọc cấu trúc thư mục và tệp cấu hình mà Angular tạo ra. Khi biết mỗi nơi chịu trách nhiệm gì, bạn sẽ không phải đoán nơi cần sửa khi thêm tính năng.
+5. **[Công cụ phát triển](/docs/bat-dau/cong-cu-phat-trien)** — Thiết lập Angular DevTools, linting, formatting và quy trình làm việc đề xuất. Chặng này giúp việc học các chủ đề sau dễ quan sát và dễ bảo trì hơn.
+
+<Callout type="idea" title="Học bằng một dự án duy nhất">
+  Giữ lại ứng dụng bạn tạo ở chặng 3. Hãy dùng chính dự án đó để thử các ví dụ trong những nhóm bài tiếp theo thay vì tạo một dự án mới cho mỗi khái niệm.
+</Callout>
+
+## Cách đi qua nhóm bài này
+
+Hãy học theo thứ tự của lộ trình, vì mỗi bài sử dụng kết quả của bài trước. Một vòng học hiệu quả gồm ba việc:
+
+- **Đọc để hiểu mục tiêu:** xác định bạn cần có gì sau bài học, chẳng hạn một công cụ đã cài hay một ứng dụng đang chạy.
+- **Làm ngay trên máy:** tự gõ lệnh, mở dự án và quan sát kết quả. Việc tự thực hiện giúp bạn phát hiện khác biệt giữa máy của mình và ví dụ.
+- **Ghi lại vướng mắc:** lưu thông báo lỗi, phiên bản công cụ và bước đã làm. Những chi tiết này là dữ kiện cần thiết khi tra cứu hoặc hỏi hỗ trợ.
+
+Nếu một bước chưa chạy được, hãy dừng ở bước đó thay vì bỏ qua. Các bài sau giả định bạn đã có môi trường và ứng dụng hoạt động. Nói ngắn gọn: một bước nhỏ đã kiểm chứng có giá trị hơn nhiều bài chỉ đọc.
+
+## Chuẩn bị trước khi bắt đầu
+
+Bạn nên chuẩn bị các điều kiện sau trước khi mở bài đầu tiên:
+
+- Một máy tính có quyền cài phần mềm và kết nối Internet để tải các gói cần thiết.
+- Kiến thức JavaScript cơ bản: biến, hàm, `import`/`export` và cách chạy lệnh trong terminal.
+- Thời gian để thực hành liên tục với một dự án mẫu. Không cần có kinh nghiệm với framework JavaScript khác.
+
+<Callout type="warn" title="Đừng bỏ qua phiên bản công cụ">
+  Khi một lệnh cho kết quả khác mong đợi, hãy kiểm tra phiên bản Node.js và Angular CLI trước. Sự khác nhau về phiên bản thường giải thích cho khác biệt về câu lệnh, tệp được tạo hoặc thông báo lỗi.
+</Callout>
+
+## Bắt đầu ngay
+
+Mở bài **Cài đặt môi trường** và hoàn thành các kiểm tra trong đó. Khi môi trường đã sẵn sàng, tiếp tục theo thứ tự các thẻ dưới đây.
+
+<Cards>
+  <Card title="1. Cài đặt môi trường" href="/docs/bat-dau/cai-dat-moi-truong" description="Chuẩn bị Node.js, package manager và công cụ làm việc." />
+  <Card title="2. Angular CLI" href="/docs/bat-dau/angular-cli" description="Nắm các lệnh cần để tạo, chạy và quản lý dự án." />
+  <Card title="3. Ứng dụng đầu tiên" href="/docs/bat-dau/ung-dung-dau-tien" description="Tạo ứng dụng Angular tối giản và chạy nó cục bộ." />
+  <Card title="4. Cấu trúc workspace" href="/docs/bat-dau/cau-truc-workspace" description="Định vị các thư mục và tệp cấu hình quan trọng." />
+  <Card title="5. Công cụ phát triển" href="/docs/bat-dau/cong-cu-phat-trien" description="Hoàn thiện bộ công cụ cho vòng lặp phát triển hằng ngày." />
+</Cards>

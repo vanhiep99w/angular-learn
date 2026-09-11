@@ -1,10 +1,727 @@
 ---
 title: Thiết kế service
-description: Phân tách nghiệp vụ, dữ liệu và side effect vào service.
+description: Tách nghiệp vụ, truy cập dữ liệu, state và side effect khỏi component để Angular dễ thay đổi và kiểm thử.
 ---
 
-Trang này sẽ trình bày **Thiết kế service** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu trang này">
+  Sau khi đọc, bạn có thể phân biệt service nghiệp vụ, repository và facade; đặt provider theo vòng đời của state; và kiểm thử logic feature mà không cần render giao diện hay gọi API thật.
 </Callout>
+
+## Mục lục
+
+- [Service giải quyết vấn đề gì?](#service-giải-quyết-vấn-đề-gì)
+  - [Component không phải nơi chứa mọi logic](#component-không-phải-nơi-chứa-mọi-logic)
+  - [Một service có trách nhiệm rõ ràng](#một-service-có-trách-nhiệm-rõ-ràng)
+- [Cơ chế: service, DI và phạm vi instance](#cơ-chế-service-di-và-phạm-vi-instance)
+  - [`providedIn` không đồng nghĩa với một singleton toàn cục](#providedin-không-đồng-nghĩa-với-một-singleton-toàn-cục)
+  - [Chọn scope từ quyền sở hữu state](#chọn-scope-từ-quyền-sở-hữu-state)
+  - [Vòng đời và cleanup](#vòng-đời-và-cleanup)
+- [Đặt ranh giới giữa UI, use case và hạ tầng](#đặt-ranh-giới-giữa-ui-use-case-và-hạ-tầng)
+  - [Repository: nói chuyện với nguồn dữ liệu](#repository-nói-chuyện-với-nguồn-dữ-liệu)
+  - [Service nghiệp vụ: bảo vệ quy tắc](#service-nghiệp-vụ-bảo-vệ-quy-tắc)
+  - [Facade: API cho một vùng UI](#facade-api-cho-một-vùng-ui)
+- [Ví dụ hoàn chỉnh: feature danh mục](#ví-dụ-hoàn-chỉnh-feature-danh-mục)
+  - [Tạo repository có ranh giới dữ liệu](#tạo-repository-có-ranh-giới-dữ-liệu)
+  - [Tạo facade quản lý state màn hình](#tạo-facade-quản-lý-state-màn-hình)
+  - [Cấp facade ở route và giữ component mỏng](#cấp-facade-ở-route-và-giữ-component-mỏng)
+- [State trong service: dùng chung nhưng không thành global](#state-trong-service-dùng-chung-nhưng-không-thành-global)
+  - [State riêng tư, API đọc và thao tác nhỏ](#state-riêng-tư-api-đọc-và-thao-tác-nhỏ)
+  - [Đồng bộ, bất đồng bộ và lỗi](#đồng-bộ-bất-đồng-bộ-và-lỗi)
+- [Facade API và khi nào không cần nó](#facade-api-và-khi-nào-không-cần-nó)
+- [Thiết kế để kiểm thử](#thiết-kế-để-kiểm-thử)
+  - [Test service nghiệp vụ bằng fake nhỏ](#test-service-nghiệp-vụ-bằng-fake-nhỏ)
+  - [Test facade và HTTP ở đúng ranh giới](#test-facade-và-http-ở-đúng-ranh-giới)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [God service và abstraction quá sớm](#god-service-và-abstraction-quá-sớm)
+  - [Sai scope, state cũ và instance trùng](#sai-scope-state-cũ-và-instance-trùng)
+  - [Side effect ẩn và API service khó dùng](#side-effect-ẩn-và-api-service-khó-dùng)
+- [Checklist thiết kế](#checklist-thiết-kế)
+- [Tóm tắt](#tóm-tắt)
+
+## Service giải quyết vấn đề gì?
+
+Service là một class chứa hành vi mà không thuộc về vòng đời hay template của một component cụ thể. Angular có thể tạo và đưa service vào nơi cần dùng qua **Dependency Injection (DI)**. Tuy nhiên, decorator `@Injectable()` không tự biến mọi class thành một service được thiết kế tốt. Điều quan trọng hơn là service sở hữu trách nhiệm nào, state sống bao lâu và consumer được phép biết những chi tiết gì.
+
+Ví dụ, một trang danh mục cần tải sản phẩm, lọc theo từ khóa và hiển thị trạng thái đang tải. Nếu cả ba việc nằm trong component, template và vòng đời UI sẽ bị trộn với HTTP, xử lý lỗi và quy tắc lọc. Khi cần cùng quy tắc ở một trang khác, hoặc khi cần test lỗi mạng, component nhanh chóng trở nên dài và khó thay đổi.
+
+### Component không phải nơi chứa mọi logic
+
+Component vẫn có logic. Nó nên giữ logic **gắn trực tiếp với cách hiển thị**, chẳng hạn mở/đóng một popover, giữ `ElementRef` để focus input, hoặc chuyển một click thành lệnh gọi API của feature. Component không nên là nơi biết URL endpoint, định dạng DTO từ server, chính sách retry, hay quy tắc tính giá khuyến mãi.
+
+Một dấu hiệu sớm của component quá tải là method event handler vừa đọc form, vừa gọi `HttpClient`, vừa chuyển đổi dữ liệu, vừa tự đổi nhiều cờ `loading` và `error`.
+
+```ts
+// Khó tái sử dụng và khó test: UI biết cả hạ tầng lẫn quy tắc feature.
+save() {
+  this.loading = true;
+  this.http.post('/api/orders', this.form.getRawValue()).subscribe({
+    next: (order) => {
+      if (order.total < 0) {
+        this.error = 'Tổng tiền không hợp lệ';
+      } else {
+        this.router.navigate(['/orders', order.id]);
+      }
+      this.loading = false;
+    },
+    error: () => {
+      this.error = 'Không thể tạo đơn hàng';
+      this.loading = false;
+    },
+  });
+}
+```
+
+Tách code không có nghĩa là đẩy mọi dòng ra khỏi component. Component trên vẫn có thể giữ một lệnh ngắn như `this.checkout.submit(this.form.getRawValue())`. Service hoặc facade phía sau mới chọn repository, áp dụng quy tắc và công bố state mà UI cần đọc.
+
+### Một service có trách nhiệm rõ ràng
+
+Đặt tên theo **năng lực hoặc use case**, không chỉ theo một kiểu kỹ thuật chung chung. `CheckoutService`, `CatalogRepository` và `CatalogFacade` nói rõ phần việc hơn `CommonService`, `DataService` hoặc `UtilsService`.
+
+| Loại | Trách nhiệm chính | Nên biết | Không nên biết |
+| --- | --- | --- | --- |
+| Service nghiệp vụ/use case | Áp dụng quy tắc nghiệp vụ và điều phối một hành động. | Contract dữ liệu mà use case cần. | Template, `ElementRef`, chi tiết endpoint. |
+| Repository/data-access | Đọc/ghi một nguồn dữ liệu và chuyển đổi DTO. | `HttpClient`, storage hoặc SDK ngoài. | Cách một component hiển thị loading. |
+| Facade/view-model service | Cung cấp state và thao tác phù hợp cho một vùng UI. | Use case/repository, signal hoặc stream state. | Chi tiết markup của component con. |
+| Adapter hạ tầng | Bọc một API trình duyệt hay bên thứ ba. | `localStorage`, analytics, SDK. | Quy tắc nghiệp vụ của feature. |
+
+Các loại trên là **vai trò**, không phải số lớp bắt buộc. Một feature nhỏ chỉ tải một danh sách có thể dùng một `CatalogRepository` trực tiếp trong component. Khi quy tắc, state hoặc nhiều consumer xuất hiện, tách thêm service/facade giúp thay đổi có ranh giới rõ hơn.
+
+<Callout type="idea" title="Câu hỏi trước khi tạo service">
+  Hãy mô tả trách nhiệm bằng một câu có động từ: “tải danh mục”, “tính giá đơn hàng”, “lưu phiên đăng nhập”. Nếu câu trả lời là “xử lý mọi thứ dùng chung”, ranh giới đang quá rộng.
+</Callout>
+
+## Cơ chế: service, DI và phạm vi instance
+
+Angular không tạo một service duy nhất cho cả chương trình chỉ vì class có `@Injectable()`. Injector tạo instance theo provider mà consumer tìm được. Vì vậy, vị trí khai báo provider là một phần của thiết kế service: nó quyết định ai dùng chung instance và instance được hủy khi nào.
+
+```text
+CatalogPageComponent
+        │ inject(CatalogFacade)
+        ▼
+┌──────────────────────────────────────────────────────┐
+│ Route injector: providers: [CatalogFacade]           │
+│ Một facade/state cho cây route /catalog              │
+└───────────────────────┬──────────────────────────────┘
+                        │ inject(CatalogRepository)
+                        ▼
+┌──────────────────────────────────────────────────────┐
+│ Root injector: CatalogRepository, HttpClient         │
+│ Dùng chung hạ tầng truy cập dữ liệu cho ứng dụng     │
+└──────────────────────────────────────────────────────┘
+```
+
+Đọc sâu hơn về đường phân giải token ở [Dependency Injection](/docs/di-kien-truc/dependency-injection). Phần này tập trung vào quyết định scope của service.
+
+### `providedIn` không đồng nghĩa với một singleton toàn cục
+
+Khai báo sau là cách mặc định tốt cho service không giữ state theo màn hình, hoặc hạ tầng cần dùng rộng rãi:
+
+```ts
+import { Injectable } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class CatalogRepository {
+  // Angular đăng ký class trong root EnvironmentInjector.
+}
+```
+
+Trong một Angular application, consumer cùng nhìn thấy root provider thường nhận cùng một instance. Nhưng “singleton” luôn phải đọc kèm **scope injector**. Provider cùng token ở route hoặc component gần hơn sẽ che provider root và tạo instance khác cho subtree đó. Một trang web có nhiều Angular application còn có root injector riêng cho từng application.
+
+`providedIn: 'root'` cũng cho phép tree-shaking: nếu service không được tham chiếu, bundler có thể loại nó khỏi bundle. Đừng chọn root chỉ vì ít boilerplate. Root service có state thay đổi sẽ giữ state đến khi ứng dụng bị hủy, kể cả khi người dùng đã rời màn hình sở hữu state đó.
+
+### Chọn scope từ quyền sở hữu state
+
+Bắt đầu bằng ba câu hỏi: **ai** cần cùng state, **khi nào** state hết giá trị, và **có bao nhiêu phiên độc lập** cùng tồn tại? Bảng sau là điểm xuất phát thực dụng.
+
+| Provider đặt ở đâu? | Instance được chia sẻ bởi | Phù hợp với | Cần thận trọng |
+| --- | --- | --- | --- |
+| `providedIn: 'root'` hoặc application config | Toàn ứng dụng | Auth session, API client, telemetry, cache thực sự toàn cục | Bộ lọc và form của một màn hình. |
+| `providers` của route | Cây route/feature đang hoạt động | State trang, wizard theo feature, quyền hoặc context route | State phải tồn tại khi rời rồi quay lại feature. |
+| `providers` của component | Một instance component và cây con | Editor lặp lại, dialog, tab độc lập | Service cần chia sẻ giữa sibling hoặc route khác. |
+| Provider cục bộ ở test | Một test/injector test | Fake, spy, fixture cô lập | Kỳ vọng nó thay provider do component che khuất. |
+
+Ví dụ, hai editor trên cùng trang cần hai bản nháp độc lập. Provider ở component giúp mỗi thẻ editor có `DraftFacade` riêng:
+
+```ts
+@Component({
+  selector: 'app-article-editor',
+  providers: [DraftFacade],
+  template: `<!-- children dùng cùng DraftFacade của editor này -->`,
+})
+export class ArticleEditorComponent {}
+```
+
+Ngược lại, đặt `DraftFacade` ở root sẽ khiến hai editor cùng sửa một state, trừ khi service tự xây thêm map theo ID. Scope đúng thường đơn giản hơn cơ chế reset hoặc phân vùng state tự viết.
+
+### Vòng đời và cleanup
+
+Injector cache instance mà nó tạo. Khi injector bị hủy, Angular gọi `ngOnDestroy()` của service do injector đó sở hữu và chạy callback đăng ký qua `DestroyRef`. Route-scoped facade vì thế là nơi tự nhiên để dừng polling hoặc hủy subscription khi rời feature.
+
+```ts
+import { DestroyRef, Injectable, inject } from '@angular/core';
+
+@Injectable()
+export class LivePriceFacade {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly socket = new WebSocket('wss://example.test/prices');
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.socket.close());
+  }
+}
+```
+
+Không nên mở kết nối mạng nặng trong constructor chỉ vì DI tạo service. Constructor nên thiết lập dependency và state nhẹ. Hãy để một method rõ ràng như `connect()` hoặc `load()` kích hoạt công việc; nhờ đó caller, test và vòng đời đều dễ kiểm soát hơn.
+
+<Callout type="warn" title="Root service không tự dọn dẹp khi đổi trang">
+  `DestroyRef` của root service chỉ bị hủy khi ứng dụng bị hủy. Nếu root service bắt đầu timer, subscription hoặc WebSocket cho một feature tạm thời, nó phải có method dừng rõ ràng hoặc chuyển provider xuống route/component.
+</Callout>
+
+## Đặt ranh giới giữa UI, use case và hạ tầng
+
+DI giải quyết cách một class nhận dependency. Kiến trúc service quyết định **hướng dependency**. Một hướng dễ bảo trì là UI gọi facade hoặc use case; lớp đó dùng repository/port; repository mới dùng HTTP, storage hoặc SDK bên ngoài.
+
+```text
+┌──────────────────────────────────────────────────────┐
+│ UI: page, component, template                        │
+│ Hiển thị state; chuyển thao tác người dùng thành lệnh│
+└───────────────────────────┬──────────────────────────┘
+                            ▼
+┌──────────────────────────────────────────────────────┐
+│ Facade / use case                                    │
+│ Điều phối state và áp dụng quy tắc feature           │
+└───────────────────────────┬──────────────────────────┘
+                            ▼
+┌──────────────────────────────────────────────────────┐
+│ Repository / adapter                                 │
+│ HTTP, cache, storage, DTO của nguồn bên ngoài        │
+└──────────────────────────────────────────────────────┘
+```
+
+Mũi tên là hướng mã được phép biết nhau. `CatalogRepository` không import component; `CatalogPageComponent` không tự biết `/api/catalog/products`. Nhờ vậy có thể thay endpoint hoặc UI mà không buộc phần còn lại thay đổi theo.
+
+### Repository: nói chuyện với nguồn dữ liệu
+
+Repository là ranh giới cho dữ liệu ngoài ứng dụng. Nó có thể gọi `HttpClient`, đọc IndexedDB hoặc bọc SDK. Nó nên trả về model mà ứng dụng cần, thay vì làm rò rỉ nguyên DTO của backend đi khắp component.
+
+```ts
+// DTO phản ánh response của API, có thể thay đổi theo backend.
+interface ProductDto {
+  id: string;
+  display_name: string;
+  price_cents: number;
+  active: boolean;
+}
+
+// Model mà phần còn lại của feature dùng.
+export interface Product {
+  readonly id: string;
+  readonly name: string;
+  readonly price: number;
+}
+
+function toProduct(dto: ProductDto): Product {
+  return {
+    id: dto.id,
+    name: dto.display_name,
+    price: dto.price_cents / 100,
+  };
+}
+```
+
+Chuyển đổi gần nguồn dữ liệu giúp một thay đổi như `display_name` đổi tên chỉ ảnh hưởng repository và test của nó. Repository không nên quyết định button nào bị disabled hoặc text lỗi nào UI hiển thị; đó là policy của use case/facade hoặc của component.
+
+### Service nghiệp vụ: bảo vệ quy tắc
+
+Service nghiệp vụ diễn đạt quy tắc độc lập với UI và hạ tầng. Chẳng hạn một use case thanh toán quyết định đơn hàng nào được gửi đi, còn gateway mới biết cách gọi nhà cung cấp thanh toán.
+
+```ts
+export interface CheckoutGateway {
+  charge(orderId: string, total: number): Promise<void>;
+}
+
+export interface Order {
+  readonly id: string;
+  readonly total: number;
+  readonly status: 'draft' | 'confirmed' | 'cancelled';
+}
+
+export class ConfirmOrder {
+  constructor(private readonly gateway: CheckoutGateway) {}
+
+  async execute(order: Order): Promise<void> {
+    if (order.status !== 'draft') {
+      throw new Error('Chỉ có thể xác nhận đơn nháp');
+    }
+
+    if (order.total <= 0) {
+      throw new Error('Tổng tiền phải lớn hơn 0');
+    }
+
+    await this.gateway.charge(order.id, order.total);
+  }
+}
+```
+
+Class này không bắt buộc phải là Angular injectable nếu nó chỉ là logic thuần và được tạo gần nơi dùng. Khi muốn Angular lắp `CheckoutGateway`, hãy dùng `InjectionToken<CheckoutGateway>` như bài [Provider và InjectionToken](/docs/di-kien-truc/provider-token). Đừng thêm `@Injectable()` chỉ vì class có hậu tố `Service`.
+
+### Facade: API cho một vùng UI
+
+Facade là service đứng trước một feature UI. Nó cung cấp đúng state và thao tác UI cần, che việc state đến từ signal, RxJS, cache hay repository nào. Component phụ thuộc vào facade, không phải vào một danh sách dài repository, router, analytics và service nghiệp vụ.
+
+Một facade tốt thường có API nhỏ và định hướng hành động:
+
+```ts
+readonly products: Signal<readonly Product[]>;
+readonly loading: Signal<boolean>;
+readonly error: Signal<string | null>;
+
+load(): void;
+setQuery(query: string): void;
+archive(productId: string): void;
+```
+
+Facade không phải tên mới cho “god service”. Nếu nó lộ mọi method của mười repository hoặc điều phối nhiều domain không liên quan, hãy tách theo feature/use case. Nếu một component đơn giản chỉ dùng một service rõ ràng, thêm facade trung gian có thể chỉ tạo thêm lớp để đọc.
+
+## Ví dụ hoàn chỉnh: feature danh mục
+
+Ví dụ này xây một feature danh mục theo từng ranh giới. `CatalogRepository` là hạ tầng root-scoped và không giữ state UI. `CatalogFacade` là state của route `/catalog`, nên được cấp ở route. `CatalogPageComponent` chỉ hiển thị và phát thao tác.
+
+### Tạo repository có ranh giới dữ liệu
+
+Trước hết, khai báo model, token URL và repository. `CATALOG_API_URL` là cấu hình môi trường; token giúp repository không import trực tiếp file `environment`.
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable, InjectionToken, inject } from '@angular/core';
+import { Observable, map } from 'rxjs';
+
+export interface Product {
+  readonly id: string;
+  readonly name: string;
+  readonly price: number;
+}
+
+interface ProductDto {
+  id: string;
+  display_name: string;
+  price_cents: number;
+}
+
+export const CATALOG_API_URL = new InjectionToken<string>('catalog.api-url');
+
+@Injectable({ providedIn: 'root' })
+export class CatalogRepository {
+  private readonly http = inject(HttpClient);
+  private readonly apiUrl = inject(CATALOG_API_URL);
+
+  list(): Observable<readonly Product[]> {
+    return this.http
+      .get<readonly ProductDto[]>(`${this.apiUrl}/products`)
+      .pipe(
+        map((items) => items.map((item) => ({
+          id: item.id,
+          name: item.display_name,
+          price: item.price_cents / 100,
+        }))),
+      );
+  }
+}
+```
+
+Cấu hình bootstrap cung cấp `HttpClient` và URL thật. Không đưa secret vào token client; mọi giá trị trong bundle Angular đều có thể được người dùng xem.
+
+```ts
+import { provideHttpClient } from '@angular/common/http';
+import { ApplicationConfig } from '@angular/core';
+import { CATALOG_API_URL } from './catalog.repository';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(),
+    { provide: CATALOG_API_URL, useValue: '/api/catalog' },
+  ],
+};
+```
+
+### Tạo facade quản lý state màn hình
+
+Facade giữ state private bằng signal. Các signal public chỉ đọc theo quy ước `readonly`; component không được gọi `.set()` lên state nội bộ. Method `load()` là một side effect tường minh, còn `setQuery()` là thay đổi state đồng bộ có tên rõ nghĩa.
+
+```ts
+import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CatalogRepository, Product } from './catalog.repository';
+
+@Injectable()
+export class CatalogFacade {
+  private readonly repository = inject(CatalogRepository);
+  private readonly destroyRef = inject(DestroyRef);
+
+  private readonly allProducts = signal<readonly Product[]>([]);
+  private readonly query = signal('');
+
+  private readonly loadingState = signal(false);
+  private readonly errorState = signal<string | null>(null);
+
+  readonly loading = this.loadingState.asReadonly();
+  readonly error = this.errorState.asReadonly();
+  readonly products = computed(() => {
+    const normalizedQuery = this.query().trim().toLocaleLowerCase();
+
+    if (!normalizedQuery) return this.allProducts();
+
+    return this.allProducts().filter((product) =>
+      product.name.toLocaleLowerCase().includes(normalizedQuery),
+    );
+  });
+
+  setQuery(query: string): void {
+    this.query.set(query);
+  }
+
+  load(): void {
+    this.loadingState.set(true);
+    this.errorState.set(null);
+
+    this.repository.list()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (products) => {
+          this.allProducts.set(products);
+          this.loadingState.set(false);
+        },
+        error: () => {
+          this.errorState.set('Không thể tải danh mục. Hãy thử lại.');
+          this.loadingState.set(false);
+        },
+      });
+  }
+}
+```
+
+`takeUntilDestroyed()` gắn subscription với injector sở hữu facade. Vì facade được cung cấp ở route ở bước kế tiếp, subscription tự hủy khi route bị destroy. Nếu facade là root-scoped, cơ chế này chỉ hủy lúc ứng dụng đóng; đó có thể không khớp với một request stream hoặc polling của trang.
+
+### Cấp facade ở route và giữ component mỏng
+
+Provider ở route tạo một `CatalogFacade` mới cho cây route. Tất cả component con của trang có thể inject cùng facade; rời `/catalog` thì state bộ lọc, error và danh sách được giải phóng cùng route injector.
+
+```ts
+import { Routes } from '@angular/router';
+import { CatalogFacade } from './catalog.facade';
+import { CatalogPageComponent } from './catalog-page.component';
+
+export const routes: Routes = [
+  {
+    path: 'catalog',
+    component: CatalogPageComponent,
+    providers: [CatalogFacade],
+  },
+];
+```
+
+Component không cần biết API trả DTO gì hay subscription bị hủy ra sao. Nó lấy facade, gọi `load()` vào thời điểm trang khởi tạo, và liên kết template với state.
+
+```ts
+import { Component, OnInit, inject } from '@angular/core';
+import { CatalogFacade } from './catalog.facade';
+
+@Component({
+  selector: 'app-catalog-page',
+  template: `
+    <input
+      type="search"
+      placeholder="Tìm sản phẩm"
+      (input)="catalog.setQuery($any($event.target).value)"
+    />
+
+    @if (catalog.loading()) {
+      <p>Đang tải...</p>
+    } @else if (catalog.error(); as error) {
+      <p role="alert">{{ error }}</p>
+    } @else {
+      <ul>
+        @for (product of catalog.products(); track product.id) {
+          <li>{{ product.name }} — {{ product.price }}</li>
+        }
+      </ul>
+    }
+  `,
+})
+export class CatalogPageComponent implements OnInit {
+  protected readonly catalog = inject(CatalogFacade);
+
+  ngOnInit(): void {
+    this.catalog.load();
+  }
+}
+```
+
+Trong ứng dụng thật, có thể thay `(input)` bằng reactive form hoặc model signal. Chi tiết đó thuộc UI. Contract quan trọng là component gửi chuỗi tìm kiếm vào facade, không tự lọc một bản sao khác của danh sách.
+
+## State trong service: dùng chung nhưng không thành global
+
+Đặt state vào service có ích khi nhiều component cần cùng nhìn và thay đổi một trạng thái theo một quy tắc chung. Ví dụ, toolbar, bảng kết quả và phân trang của trang danh mục cùng dùng `CatalogFacade`. Provider ở route cho chúng cùng một source of truth mà không làm state sống toàn app.
+
+Signal là lựa chọn tự nhiên cho state đồng bộ đọc trong template. RxJS vẫn phù hợp cho event stream, request, WebSocket hoặc composition bất đồng bộ. Một facade có thể dùng RxJS bên trong rồi công bố signal ra UI; điều cần giữ ổn định là API công khai, không phải công cụ lưu state.
+
+### State riêng tư, API đọc và thao tác nhỏ
+
+Không công khai writable signal chỉ để component tự set mọi thứ:
+
+```ts
+// Tránh: consumer có thể tạo trạng thái không hợp lệ.
+readonly status = signal<'idle' | 'saving' | 'saved' | 'error'>('idle');
+```
+
+Thay vào đó, giữ writable signal private và cho phép chuyển trạng thái qua method có ý nghĩa. Ví dụ `save()` có thể từ chối lưu khi form chưa hợp lệ; component không thể nhảy thẳng sang `'saved'`.
+
+```ts
+@Injectable()
+export class DraftFacade {
+  private readonly statusState = signal<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  readonly status = this.statusState.asReadonly();
+
+  beginSave(): void {
+    this.statusState.set('saving');
+  }
+
+  markSaved(): void {
+    this.statusState.set('saved');
+  }
+
+  markFailed(): void {
+    this.statusState.set('error');
+  }
+}
+```
+
+`asReadonly()` ngăn consumer gọi API ghi của signal qua reference public. Đây không thay thế kiểm tra runtime hay bất biến sâu của object. Nếu state là object/mảng, đừng mutate object lấy từ signal; hãy tạo bản mới để thay đổi có thể được theo dõi và không làm consumer bất ngờ.
+
+```ts
+private readonly filtersState = signal({ category: 'all', inStock: false });
+readonly filters = this.filtersState.asReadonly();
+
+showInStockOnly(): void {
+  this.filtersState.update((filters) => ({ ...filters, inStock: true }));
+}
+```
+
+### Đồng bộ, bất đồng bộ và lỗi
+
+Một request UI thường có tối thiểu ba trạng thái: chưa/đang tải, dữ liệu thành công và lỗi. Đừng để `loading` chỉ được set về `false` ở nhánh thành công như ví dụ component đầu trang; lỗi khi đó khiến spinner chạy mãi.
+
+Cũng không nên ghi đè kết quả mới bằng request cũ. Khi query thay đổi nhanh và mỗi lần thay đổi gọi HTTP, request cho `"a"` có thể hoàn tất sau request cho `"angular"`. Hãy chọn rõ chính sách phù hợp:
+
+- **Chỉ tải khi bấm nút:** action `load()` hoặc `search()` rõ ràng thường đủ.
+- **Tìm kiếm khi gõ:** dùng `switchMap` để chỉ giữ request mới nhất, kết hợp `debounceTime` nếu cần.
+- **Lưu đơn hàng:** thường không được tự hủy request cũ; dùng luồng tuần tự như `concatMap` hoặc khóa nút submit.
+- **Polling/stream:** đặt cleanup theo `DestroyRef` và quyết định route hay root là chủ sở hữu vòng đời.
+
+<Callout type="warn" title="Không biến lỗi kỹ thuật thành state mơ hồ">
+  Đừng chỉ `console.error(error)` rồi để UI suy đoán. Facade nên công bố một trạng thái mà UI dùng được, đồng thời logging/telemetry có thể giữ lỗi gốc ở ranh giới hạ tầng. Thông điệp cho người dùng không nhất thiết là `error.message` từ server.
+</Callout>
+
+## Facade API và khi nào không cần nó
+
+Facade có giá trị khi nó giảm số dependency UI phải hiểu hoặc khi nó giữ state/luồng dùng chung cho một feature. Ví dụ page danh mục có thể cần dữ liệu, filter, selected product, phân trang, refresh và analytics. Một `CatalogFacade` diễn đạt API feature tốt hơn việc page inject sáu service rời rạc.
+
+Ngược lại, không cần facade chỉ để đặt thêm một lớp chuyển tiếp:
+
+```ts
+// CatalogFacade này không thêm state, policy hay API phù hợp UI.
+@Injectable({ providedIn: 'root' })
+export class CatalogFacade {
+  private readonly repository = inject(CatalogRepository);
+
+  list() {
+    return this.repository.list();
+  }
+}
+```
+
+Với feature nhỏ, component inject `CatalogRepository` trực tiếp có thể rõ ràng hơn. Tạo facade khi ít nhất một trong các điều sau đúng:
+
+- Có state được nhiều phần UI chia sẻ.
+- Component đang phải phối hợp nhiều dependency để hoàn thành một use case.
+- Cần che chi tiết RxJS/cache/DTO để UI không bị buộc theo implementation.
+- Muốn cung cấp một API ổn định cho feature trong khi cấu trúc bên trong còn thay đổi.
+
+Facade không thay thế service nghiệp vụ. Một quy tắc như “không thể hủy đơn đã giao” nên tồn tại trong use case/domain service, để cả facade web, job nền và endpoint khác đều dùng cùng policy.
+
+## Thiết kế để kiểm thử
+
+DI hữu ích vì test có thể thay dependency ở ranh giới. Mục tiêu không phải mock mọi class. Mục tiêu là test quy tắc với dependency nhỏ, có kiểm soát; chỉ test HTTP, provider wiring hay template khi đó thực sự là phần contract cần xác nhận.
+
+### Test service nghiệp vụ bằng fake nhỏ
+
+`ConfirmOrder` ở trên nhận một `CheckoutGateway` qua constructor. Nó không cần `TestBed`, vì đây là logic TypeScript thuần. Fake chỉ cần ghi nhận lời gọi mà test quan tâm.
+
+```ts
+import { ConfirmOrder, CheckoutGateway } from './confirm-order';
+
+it('không charge đơn hàng đã xác nhận', async () => {
+  const gateway: CheckoutGateway = {
+    charge: jasmine.createSpy('charge').and.resolveTo(),
+  };
+  const service = new ConfirmOrder(gateway);
+
+  await expectAsync(service.execute({
+    id: 'order-1',
+    total: 100,
+    status: 'confirmed',
+  })).toBeRejectedWithError('Chỉ có thể xác nhận đơn nháp');
+
+  expect(gateway.charge).not.toHaveBeenCalled();
+});
+```
+
+Test này mô tả policy: đơn đã xác nhận không được charge. Nó không phụ thuộc DOM, injector hoặc API thật, nên chạy nhanh và chỉ vỡ khi quy tắc đổi.
+
+### Test facade và HTTP ở đúng ranh giới
+
+Khi test `CatalogFacade`, fake repository có thể trả `of()` hoặc `throwError()`. Cấu hình provider trước lần đầu inject để Angular tạo facade với fake đó.
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { of } from 'rxjs';
+import { CatalogFacade } from './catalog.facade';
+import { CatalogRepository } from './catalog.repository';
+
+it('công bố danh sách đã lọc sau khi tải', () => {
+  const repository = {
+    list: () => of([
+      { id: '1', name: 'Angular áo thun', price: 10 },
+      { id: '2', name: 'Sổ tay', price: 5 },
+    ]),
+  };
+
+  TestBed.configureTestingModule({
+    providers: [
+      CatalogFacade,
+      { provide: CatalogRepository, useValue: repository },
+    ],
+  });
+
+  const facade = TestBed.inject(CatalogFacade);
+  facade.load();
+  facade.setQuery('angular');
+
+  expect(facade.loading()).toBeFalse();
+  expect(facade.products()).toEqual([
+    { id: '1', name: 'Angular áo thun', price: 10 },
+  ]);
+});
+```
+
+Repository là nơi phù hợp để test request HTTP và mapping DTO. Dùng `provideHttpClient()` cùng `provideHttpClientTesting()`, rồi xác nhận URL, method và model trả về. Không gọi backend thật trong unit test.
+
+```ts
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [
+      provideHttpClient(),
+      provideHttpClientTesting(),
+      CatalogRepository,
+      { provide: CATALOG_API_URL, useValue: '/test/catalog' },
+    ],
+  });
+});
+
+it('map DTO API thành Product của ứng dụng', () => {
+  const repository = TestBed.inject(CatalogRepository);
+  const http = TestBed.inject(HttpTestingController);
+
+  repository.list().subscribe((products) => {
+    expect(products).toEqual([{ id: 'p1', name: 'Bút', price: 2.5 }]);
+  });
+
+  const request = http.expectOne('/test/catalog/products');
+  expect(request.request.method).toBe('GET');
+  request.flush([{ id: 'p1', display_name: 'Bút', price_cents: 250 }]);
+  http.verify();
+});
+```
+
+Với facade được cung cấp ở route/component, test provider tại đúng scope. `TestBed.inject(CatalogFacade)` kiểm tra test/root injector, không tái hiện instance cục bộ bị provider của component che khuất. Khi cần, cấu hình route test hoặc `overrideComponent` trước khi tạo fixture.
+
+<Callout type="idea" title="Kiểm thử behavior, không kiểm thử implementation detail">
+  Ưu tiên kiểm tra đầu vào, kết quả state và lời gọi ở ranh giới. Test không cần biết facade dùng `computed()`, `map()` hay một private method cụ thể, trừ khi chi tiết đó là contract công khai.
+</Callout>
+
+## Lỗi thường gặp và trade-off
+
+Tách service mang lại ranh giới, nhưng mỗi ranh giới thêm API và dependency cần hiểu. Thiết kế tốt không phải là nhiều lớp nhất; nó là số lớp nhỏ nhất giúp thay đổi thường gặp diễn ra an toàn.
+
+### God service và abstraction quá sớm
+
+`AppService`, `CommonService` hoặc `DataService` thường bắt đầu tiện: ai cũng inject được và đặt thêm một method. Sau vài feature, class đó chứa auth, cache, notification, HTTP và state UI không liên quan. Test phải dựng quá nhiều dependency; mỗi thay đổi có nguy cơ ảnh hưởng phần không liên quan.
+
+Hãy tách theo capability sở hữu, chẳng hạn `SessionService`, `CatalogRepository`, `CheckoutFacade`. Nhưng cũng không cần interface/token cho mọi class. Một implementation nội bộ, ổn định và chỉ có một consumer có thể dùng trực tiếp class concrete. Thêm abstraction khi có biến thể, boundary hạ tầng, nhu cầu fake rõ ràng hoặc khi nó bảo vệ một contract quan trọng.
+
+### Sai scope, state cũ và instance trùng
+
+Các lỗi state khó hiểu thường là lỗi scope:
+
+| Triệu chứng | Nguyên nhân có thể | Cách xử lý |
+| --- | --- | --- |
+| Vào lại trang vẫn thấy bộ lọc cũ | Facade state màn hình ở root. | Cấp facade ở route/component hoặc reset theo action có chủ đích. |
+| Hai dialog sửa cùng một bản nháp | `DraftFacade` được chia sẻ ở root/route nhưng mỗi dialog cần phiên riêng. | Đặt provider tại dialog/component. |
+| Hai phần UI không thấy cùng state | Cùng service bị khai báo trong `providers` của hai component khác nhau. | Đưa provider lên tổ tiên chung nếu state cần chia sẻ. |
+| Fake từ TestBed không có tác dụng | Component/route có provider gần hơn che fake. | Override đúng metadata/scope trước khi tạo fixture. |
+| WebSocket tiếp tục chạy sau khi rời trang | Service ở root hoặc cleanup không gắn với owner. | Chọn route scope hoặc thêm method cleanup rõ ràng. |
+
+Không giải quyết mọi trường hợp bằng root provider hay bằng một lệnh reset trong `ngOnDestroy`. Hãy tìm owner thật của state trước; provider scope thường là câu trả lời bền vững hơn.
+
+### Side effect ẩn và API service khó dùng
+
+Một method getter như `getProducts()` mà âm thầm gọi HTTP mỗi lần template đánh giá là API nguy hiểm. Tương tự, constructor tự chạy request khiến test và consumer không biết lúc nào side effect bắt đầu. Đặt tên động từ cho action: `load()`, `refresh()`, `saveDraft()` và `connect()`.
+
+Tránh để consumer phải gọi một chuỗi method đúng thứ tự bí mật:
+
+```ts
+// Dễ dùng sai: caller phải nhớ thứ tự và cờ nội bộ.
+facade.reset();
+facade.prepare();
+facade.execute();
+```
+
+Nếu chúng luôn đi cùng nhau, hãy biểu đạt use case bằng một method nhận input cần thiết:
+
+```ts
+facade.submitOrder(formValue);
+```
+
+Trade-off là facade có thể che quá nhiều nếu `submitOrder()` vừa validate, gọi nhiều API, điều hướng, hiện toast và ghi analytics. Hãy giữ điều phối UI ở facade, policy ở service nghiệp vụ và adapter hạ tầng ở ranh giới riêng. Khi khó xác định nơi đặt code, hỏi: thay đổi này do quy tắc nghiệp vụ, trải nghiệm UI hay công nghệ ngoài quyết định?
+
+## Checklist thiết kế
+
+Trước khi thêm hoặc sửa một service, kiểm tra các điểm sau:
+
+- [ ] Tên service diễn đạt một capability hoặc use case cụ thể, không phải “dùng chung”.
+- [ ] Component chỉ giữ logic gắn với hiển thị; HTTP, DTO và quy tắc nghiệp vụ ở ranh giới phù hợp.
+- [ ] Provider scope được chọn từ owner, mức chia sẻ và vòng đời của state.
+- [ ] Writable state là private; consumer nhận API đọc và action có tên rõ nghĩa.
+- [ ] Side effect không khởi chạy bí mật trong getter hoặc constructor nặng; có policy cleanup rõ ràng.
+- [ ] Repository chuyển DTO ngoài biên thành model mà feature dùng.
+- [ ] Facade chỉ tồn tại khi nó giảm phức tạp UI hoặc giữ state/luồng chung thực sự.
+- [ ] Test rule bằng fake nhỏ; test HTTP/provider scope chỉ ở ranh giới cần thiết.
+
+## Tóm tắt
+
+- Service là nơi chứa hành vi không thuộc riêng template hay vòng đời của một component. Chất lượng service đến từ trách nhiệm rõ, không phải từ decorator.
+- DI cấp service theo provider; root, route và component scope quyết định instance nào được chia sẻ và khi nào state bị hủy.
+- Repository cô lập HTTP/DTO và hạ tầng. Service nghiệp vụ giữ policy. Facade cung cấp state và action phù hợp cho một vùng UI.
+- State dùng chung nên có một owner và source of truth rõ ràng. Giữ state ghi private, công bố signal/stream đọc, và đặt side effect sau action tường minh.
+- Tách lớp có chi phí. Bắt đầu đơn giản, thêm facade/token/abstraction khi nó tạo ranh giới có ích cho biến thể, state hoặc kiểm thử.
+
+<Cards>
+  <Card title="Dependency Injection" href="/docs/di-kien-truc/dependency-injection" description="Hiểu injector, provider scope và cách Angular phân giải service." />
+  <Card title="Provider và InjectionToken" href="/docs/di-kien-truc/provider-token" description="Thay implementation và cấu hình dependency ở ranh giới DI." />
+  <Card title="Signals và state cục bộ" href="/docs/reactivity-state/state-cuc-bo" description="Đọc thêm về cách mô hình hóa state UI bằng signal." />
+</Cards>

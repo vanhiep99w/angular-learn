@@ -1,10 +1,700 @@
 ---
 title: HttpClient
-description: Gửi request, ánh xạ response và cấu hình tùy chọn HTTP.
+description: Cấu hình HttpClient, gửi request có kiểu, kiểm soát vòng đời và chọn resource phù hợp trong Angular.
 ---
 
-Trang này sẽ trình bày **HttpClient** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi">
+  Trang này tập trung vào lớp gọi API của Angular: cấu hình `HttpClient`, hợp đồng dữ liệu, request options, hủy request, tiến trình upload và resource. Xác thực dùng interceptor và chính sách retry/lỗi được trình bày sâu hơn ở các bài liên quan.
 </Callout>
+
+## Mục lục
+
+- [Bức tranh tổng quan](#bức-tranh-tổng-quan)
+  - [HttpClient nằm ở đâu](#httpclient-nằm-ở-đâu)
+  - [Vòng đời của một request](#vòng-đời-của-một-request)
+- [Cấu hình HttpClient](#cấu-hình-httpclient)
+  - [Đăng ký provider toàn ứng dụng](#đăng-ký-provider-toàn-ứng-dụng)
+  - [Chọn backend Fetch](#chọn-backend-fetch)
+- [Gửi request và nhận response có kiểu](#gửi-request-và-nhận-response-có-kiểu)
+  - [Đặt HTTP ở data-access service](#đặt-http-ở-data-access-service)
+  - [Đọc body hoặc toàn bộ response](#đọc-body-hoặc-toàn-bộ-response)
+  - [Generic không xác thực dữ liệu lúc chạy](#generic-không-xác-thực-dữ-liệu-lúc-chạy)
+- [Query params, headers và body](#query-params-headers-và-body)
+  - [HttpParams và HttpHeaders là immutable](#httpparams-và-httpheaders-là-immutable)
+  - [Tạo request danh sách có lọc](#tạo-request-danh-sách-có-lọc)
+  - [Khi nào đặt header ở request](#khi-nào-đặt-header-ở-request)
+- [Hủy request và quản lý vòng đời](#hủy-request-và-quản-lý-vòng-đời)
+  - [Hủy request cũ bằng switchMap](#hủy-request-cũ-bằng-switchmap)
+  - [Gắn subscription imperative với DestroyRef](#gắn-subscription-imperative-với-destroyref)
+  - [Hủy ở client không hoàn tác server](#hủy-ở-client-không-hoàn-tác-server)
+- [Theo dõi tiến trình upload và download](#theo-dõi-tiến-trình-upload-và-download)
+  - [Nhận HttpEvent thay vì chỉ body](#nhận-httpevent-thay-vì-chỉ-body)
+  - [Giới hạn của progress](#giới-hạn-của-progress)
+- [Resource layer cho dữ liệu đọc](#resource-layer-cho-dữ-liệu-đọc)
+  - [Khi resource là mô hình phù hợp](#khi-resource-là-mô-hình-phù-hợp)
+  - [resource với Promise và AbortSignal](#resource-với-promise-và-abortsignal)
+  - [rxResource với HttpClient](#rxresource-với-httpclient)
+  - [Giới hạn của resource](#giới-hạn-của-resource)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Bức tranh tổng quan
+
+`HttpClient` là service Angular dùng để gửi HTTP request và nhận response dưới dạng `Observable`. Nó đóng gói các chi tiết trình duyệt như serialize body, parse JSON, hủy request khi unsubscribe và chuỗi interceptor. Component không cần biết các chi tiết đó để render dữ liệu.
+
+### HttpClient nằm ở đâu
+
+Đặt URL, DTO và phép ánh xạ dữ liệu tại một data-access service hoặc repository. Component chỉ yêu cầu một ý nghĩa nghiệp vụ như “lấy danh sách công việc”, thay vì tự ghép URL và đọc JSON thô. Ranh giới này làm API dễ thay đổi và dễ kiểm thử hơn.
+
+```text
+┌────────────────┐  loadTasks()  ┌──────────────────┐  HttpClient  ┌──────────────┐
+│ Page / facade  │ ─────────────►│ TaskApi          │ ───────────► │ Interceptor  │
+│ state + UI     │ ◄─────────────│ DTO → app model  │ ◄─────────── │ + transport  │
+└────────────────┘   Task[]      └──────────────────┘              └──────┬───────┘
+                                                                          │
+                                                                          ▼
+                                                                    ┌──────────────┐
+                                                                    │ Backend API  │
+                                                                    └──────────────┘
+```
+
+`DTO` (_Data Transfer Object_) là hình dạng dữ liệu ở biên API. Model của ứng dụng có thể khác DTO. Chẳng hạn backend trả `created_at` là chuỗi ISO, còn giao diện cần `createdAt: Date`. Ánh xạ một lần ở `TaskApi` giúp phần còn lại của ứng dụng không phụ thuộc vào cách backend đặt tên trường.
+
+### Vòng đời của một request
+
+`HttpClient.get()` chưa gửi request ngay. Nó trả về một **cold Observable**, nghĩa là mỗi lần có consumer `subscribe` thì một request mới được tạo. Với request HTTP thông thường, Observable phát response rồi `complete`.
+
+1. Consumer subscribe trực tiếp, dùng `AsyncPipe`, hoặc được `rxResource` subscribe.
+2. Angular tạo request; interceptor có thể clone và bổ sung metadata trước khi transport gửi đi.
+3. Backend trả response hoặc lỗi. `HttpClient` parse body theo `responseType` và phát kết quả.
+4. Consumer nhận dữ liệu. Khi request hoàn tất, subscription tự kết thúc; nếu unsubscribe sớm, Angular hủy request phía client khi transport hỗ trợ.
+
+<Callout type="warn" title="Cold Observable có thể tạo request trùng">
+  Hai lần `subscribe()` vào cùng một Observable từ `http.get()` vẫn là hai request độc lập. Đừng vừa dùng `AsyncPipe` vừa `subscribe()` cùng nguồn chỉ để lấy một response; hãy chia sẻ hoặc tổ chức lại state khi thực sự cần nhiều consumer.
+</Callout>
+
+## Cấu hình HttpClient
+
+Trước khi inject `HttpClient`, ứng dụng phải đăng ký các provider của nó. Với ứng dụng standalone hiện đại, thực hiện việc này trong cấu hình bootstrap, không phải trong `imports` của component.
+
+### Đăng ký provider toàn ứng dụng
+
+```ts
+// app.config.ts
+import { ApplicationConfig } from '@angular/core';
+import { provideHttpClient } from '@angular/common/http';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(),
+  ],
+};
+```
+
+`provideHttpClient()` đăng ký `HttpClient` ở application injector. Vì vậy mọi service được tạo trong cây injector ứng dụng đều có thể `inject(HttpClient)`. Chỉ đăng ký một lần ở cấp ứng dụng trừ khi có một ranh giới injector rất chủ đích.
+
+Nếu cần interceptor hàm, cấu hình chúng cùng provider. Không tự thêm `Authorization` vào từng service; chính sách chung thuộc interceptor.
+
+```ts
+import { ApplicationConfig } from '@angular/core';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { authInterceptor } from './core/http/auth.interceptor';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(withInterceptors([authInterceptor])),
+  ],
+};
+```
+
+<Callout type="error" title="Lỗi No provider for HttpClient">
+  Lỗi này thường có nghĩa là thiếu `provideHttpClient()` trong provider của bootstrap hoặc test bed. Thêm `HttpClient` vào `imports` của standalone component không đăng ký service này.
+</Callout>
+
+### Chọn backend Fetch
+
+Mặc định, Angular có backend HTTP phù hợp cho đa số ứng dụng. Có thể chọn Fetch API bằng `withFetch()` khi dự án cần khả năng tương thích Fetch, đặc biệt khi dùng SSR.
+
+```ts
+import { ApplicationConfig } from '@angular/core';
+import { provideHttpClient, withFetch } from '@angular/common/http';
+
+export const appConfig: ApplicationConfig = {
+  providers: [provideHttpClient(withFetch())],
+};
+```
+
+Fetch không phải là “nhanh hơn” trong mọi tình huống. Một trade-off quan trọng là backend Fetch không cung cấp **upload progress events**. Nếu UI cần thanh tiến trình upload bằng `HttpEventType.UploadProgress`, đừng bật `withFetch()` cho client đó; dùng backend mặc định dựa trên XHR.
+
+## Gửi request và nhận response có kiểu
+
+Một generic như `get<TaskDto[]>()` giúp TypeScript biết body mà mã gọi **kỳ vọng** nhận được. Nhờ đó, IDE kiểm tra tên trường và `Observable` có kiểu đúng. Generic không thay đổi JSON từ server và không tự kiểm tra JSON có đúng schema hay không.
+
+### Đặt HTTP ở data-access service
+
+Ví dụ dưới đây tách DTO khỏi model dùng trong ứng dụng. `map` là RxJS operator chuyển từng giá trị của Observable; ở đây HTTP chỉ phát một danh sách rồi hoàn tất.
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { Observable, map } from 'rxjs';
+
+interface TaskDto {
+  id: string;
+  title: string;
+  done: boolean;
+  created_at: string;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  completed: boolean;
+  createdAt: Date;
+}
+
+function toTask(dto: TaskDto): Task {
+  return {
+    id: dto.id,
+    title: dto.title,
+    completed: dto.done,
+    createdAt: new Date(dto.created_at),
+  };
+}
+
+@Injectable({ providedIn: 'root' })
+export class TaskApi {
+  private readonly http = inject(HttpClient);
+  private readonly baseUrl = '/api/tasks';
+
+  getAll(): Observable<Task[]> {
+    return this.http
+      .get<TaskDto[]>(this.baseUrl)
+      .pipe(map((dtos) => dtos.map(toTask)));
+  }
+}
+```
+
+Component hoặc facade nên dùng `TaskApi.getAll()` thay vì gọi `HttpClient` trực tiếp. Khi endpoint đổi từ `/api/tasks` sang `/v2/tasks`, hoặc DTO đổi tên trường, thay đổi chỉ tập trung tại lớp này.
+
+### Đọc body hoặc toàn bộ response
+
+Mặc định, `HttpClient` chỉ phát body đã parse. Đây là lựa chọn đúng cho phần lớn request đọc dữ liệu.
+
+```ts
+getTask(id: string): Observable<Task> {
+  return this.http
+    .get<TaskDto>(`${this.baseUrl}/${encodeURIComponent(id)}`)
+    .pipe(map(toTask));
+}
+```
+
+Khi cần status code hoặc header như `ETag`, đặt `observe: 'response'`. Khi đó kết quả là `HttpResponse<T>` thay vì `T`.
+
+```ts
+import { HttpResponse } from '@angular/common/http';
+import { Observable, map } from 'rxjs';
+
+interface CreateTaskCommand {
+  title: string;
+}
+
+interface CreatedTask {
+  task: Task;
+  etag: string | null;
+}
+
+create(command: CreateTaskCommand): Observable<CreatedTask> {
+  return this.http
+    .post<TaskDto>(this.baseUrl, command, { observe: 'response' })
+    .pipe(
+      map((response: HttpResponse<TaskDto>) => {
+        if (response.body === null) {
+          throw new Error('API trả response thành công nhưng không có body.');
+        }
+
+        return {
+          task: toTask(response.body),
+          etag: response.headers.get('ETag'),
+        };
+      }),
+    );
+}
+```
+
+`post`, `put`, `patch` và `delete` cũng nhận generic cho kiểu body response. `DELETE` không phải lúc nào cũng trả body. Nếu API trả `204 No Content`, hãy để method trả `Observable<void>` hoặc xử lý response rỗng theo đúng hợp đồng, thay vì ép nó thành một object giả.
+
+Một endpoint không trả JSON cần `responseType` tương ứng. Giá trị literal `'text'` giúp overload của TypeScript chọn đúng kiểu trả về.
+
+```ts
+healthCheck(): Observable<string> {
+  return this.http.get('/api/health', { responseType: 'text' });
+}
+```
+
+### Generic không xác thực dữ liệu lúc chạy
+
+Đoạn sau vẫn biên dịch, kể cả khi backend thực tế trả `{ message: 'maintenance' }` thay vì `TaskDto[]`.
+
+```ts
+const tasks$ = this.http.get<TaskDto[]>('/api/tasks');
+```
+
+Lỗi chỉ lộ ra khi mã truy cập `task.title` hoặc khi mapping dữ liệu. Với API do nhóm khác vận hành hoặc dữ liệu nhạy cảm, hãy xác thực ở runtime tại ranh giới bằng schema validator, hoặc ít nhất kiểm tra các trường quan trọng trước khi đưa vào state.
+
+```ts
+function isTaskDto(value: unknown): value is TaskDto {
+  if (typeof value !== 'object' || value === null) return false;
+
+  const task = value as Record<string, unknown>;
+  return (
+    typeof task['id'] === 'string' &&
+    typeof task['title'] === 'string' &&
+    typeof task['done'] === 'boolean' &&
+    typeof task['created_at'] === 'string'
+  );
+}
+```
+
+Không cần tự viết validator sâu cho mọi endpoint nhỏ. Điểm cần nhớ là `T` là contract tĩnh phía client, không phải hàng rào bảo vệ ở runtime. Với dữ liệu quan trọng, hãy có một hàng rào runtime rõ ràng.
+
+## Query params, headers và body
+
+Request không chỉ gồm method và URL. Query params mô tả lọc, phân trang hoặc sắp xếp; headers mô tả metadata như định dạng nhận, locale hoặc correlation ID; body mang command của `POST`, `PUT` hoặc `PATCH`.
+
+### HttpParams và HttpHeaders là immutable
+
+`HttpParams` và `HttpHeaders` không bị sửa tại chỗ. `set()` và `append()` trả về object mới. Đây là lỗi rất hay gặp:
+
+```ts
+let params = new HttpParams();
+params.set('page', '1'); // Sai: giá trị trả về bị bỏ đi.
+```
+
+Gán lại kết quả hoặc chain các lời gọi:
+
+```ts
+const params = new HttpParams()
+  .set('page', '1')
+  .set('pageSize', '20')
+  .append('tag', 'angular')
+  .append('tag', 'http');
+
+const headers = new HttpHeaders()
+  .set('Accept', 'application/json')
+  .set('X-Client-Version', '2026.03');
+```
+
+Dùng `append()` khi server hiểu cùng một key xuất hiện nhiều lần, ví dụ `?tag=angular&tag=http`. Nếu backend yêu cầu `tags=angular,http`, hãy gửi đúng chuỗi mà hợp đồng API quy định; Angular không thể tự đoán quy ước mảng của backend.
+
+### Tạo request danh sách có lọc
+
+Ví dụ này chỉ thêm query param khi người dùng thực sự nhập giá trị. `encodeURIComponent` không cần dùng cho giá trị đưa vào `HttpParams`; Angular sẽ encode query string. Còn khi chèn ID vào URL path, hãy dùng `encodeURIComponent` như ví dụ `getTask()` ở trên.
+
+```ts
+import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
+import { Observable, map } from 'rxjs';
+
+interface TaskQuery {
+  page: number;
+  pageSize: number;
+  search?: string;
+  completed?: boolean;
+  tags: string[];
+}
+
+interface TaskPageDto {
+  items: TaskDto[];
+  total: number;
+}
+
+interface TaskPage {
+  items: Task[];
+  total: number;
+}
+
+list(query: TaskQuery): Observable<TaskPage> {
+  let params = new HttpParams()
+    .set('page', String(query.page))
+    .set('pageSize', String(query.pageSize));
+
+  if (query.search?.trim()) {
+    params = params.set('search', query.search.trim());
+  }
+
+  if (query.completed !== undefined) {
+    params = params.set('completed', String(query.completed));
+  }
+
+  for (const tag of query.tags) {
+    params = params.append('tag', tag);
+  }
+
+  const headers = new HttpHeaders().set('Accept-Language', 'vi');
+
+  return this.http
+    .get<TaskPageDto>(this.baseUrl, { params, headers })
+    .pipe(
+      map((page) => ({
+        total: page.total,
+        items: page.items.map(toTask),
+      })),
+    );
+}
+```
+
+`HttpClient` sẽ serialize object body JSON khi request phù hợp. Đừng tự gọi `JSON.stringify()` cho object thông thường trừ khi backend yêu cầu body text thô. Với file, dùng `FormData`; trình duyệt tự tạo `Content-Type` kèm boundary.
+
+```ts
+uploadAttachment(taskId: string, file: File) {
+  const body = new FormData();
+  body.append('file', file, file.name);
+
+  return this.http.post(
+    `${this.baseUrl}/${encodeURIComponent(taskId)}/attachments`,
+    body,
+  );
+}
+```
+
+<Callout type="warn" title="Không tự đặt Content-Type cho FormData">
+  Nếu tự đặt `Content-Type: multipart/form-data`, browser không thêm boundary cần thiết và server thường không parse được file. Chỉ đặt header này khi bạn thật sự tự tạo multipart body.
+</Callout>
+
+### Khi nào đặt header ở request
+
+Đặt header ngay tại request khi nó là dữ liệu **riêng của use case**, chẳng hạn `If-Match` chứa ETag mà người dùng vừa đọc để chống ghi đè đồng thời.
+
+```ts
+update(id: string, command: CreateTaskCommand, etag: string): Observable<Task> {
+  const headers = new HttpHeaders().set('If-Match', etag);
+
+  return this.http
+    .patch<TaskDto>(`${this.baseUrl}/${encodeURIComponent(id)}`, command, { headers })
+    .pipe(map(toTask));
+}
+```
+
+Đặt header ở interceptor khi nó là chính sách **dùng chung**, như `Authorization`, request ID, locale toàn ứng dụng hoặc logging. Không gửi token cho mọi URL một cách vô điều kiện; interceptor cần giới hạn origin/endpoint tin cậy. Xem [Interceptors](/docs/http-api-auth/interceptors) để thiết kế lớp này.
+
+## Hủy request và quản lý vòng đời
+
+Hủy request không phải là xử lý lỗi. Nó là cách nói rằng consumer không còn cần kết quả nữa, ví dụ người dùng đã gõ từ khóa mới hoặc rời màn hình. Với `HttpClient`, unsubscribe trước khi response về sẽ yêu cầu transport hủy request phía client.
+
+### Hủy request cũ bằng switchMap
+
+Tìm kiếm là trường hợp điển hình. `switchMap` chỉ giữ inner Observable mới nhất. Khi `query` phát giá trị mới, nó unsubscribe request cũ trước khi bắt đầu request mới.
+
+```ts
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Observable, Subject, debounceTime, distinctUntilChanged, switchMap } from 'rxjs';
+
+interface SearchResultDto {
+  id: string;
+  title: string;
+}
+
+export class TaskSearchStore {
+  private readonly queryInput = new Subject<string>();
+
+  readonly results$: Observable<SearchResultDto[]> = this.queryInput.pipe(
+    debounceTime(250),
+    distinctUntilChanged(),
+    switchMap((query) => {
+      const params = new HttpParams().set('q', query);
+      return this.http.get<SearchResultDto[]>('/api/tasks/search', { params });
+    }),
+  );
+
+  constructor(private readonly http: HttpClient) {}
+
+  search(query: string): void {
+    this.queryInput.next(query);
+  }
+}
+```
+
+Nếu dùng `mergeMap`, mọi request được giữ và response cũ có thể đến sau response mới rồi ghi đè UI. `concatMap` xếp request vào hàng đợi, phù hợp khi thứ tự ghi phải được giữ, nhưng thường làm tìm kiếm chậm. Với search-as-you-type, `debounceTime` + `distinctUntilChanged` + `switchMap` là điểm bắt đầu hợp lý.
+
+### Gắn subscription imperative với DestroyRef
+
+HTTP Observable đơn thường tự complete, nên không phải lúc nào cũng cần teardown riêng. Tuy nhiên stream ngoài trong ví dụ tìm kiếm có `Subject` và có thể sống lâu. Nếu class phải `subscribe()` để thực hiện side effect, gắn subscription với vòng đời của component/facade bằng `takeUntilDestroyed`.
+
+```ts
+import { DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+export class TaskSearchPage {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly store = inject(TaskSearchStore);
+
+  ngOnInit(): void {
+    this.store.results$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((results) => {
+        // Ví dụ: đồng bộ một API imperative, không phải state template.
+        console.log(`Nhận ${results.length} kết quả`);
+      });
+  }
+}
+```
+
+Nếu chỉ hiển thị Observable trong template, ưu tiên `AsyncPipe`; nó subscribe và unsubscribe theo vòng đời view. Nếu chỉ cần state mới nhất, cân nhắc `toSignal`, `resource` hoặc `rxResource` thay vì một subscription thủ công.
+
+### Hủy ở client không hoàn tác server
+
+Việc hủy có thể ngăn browser chờ response và tiết kiệm tài nguyên client. Nó **không bảo đảm** server chưa nhận request hoặc chưa bắt đầu ghi dữ liệu. Vì vậy:
+
+- Dùng cancellation mạnh cho request đọc có thể thay thế, như tìm kiếm hoặc đổi trang chi tiết.
+- Không coi cancellation là nút “undo” cho `POST` hoặc `PATCH`.
+- Với command ghi có thể bị gửi lại do retry, thiết kế idempotency key hoặc cơ chế chống trùng ở server.
+- UI cần xử lý trạng thái gửi dữ liệu rõ ràng, thay vì giả định request bị hủy thì không có tác dụng.
+
+## Theo dõi tiến trình upload và download
+
+Một request mặc định chỉ phát body cuối cùng. Để render tiến trình, yêu cầu `HttpClient` phát toàn bộ các `HttpEvent` bằng `observe: 'events'` và bật `reportProgress`.
+
+### Nhận HttpEvent thay vì chỉ body
+
+Ví dụ upload file dưới đây cập nhật phần trăm khi có event upload và xử lý response cuối cùng riêng biệt.
+
+```ts
+import {
+  HttpClient,
+  HttpEvent,
+  HttpEventType,
+  HttpResponse,
+} from '@angular/common/http';
+import { Observable, filter, map, tap } from 'rxjs';
+
+interface UploadReceipt {
+  attachmentId: string;
+  url: string;
+}
+
+upload(file: File): Observable<UploadReceipt> {
+  const body = new FormData();
+  body.append('file', file, file.name);
+
+  return this.http
+    .post<UploadReceipt>('/api/attachments', body, {
+      observe: 'events',
+      reportProgress: true,
+    })
+    .pipe(
+      tap((event: HttpEvent<UploadReceipt>) => {
+        if (event.type === HttpEventType.UploadProgress) {
+          const total = event.total;
+          const percent = total ? Math.round((event.loaded * 100) / total) : undefined;
+          // Cập nhật signal/state UI bằng percent; undefined nghĩa là server không báo total.
+          console.log('Upload progress:', percent);
+        }
+      }),
+      filter(
+        (event): event is HttpResponse<UploadReceipt> =>
+          event.type === HttpEventType.Response,
+      ),
+      map((response) => {
+        if (response.body === null) {
+          throw new Error('Upload hoàn tất nhưng API không trả biên nhận.');
+        }
+        return response.body;
+      }),
+    );
+}
+```
+
+`HttpEventType.Response` là event cuối chứa `HttpResponse<T>`. Ngoài `UploadProgress`, Angular còn có `DownloadProgress`, `Sent` và `ResponseHeader`. Chỉ xử lý event mà UI thực sự cần; đừng giả định mọi transport hoặc server đều phát đủ các mốc này.
+
+### Giới hạn của progress
+
+`event.total` có thể là `undefined`, ví dụ server không gửi `Content-Length` hoặc response dùng streaming/chunked transfer. Trong trường hợp đó, hiển thị spinner hay nhãn “Đang tải…” thay vì phần trăm giả.
+
+Upload progress phụ thuộc vào XHR backend. Như đã nêu ở phần cấu hình, `withFetch()` không hỗ trợ `UploadProgress`. Download progress cũng không nói rằng server đã xử lý xong nghiệp vụ; nó chỉ mô tả số byte client đã nhận.
+
+<Callout type="idea" title="Chọn UI theo độ tin cậy của tín hiệu">
+  Chỉ hiển thị `42%` khi có `loaded` và `total` đáng tin cậy. Với request nhỏ hoặc không có total, trạng thái bắt đầu/kết thúc và nút hủy thường hữu ích hơn một progress bar không chính xác.
+</Callout>
+
+## Resource layer cho dữ liệu đọc
+
+`resource` và `rxResource` tổ chức một request đọc thành state có vòng đời: có params đầu vào, đang tải, giá trị, lỗi và khả năng reload. Chúng hợp với màn hình “đọc bản ghi theo key”, nơi UI chủ yếu cần snapshot mới nhất chứ không cần xử lý từng event trong stream.
+
+### Khi resource là mô hình phù hợp
+
+Ví dụ trang chi tiết sản phẩm có `productId`. Mỗi giá trị ID tương ứng một dữ liệu hiện tại. Khi ID đổi, resource tải dữ liệu mới; UI đọc `isLoading()`, `hasValue()` và `error()` trực tiếp.
+
+```text
+productId() đổi
+      │
+      ▼
+params() tạo key mới ──► loader/stream mới ──► value, error, isLoading
+      │                        │                         │
+      └── request cũ bị hủy ◄──┘                         └── template render state mới
+```
+
+Resource không phải cache toàn ứng dụng hoặc thay thế chung cho RxJS. Nó quản lý state async của một resource instance. Chính sách cache, invalidation sau mutation và phối hợp nhiều consumer vẫn cần được thiết kế ở service/store phù hợp.
+
+### resource với Promise và AbortSignal
+
+`resource` dùng loader trả `Promise`. Angular truyền `abortSignal` cho loader để request cũ có thể dừng khi params đổi hoặc resource bị hủy. `fetch` hiểu signal này trực tiếp.
+
+```ts
+import { Component, resource, signal } from '@angular/core';
+
+interface ProductDto {
+  id: string;
+  name: string;
+  price: number;
+}
+
+@Component({
+  selector: 'app-product-detail',
+  template: `
+    @if (product.isLoading()) {
+      <p>Đang tải sản phẩm...</p>
+    } @else if (product.hasValue()) {
+      <h2>{{ product.value().name }}</h2>
+      <p>{{ product.value().price }}</p>
+    } @else if (product.error()) {
+      <p>Không thể tải sản phẩm.</p>
+    }
+  `,
+})
+export class ProductDetailComponent {
+  readonly productId = signal<string | undefined>(undefined);
+
+  readonly product = resource({
+    params: () => {
+      const id = this.productId();
+      return id ? { id } : undefined;
+    },
+    loader: async ({ params, abortSignal }) => {
+      const response = await fetch(
+        `/api/products/${encodeURIComponent(params.id)}`,
+        { signal: abortSignal },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Không thể tải sản phẩm: HTTP ${response.status}`);
+      }
+
+      return response.json() as Promise<ProductDto>;
+    },
+  });
+}
+```
+
+Khi `params()` trả `undefined`, resource không có yêu cầu hợp lệ để tải. Khi `productId` được đặt, loader chạy. `reload()` yêu cầu tải lại; `hasValue()` vừa kiểm tra dữ liệu vừa giúp TypeScript biết có thể đọc `value()` trong nhánh đó.
+
+Trade-off của `resource` dùng `fetch` là request không đi qua interceptor của `HttpClient`. Nếu authentication, tracing hoặc quy tắc lỗi của ứng dụng được tập trung ở interceptor, dùng `fetch` riêng dễ làm lệch chính sách. Đừng trộn hai đường HTTP chỉ vì API resource tiện.
+
+### rxResource với HttpClient
+
+`rxResource` giữ giao diện state của resource nhưng loader là Observable. Đây là lựa chọn tự nhiên khi data-access service đã dùng `HttpClient`, vì request vẫn đi qua interceptor và được hủy khi resource thay params.
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { Component, inject, signal } from '@angular/core';
+import { rxResource } from '@angular/core/rxjs-interop';
+import { map } from 'rxjs';
+
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+}
+
+@Component({
+  selector: 'app-product-detail',
+  template: `
+    @if (product.isLoading()) {
+      <p>Đang tải sản phẩm...</p>
+    } @else if (product.hasValue()) {
+      <h2>{{ product.value().name }}</h2>
+    } @else if (product.error()) {
+      <p>Không thể tải sản phẩm.</p>
+    }
+  `,
+})
+export class ProductDetailComponent {
+  private readonly http = inject(HttpClient);
+
+  readonly productId = signal<string | undefined>(undefined);
+
+  readonly product = rxResource({
+    params: () => {
+      const id = this.productId();
+      return id ? { id } : undefined;
+    },
+    stream: ({ params }) =>
+      this.http
+        .get<ProductDto>(`/api/products/${encodeURIComponent(params.id)}`)
+        .pipe(map((dto) => ({ ...dto }))),
+  });
+}
+```
+
+Khi params đổi, `rxResource` unsubscribe stream cũ trước khi dùng stream mới. Với `HttpClient`, unsubscribe này yêu cầu hủy HTTP request phía client. Giống mọi generic `HttpClient`, `ProductDto` vẫn là kiểu tĩnh; mapping hoặc validation runtime cần thêm khi API không đáng tin cậy.
+
+<Callout type="warn" title="Kiểm tra trạng thái API theo phiên bản Angular">
+  API resource đã thay đổi giữa các phiên bản Angular và có thể mang nhãn experimental ở một số phiên bản cũ. Trước khi chuẩn hóa kiến trúc trên toàn dự án, đối chiếu phiên bản Angular đang dùng với tài liệu chính thức và chữ ký API hiện tại.
+</Callout>
+
+### Giới hạn của resource
+
+Không dùng resource cho mọi bất đồng bộ chỉ để tránh `subscribe()`:
+
+- Search-as-you-type cần `debounceTime`, `switchMap` và có thể nhiều event; pipeline RxJS diễn tả trực tiếp hơn.
+- WebSocket, SSE và message stream cần xử lý **mọi** event theo thứ tự. Resource ưu tiên giá trị hiện tại.
+- Lệnh ghi như tạo đơn hàng là từng attempt độc lập, có optimistic update, retry và phản hồi riêng. Một resource theo key thường không biểu diễn đủ ngữ nghĩa command.
+- Upload cần progress event. Resource có loading/value/error nhưng không phải UI cho một chuỗi `HttpEvent` nhiều mốc.
+
+Nói ngắn gọn: chọn resource cho “đọc giá trị hiện tại theo params”; chọn Observable/RxJS khi dòng thời gian và từng event là trọng tâm.
+
+## Lỗi thường gặp và trade-off
+
+| Sai lầm | Hậu quả | Cách sửa |
+| --- | --- | --- |
+| Gọi `HttpClient` trong nhiều component | URL, mapping và xử lý lỗi bị lặp; khó đổi backend. | Đưa request vào data-access service và trả model có ý nghĩa. |
+| Tin `get<T>()` đã validate JSON | Response sai schema chỉ lỗi muộn hoặc đưa dữ liệu xấu vào state. | Có contract backend rõ; validate runtime ở dữ liệu quan trọng. |
+| Quên gán lại `params.set()` | Query param biến mất âm thầm. | Chain hoặc gán lại `HttpParams`/`HttpHeaders` mới. |
+| Gắn token trong từng request | Dễ bỏ sót, gửi nhầm token, khó đổi chính sách. | Dùng interceptor có allow-list endpoint. |
+| Dùng `mergeMap` cho tìm kiếm | Response cũ có thể ghi đè kết quả mới. | Dùng `switchMap` cho request có thể thay thế. |
+| Xem cancel như undo mutation | Server vẫn có thể đã xử lý `POST`/`PATCH`. | Thiết kế idempotency và trạng thái mutation ở server/client. |
+| Bật `withFetch()` rồi chờ upload progress | Không có `UploadProgress` để vẽ thanh tiến trình. | Dùng XHR backend cho luồng upload cần progress. |
+| Dùng `resource` với `fetch` bên cạnh interceptor auth | Request bỏ qua chính sách auth/logging tập trung. | Dùng `rxResource` + `HttpClient`, hoặc chủ đích thiết kế wrapper Fetch. |
+
+Lỗi HTTP từ `HttpClient` được phát qua error channel của Observable, thường là `HttpErrorResponse`. Đừng hiển thị thẳng `error.error` cho người dùng: payload này do server hoặc proxy trả về và có thể không có hình dạng bạn mong đợi. Phân loại status, lỗi mạng và lỗi validation trước khi quyết định thông báo hay retry. Xem [Xử lý lỗi API](/docs/http-api-auth/xu-ly-loi-api) để xây chính sách đó.
+
+## Checklist và tóm tắt
+
+Trước khi hoàn thành một integration HTTP, kiểm tra các câu hỏi sau:
+
+- [ ] `provideHttpClient()` đã có ở application config và interceptor chung được cấu hình một chỗ.
+- [ ] Component không tự biết URL, DTO thô hoặc header xác thực; data-access service sở hữu các chi tiết này.
+- [ ] Generic phản ánh body mong đợi, còn dữ liệu quan trọng có validation runtime khi cần.
+- [ ] Params/headers được gán lại vì chúng immutable; quy ước mảng khớp với backend.
+- [ ] Request thay thế được hủy bằng `switchMap`; subscription dài hoặc imperative có lifecycle rõ ràng.
+- [ ] UI progress xử lý trường hợp không có `total` và không dùng Fetch backend khi cần upload progress.
+- [ ] Resource chỉ được dùng cho state đọc theo params; mutation, realtime và pipeline thời gian phức tạp giữ contract phù hợp.
+
+Tóm lại, `HttpClient` là biên giao tiếp HTTP chứ không chỉ là một hàm `get()`. Cấu hình provider một lần, giữ HTTP ở data-access layer, mô tả rõ contract response và chọn lifecycle phù hợp cho từng request. Làm đúng các ranh giới này giúp phần UI đơn giản hơn, đồng thời mở đường cho interceptor, xử lý lỗi, xác thực và cache nhất quán.
+
+<Cards>
+  <Card
+    title="Interceptors"
+    href="/docs/http-api-auth/interceptors"
+    description="Tập trung auth, logging và metadata dùng chung cho request."
+  />
+  <Card
+    title="Xử lý lỗi API"
+    href="/docs/http-api-auth/xu-ly-loi-api"
+    description="Phân loại lỗi HTTP, retry có kiểm soát và thông báo cho UI."
+  />
+  <Card
+    title="Cache dữ liệu"
+    href="/docs/http-api-auth/cache-du-lieu"
+    description="Quản lý request lặp lại và tính mới của dữ liệu."
+  />
+</Cards>

@@ -1,10 +1,614 @@
 ---
 title: Docker và Cloudflare
-description: Đóng gói và triển khai ứng dụng Angular lên hạ tầng phổ biến.
+description: Đóng gói, cấu hình và phát hành ứng dụng Angular lên static hosting, Docker hoặc nền tảng SSR với quy trình rollback có kiểm soát.
 ---
 
-Trang này sẽ trình bày **Docker và Cloudflare** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi">
+  Trang này phân biệt ba cách đưa Angular lên production: SPA tĩnh trên CDN, SSR chạy như một Node server trong container và SSR trên runtime edge. Ví dụ dùng Docker và Cloudflare, nhưng nguyên tắc artefact, cấu hình runtime, kiểm tra sau phát hành và rollback áp dụng cho các nhà cung cấp khác.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Deployment giải quyết điều gì](#deployment-giải-quyết-điều-gì)
+  - [Chọn mô hình chạy](#chọn-mô-hình-chạy)
+- [Artefact và cấu hình trước khi deploy](#artefact-và-cấu-hình-trước-khi-deploy)
+  - [Build một lần, triển khai nhiều nơi](#build-một-lần-triển-khai-nhiều-nơi)
+  - [Kiểm tra output Angular](#kiểm-tra-output-angular)
+  - [Metadata có thể truy vết](#metadata-có-thể-truy-vết)
+- [Triển khai SPA lên static hosting](#triển-khai-spa-lên-static-hosting)
+  - [Luồng phát hành static](#luồng-phát-hành-static)
+  - [SPA routing và fallback](#spa-routing-và-fallback)
+  - [Cache HTML, assets và API](#cache-html-assets-và-api)
+  - [Ví dụ Cloudflare Pages](#ví-dụ-cloudflare-pages)
+- [Đóng gói Angular SSR bằng Docker](#đóng-gói-angular-ssr-bằng-docker)
+  - [Khi nào cần SSR](#khi-nào-cần-ssr)
+  - [Dockerfile đa giai đoạn](#dockerfile-đa-giai-đoạn)
+  - [Cấu hình container khi chạy](#cấu-hình-container-khi-chạy)
+- [Triển khai SSR trên nền tảng edge](#triển-khai-ssr-trên-nền-tảng-edge)
+  - [Cloudflare Workers thay vì Pages static](#cloudflare-workers-thay-vì-pages-static)
+  - [Ranh giới tương thích runtime](#ranh-giới-tương-thích-runtime)
+- [Biến môi trường, cấu hình runtime và secrets](#biến-môi-trường-cấu-hình-runtime-và-secrets)
+  - [Giá trị nào được phép ở client](#giá-trị-nào-được-phép-ở-client)
+  - [Cấu hình runtime cho SPA](#cấu-hình-runtime-cho-spa)
+  - [Quản lý secrets đúng chỗ](#quản-lý-secrets-đúng-chỗ)
+- [CI/CD, release và rollback](#cicd-release-và-rollback)
+  - [Các cổng trong pipeline](#các-cổng-trong-pipeline)
+  - [Ví dụ workflow CI](#ví-dụ-workflow-ci)
+  - [Chiến lược rollout](#chiến-lược-rollout)
+  - [Runbook rollback](#runbook-rollback)
+- [Xác minh sau deploy và quan sát](#xác-minh-sau-deploy-và-quan-sát)
+  - [Smoke test theo phiên bản](#smoke-test-theo-phiên-bản)
+  - [Tín hiệu cần theo dõi](#tín-hiệu-cần-theo-dõi)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist production và tóm tắt](#checklist-production-và-tóm-tắt)
+
+## Tổng quan
+
+### Deployment giải quyết điều gì
+
+Deployment không chỉ là chép thư mục `dist/` lên một host. Một bản phát hành tốt trả lời được bốn câu hỏi: **mã nào** đang chạy, **cấu hình nào** đang được áp dụng, **người dùng có nhận đúng route và assets không**, và **làm sao quay lại bản an toàn nếu có sự cố**.
+
+**Artefact** là output bất biến của một lần build, ví dụ thư mục browser hoặc Docker image. **Cấu hình** là giá trị thay đổi theo môi trường, ví dụ URL API công khai, domain hoặc cờ bật tính năng. Tách chúng ra giúp cùng một artefact đã kiểm thử được promotion từ staging sang production mà không build lại một mã nguồn khác.
+
+```text
+commit đã review
+      │
+      ▼
+test + production build ──► artefact có version
+      │                              │
+      ▼                              ▼
+  staging: deploy ──► smoke test ──► promotion
+                                         │
+                                         ▼
+                               production rollout
+                                         │
+                       ┌─────────────────┴─────────────────┐
+                       ▼                                   ▼
+                 chỉ số ổn định                       lỗi/regrression
+                       │                                   │
+                       ▼                                   ▼
+                  giữ release                    rollback artefact trước
+```
+
+Đừng coi trạng thái “deploy command thành công” là bằng chứng ứng dụng hoạt động. Lệnh chỉ chứng minh provider nhận tệp hoặc image. HTTP response, route sâu, API, đăng nhập và chỉ số lỗi mới kiểm tra được bản phát hành từ góc nhìn người dùng.
+
+### Chọn mô hình chạy
+
+| Mô hình | Host phục vụ gì | Phù hợp khi | Điểm cần đánh đổi |
+| --- | --- | --- | --- |
+| SPA tĩnh | `index.html`, JS, CSS, ảnh từ object storage/CDN | Ứng dụng sau đăng nhập, không cần HTML render ở server | SEO/lần render đầu có thể kém hơn; phải cấu hình fallback cho Angular Router |
+| SSR Node trong container | Server Angular tạo HTML cho request rồi phục vụ assets | SEO, preview link, HTML đầu nhanh; tổ chức đã có container platform | Vận hành server, scale, health check, cache và tương thích server |
+| SSR edge | Worker/edge function tạo HTML gần người dùng | Cần SSR với latency toàn cầu thấp, runtime provider hỗ trợ | API Node không phải lúc nào cũng có; giới hạn runtime và debugging khác Node |
+
+Không phải ứng dụng Angular nào cũng cần SSR. Nếu trang chỉ hiện dữ liệu sau xác thực, static SPA đơn giản, rẻ và dễ cache hơn. Nếu landing page, trang sản phẩm hoặc nội dung cần được crawler và mạng xã hội đọc HTML, SSR hoặc prerender là lựa chọn đáng cân nhắc. Xem thêm [SSR và hydration](/docs/testing-performance-deploy/ssr-hydration) trước khi chuyển mô hình render.
+
+## Artefact và cấu hình trước khi deploy
+
+### Build một lần, triển khai nhiều nơi
+
+Build production bằng đúng lockfile và phiên bản Node mà CI dùng:
+
+```bash
+npm ci
+npx ng build --configuration production
+```
+
+Lệnh tạo output tối ưu theo cấu hình workspace. Không dùng `ng serve` làm artefact: development server không có cùng minification, hashing, budget và hành vi cache như production.
+
+Một release nên có ít nhất các metadata sau, lưu cùng artefact hoặc image tag:
+
+| Metadata | Ví dụ | Giá trị khi điều tra |
+| --- | --- | --- |
+| Version phát hành | `v2.8.0` | Liên kết release note và rollback |
+| Commit SHA | `a1b2c3d` | Biết chính xác mã đang chạy |
+| Thời điểm build | `2025-03-08T12:00:00Z` | So sánh timeline sự cố |
+| Dependency lockfile | hash của `package-lock.json` | Phát hiện build không tái lập |
+| URL/deploy ID | URL preview hoặc ID provider | Đối chiếu log, traffic và bản deploy |
+
+<Callout type="idea" title="Promotion thay vì rebuild">
+  Build image hoặc static artefact một lần ở commit đã qua kiểm tra. Đưa chính artefact đó sang staging rồi production. Rebuild ở production có thể kéo dependency khác, timestamp khác hoặc cấu hình build khác, làm mất ý nghĩa của kiểm thử trước đó.
+</Callout>
+
+### Kiểm tra output Angular
+
+Đường dẫn output không nên được đoán từ bài viết trên mạng. Nó phụ thuộc phiên bản Angular, builder và `outputPath` trong `angular.json`. Với application builder hiện đại, output SSR thường có hai phần `browser/` và `server/`; static build thường chỉ cần phần browser. Một số workspace cũ lại tạo cấu trúc khác.
+
+Trước khi viết lệnh upload hoặc `COPY` trong Dockerfile, hãy chạy build và kiểm tra cây tệp thật:
+
+```bash
+npx ng build --configuration production
+find dist -maxdepth 3 -type f | sort | head -80
+```
+
+Kiểm tra tối thiểu:
+
+- Có HTML entry point và những assets mà HTML tham chiếu.
+- Tên JS/CSS có content hash nếu policy cache dài dựa vào hash.
+- Không có file `*.map` bị public ngoài ý muốn.
+- Production build không có budget error hoặc cảnh báo chưa được giải thích.
+- Với SSR, server entry có mặt và lệnh chạy được xác minh trong môi trường gần production.
+
+Nếu đang dùng prerender, mở HTML đầu ra của route quan trọng để xác nhận nội dung render sẵn. Nếu đang dùng SSR theo request, chạy server cục bộ và dùng `curl` kiểm tra response HTML, thay vì chỉ xem console “server started”.
+
+### Metadata có thể truy vết
+
+Một cách đơn giản để hiện version không bí mật là tạo tệp build info tại CI. Tệp này hữu ích cho support và smoke test, nhưng không được chứa token, URL nội bộ hoặc tên secret.
+
+```bash
+mkdir -p dist/storefront/browser
+cat > dist/storefront/browser/build-info.json <<EOF
+{"version":"${GITHUB_REF_NAME:-local}","commit":"${GITHUB_SHA:-local}","builtAt":"$(date -u +%FT%TZ)"}
+EOF
+```
+
+Hãy thay `dist/storefront/browser` bằng output path thực tế của workspace. Endpoint hoặc file version nên được cache ngắn để khi điều tra nó phản ánh release mới. Trong ứng dụng, có thể hiển thị commit ở trang chẩn đoán chỉ dành cho nhân viên; không cần đưa metadata nội bộ vào giao diện công khai.
+
+## Triển khai SPA lên static hosting
+
+### Luồng phát hành static
+
+Static host chỉ cần phục vụ tệp đã build. Browser nhận `index.html`, tải chunks JavaScript/CSS có hash, rồi Angular bootstrap và điều hướng ở client. Đây là mô hình phù hợp với Cloudflare Pages, S3 + CDN, Netlify hoặc một web server chỉ đọc tệp.
+
+```text
+Browser ── GET /products/42 ──► CDN/static host
+                                      │
+                          fallback HTML cho route client
+                                      │
+                                      ▼
+                                index.html
+                                      │
+                           main.<hash>.js + CSS/assets
+                                      │
+                                      ▼
+                              Angular Router hiển thị /products/42
+```
+
+Quy trình phát hành cơ bản:
+
+1. Chạy test liên quan và `ng build --configuration production` trong CI.
+2. Lưu hoặc upload đúng thư mục browser của output build.
+3. Cấu hình fallback cho route ứng dụng, nhưng không rewrite request thật đến file assets hoặc API.
+4. Gắn domain, HTTPS, header bảo mật và cache policy.
+5. Mở URL gốc **và một route sâu bằng tab ẩn/cache lạnh** để smoke test.
+
+### SPA routing và fallback
+
+Angular Router hiểu `/products/42` sau khi mã JavaScript đã tải. Static host lại nhìn request đầu tiên như yêu cầu một file hoặc thư mục `/products/42`. Nếu host trả 404 thay vì `index.html`, việc dán URL route sâu hoặc refresh trang sẽ hỏng dù click điều hướng bên trong app vẫn hoạt động.
+
+Trên Cloudflare Pages, tạo `_redirects` trong thư mục assets của Angular để nó xuất hiện ở output build:
+
+```text
+/*  /index.html  200
+```
+
+Ví dụ cấu trúc source:
+
+```text
+src/
+└── assets/
+    └── _redirects
+```
+
+Và bảo đảm `assets` đang được Angular copy theo cấu hình workspace. Quy tắc catch-all phải là fallback cuối cùng. Nếu cần proxy API, upload hoặc route server riêng, đặt các quy tắc cụ thể trước nó hoặc dùng domain API khác. Không rewrite mọi request sang `index.html`, vì một request `main.<hash>.js` bị trả HTML sẽ gây lỗi MIME type và trang trắng.
+
+<Callout type="warn" title="404 thật vẫn phải là 404">
+  Fallback SPA có thể khiến URL không tồn tại trả status `200` cùng `index.html`. Trong Angular, tạo route `**` hiển thị trang không tìm thấy để người dùng không thấy trang trống. Với SEO cần status 404 chính xác, prerender/SSR hoặc một routing rule có chủ đích thường phù hợp hơn static catch-all.
+</Callout>
+
+### Cache HTML, assets và API
+
+Content hash cho phép cache assets lâu: nội dung thay đổi tạo URL mới. HTML không được cache bất biến quá lâu vì nó là nơi tham chiếu các hash mới. Nếu CDN giữ `index.html` cũ trong nhiều ngày, browser sẽ tiếp tục tải shell cũ sau release dù JS mới đã upload.
+
+| Loại response | Header định hướng | Lý do |
+| --- | --- | --- |
+| `index.html`, runtime config, `build-info.json` | `Cache-Control: no-cache` hoặc TTL ngắn + revalidate | Client cần phát hiện release mới |
+| JS/CSS/font/ảnh có hash | `Cache-Control: public, max-age=31536000, immutable` | URL mới xuất hiện khi nội dung đổi, nên cache dài an toàn |
+| Asset không hash | TTL ngắn hơn hoặc version URL rõ ràng | Có nguy cơ nội dung mới bị cache cũ |
+| API có dữ liệu người dùng | Theo policy API, thường không cache public | Tránh lộ hoặc trộn dữ liệu giữa người dùng |
+
+Các header chính xác phụ thuộc CDN và yêu cầu sản phẩm. Đừng gắn `immutable` cho `index.html` chỉ vì assets cần cache dài. Sau deploy, mở DevTools Network để xác minh HTML đang trỏ đến hash mới và assets trả header như dự kiến.
+
+### Ví dụ Cloudflare Pages
+
+Đây là ví dụ deploy **SPA static** đã có production output. Nó không chạy Angular SSR Node process trên Pages.
+
+```bash
+# Ví dụ: thay đường dẫn bằng browser output thực tế sau ng build.
+npx wrangler pages deploy dist/storefront/browser \
+  --project-name storefront \
+  --branch main
+```
+
+Trong CI, nên dùng token có quyền tối thiểu và truyền qua secret của provider, không đăng nhập tương tác. Một biến môi trường thường dùng là `CLOUDFLARE_API_TOKEN`; tên account/project cần được quản lý qua biến CI hoặc cấu hình không bí mật đã review.
+
+Khi kết nối repository trực tiếp với Cloudflare Pages, có thể để Pages chạy lệnh build. Tuy nhiên, pipeline tách build và deploy thường dễ giữ lại artefact, log và cổng kiểm tra hơn. Dù chọn cách nào, hãy pin Node version, chạy `npm ci`, và ghi lại deploy URL/ID trong kết quả release.
+
+## Đóng gói Angular SSR bằng Docker
+
+### Khi nào cần SSR
+
+SSR tạo HTML cho request ở server trước khi browser hydrate — gắn event handler và tiếp tục chạy Angular ở client. Nó có thể cải thiện HTML ban đầu, SEO và preview nội dung, nhưng thêm một dịch vụ chạy liên tục. Cần có health check, log, giới hạn tài nguyên, autoscaling và kế hoạch xử lý lỗi server.
+
+Docker không phải yêu cầu của SSR, nhưng container tạo một đơn vị phát hành nhất quán: builder cài dependency và tạo output, runtime chỉ chứa Node, output cần chạy và production dependencies. Đừng chạy `ng serve` trong container production; đó là development server.
+
+### Dockerfile đa giai đoạn
+
+Ví dụ dưới đây giả định workspace SSR tạo `dist/storefront/server/server.mjs`. Hãy kiểm tra output thực tế; Angular version khác có thể đặt server entry hoặc browser path khác.
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM node:22-alpine AS build
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npx ng build --configuration production
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=4000
+
+# Chỉ đưa output cần thiết vào runtime image.
+COPY --from=build /app/dist/storefront ./dist/storefront
+
+# Nếu server entry cần production dependencies, copy manifest và cài production deps.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+USER node
+EXPOSE 4000
+CMD ["node", "dist/storefront/server/server.mjs"]
+```
+
+Tạo `.dockerignore` trong dự án thật để build context không mang các tệp không cần thiết như `node_modules`, `.git`, coverage và output cũ. Ví dụ tối thiểu:
+
+```text
+node_modules
+.git
+dist
+coverage
+.env*
+```
+
+Không thêm `.env*` vào image context. Một secret đã bị `COPY` vào build layer có thể còn tồn tại trong lịch sử image, kể cả khi bị xóa ở layer sau.
+
+Build và chạy thử image với port mà server thực sự lắng nghe:
+
+```bash
+docker build --tag storefront:local .
+docker run --rm --publish 4000:4000 --env PORT=4000 storefront:local
+curl --fail --show-error http://localhost:4000/
+```
+
+Nếu `curl` thất bại, xem log container và xác nhận entry point, port, bind address, output path. Đừng sửa Dockerfile theo cách ngẫu nhiên để làm build qua; lỗi thường là giả định sai về output SSR hoặc dependency runtime.
+
+### Cấu hình container khi chạy
+
+Image nên bất biến; biến môi trường được cấp khi chạy bằng orchestrator hoặc secret store. Ví dụ manifest khái niệm:
+
+```yaml
+services:
+  storefront:
+    image: registry.example.com/storefront:2.8.0-a1b2c3d
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      PUBLIC_API_BASE_URL: https://api.example.com
+    secrets:
+      - api_service_token
+    ports:
+      - "4000:4000"
+```
+
+`PUBLIC_API_BASE_URL` có thể xuất hiện ở browser nếu SSR đưa nó vào HTML hoặc app config, nên nó không phải secret. `api_service_token` chỉ hợp lệ nếu server thực sự cần gọi dịch vụ tin cậy ở phía server và tuyệt đối không serialize nó vào HTML, API response hoặc log.
+
+Health check phải phản ánh trạng thái mà load balancer cần. Một endpoint `/healthz` đơn giản có thể chỉ báo process sống. Nếu endpoint còn kiểm tra database hay upstream, đặt timeout ngắn và tránh biến một lỗi phụ thuộc tạm thời thành vòng restart hàng loạt. Phân biệt **liveness** (process còn sống) với **readiness** (instance sẵn sàng nhận traffic) khi platform hỗ trợ.
+
+## Triển khai SSR trên nền tảng edge
+
+### Cloudflare Workers thay vì Pages static
+
+Cloudflare Pages static phù hợp để upload browser output. Một Node SSR server cần runtime server-side; không thể chỉ upload thư mục `server/` lên static hosting và chờ nó chạy. Trên Cloudflare, hướng SSR thường là adapter Angular tương thích Workers và deploy worker/worker assets, không phải Docker container trên Pages.
+
+Luồng lựa chọn:
+
+```text
+Cần HTML động từ Angular?
+        │
+   ┌────┴────┐
+   │ Không   │ Có
+   ▼         ▼
+Static SPA   SSR
+   │         │
+Pages/CDN    Runtime Node? ── Có ──► Docker/container platform
+                 │
+                 Không
+                   │
+                   ▼
+         Runtime Workers tương thích? ── Có ──► adapter + Cloudflare Workers
+                   │
+                   Không
+                   │
+                   ▼
+          Giữ static/prerender hoặc chọn runtime Node
+```
+
+Adapter, cấu hình deploy và API Workers thay đổi theo phiên bản Angular/Cloudflare. Bắt đầu từ tài liệu của **đúng phiên bản Angular**, sau đó chạy preview/development runtime của adapter trước khi deploy. Đừng lấy Dockerfile Node làm cấu hình Workers: Workers không cung cấp đầy đủ filesystem, process model hay Node APIs như container.
+
+### Ranh giới tương thích runtime
+
+Mã dùng trong SSR phải chạy được ở runtime đích. Kiểm tra các điểm sau trước khi chọn edge:
+
+- Không truy cập `window`, `document`, `localStorage` hoặc `navigator` khi render ở server; bảo vệ bằng platform check hoặc chỉ chạy sau browser bootstrap.
+- Không phụ thuộc module Node native, child process, filesystem ghi tự do hoặc socket dài nếu Workers không hỗ trợ.
+- Thư viện xác thực, image processing, database driver và logging phải có biến thể tương thích edge, hoặc được gọi qua HTTP.
+- Tác vụ nặng không được chiếm CPU request quá lâu; chuyển chúng sang queue/background job khi provider hỗ trợ.
+- Tối thiểu phải test route SSR quan trọng trên runtime thật, không chỉ trên Node local.
+
+<Callout type="warn" title="Đừng đổi runtime chỉ vì CDN">
+  Edge có thể giảm latency, nhưng không tự làm code SSR tương thích. Nếu ứng dụng phụ thuộc rõ ràng vào Node hoặc cần kết nối lâu dài, container Node có thể là lựa chọn vận hành ít rủi ro hơn. Hãy chọn từ dependency và traffic thật, không chỉ từ độ mới của nền tảng.
+</Callout>
+
+## Biến môi trường, cấu hình runtime và secrets
+
+### Giá trị nào được phép ở client
+
+Mọi thứ trong bundle JavaScript, static JSON public, HTML SSR hoặc DevTools Network đều phải được coi là công khai. `environment.ts` được thay thế lúc build và đóng vào client bundle; nó **không** là secret store.
+
+| Loại giá trị | Có thể ở client? | Ví dụ và nơi phù hợp |
+| --- | --- | --- |
+| Public API base URL | Có | runtime config hoặc environment build-time |
+| Public analytics ID | Có, sau khi review privacy | runtime config/client config |
+| Feature flag không nhạy cảm | Có | config service hoặc remote flag service |
+| API key có quyền đọc công khai thật sự | Có nhưng vẫn hạn chế quota/domain | client config, theo policy provider |
+| Database password, OAuth client secret, signing key | Không | secret manager, server/container/worker binding |
+| Token gọi service nội bộ | Không | server-side secret binding; không đi qua Angular client |
+
+Đổi tên biến thành `SECRET_KEY` không làm nó bí mật. Nếu browser nhận được giá trị, người dùng có thể đọc nó. Client chỉ gọi API bằng credential phiên người dùng hoặc token được thiết kế cho client; API/server mới giữ credential đặc quyền.
+
+### Cấu hình runtime cho SPA
+
+Build-time environment phù hợp khi mỗi môi trường có artefact riêng và URL API hiếm đổi. Nếu cần dùng cùng browser artefact ở nhiều môi trường, tải một file JSON công khai trước bootstrap. Đây là cấu hình public, không phải cách giấu secret.
+
+```json
+// public/runtime-config.json
+{
+  "apiBaseUrl": "https://api.example.com",
+  "releaseChannel": "production"
+}
+```
+
+Một initializer có thể tải file này trước khi app khởi động:
+
+```ts
+import { APP_INITIALIZER, Injectable, Provider } from '@angular/core';
+
+export interface RuntimeConfig {
+  apiBaseUrl: string;
+  releaseChannel: string;
+}
+
+@Injectable({ providedIn: 'root' })
+export class RuntimeConfigService {
+  private config!: RuntimeConfig;
+
+  async load(): Promise<void> {
+    const response = await fetch('/runtime-config.json', { cache: 'no-cache' });
+    if (!response.ok) throw new Error('Không tải được runtime configuration');
+    this.config = await response.json() as RuntimeConfig;
+  }
+
+  get apiBaseUrl(): string {
+    return this.config.apiBaseUrl;
+  }
+}
+
+export const provideRuntimeConfig: Provider = {
+  provide: APP_INITIALIZER,
+  multi: true,
+  deps: [RuntimeConfigService],
+  useFactory: (service: RuntimeConfigService) => () => service.load(),
+};
+```
+
+Tên API initializer và cách bootstrap có thể khác theo phiên bản Angular; ý chính là app không tạo request API trước khi config sẵn sàng. Cần validate schema, đặt timeout/error message hợp lý và cache file ngắn. Nếu config không tải được, fail rõ ràng thay vì khởi động với URL rỗng rồi phát sinh hàng loạt request khó hiểu.
+
+Trade-off là thêm request trước bootstrap và thêm một failure mode. Với đa số SPA chỉ có một môi trường hoặc endpoint ổn định, build-time config đơn giản hơn. Chọn runtime config khi lợi ích promotion cùng artefact thực sự lớn hơn độ phức tạp đó.
+
+### Quản lý secrets đúng chỗ
+
+Secrets thuộc về secret manager của CI/provider/orchestrator. Cấp chúng qua biến protected/masked, binding runtime hoặc volume secret; không commit vào Git, không đưa vào Docker build args, không echo vào log và không chèn vào artefact.
+
+Quy trình tối thiểu:
+
+1. Cấp token deploy riêng cho CI, giới hạn project/account và quyền cần thiết.
+2. Đánh dấu secret là masked/protected; chỉ cho branch hoặc environment được phép chạy job deploy truy cập.
+3. Dùng secret runtime riêng với deploy token. Token phát hành không cần xuất hiện bên trong ứng dụng.
+4. Luân chuyển token định kỳ và ngay khi nghi ngờ lộ. Thu hồi token cũ trước khi xóa reference trong code.
+5. Quét commit, image và log nếu từng lỡ commit/print secret; chỉ xóa dòng trong Git không đủ để coi secret an toàn.
+
+<Callout type="error" title="Secret đã vào bundle hoặc image là incident">
+  Hãy thu hồi và thay secret ngay. Cache CDN, registry image, build log hoặc clone cũ có thể còn giữ bản sao. Đừng chỉ force-push hoặc đổi tên biến rồi tiếp tục dùng cùng giá trị.
+</Callout>
+
+## CI/CD, release và rollback
+
+### Các cổng trong pipeline
+
+Pipeline nên dừng ở cổng lỗi sớm, trước khi gọi provider deploy. Cổng càng gần mã nguồn, phản hồi càng rẻ.
+
+| Giai đoạn | Bằng chứng cần lưu | Không nên bỏ qua vì |
+| --- | --- | --- |
+| Cài dependency tái lập | `npm ci`, lockfile | `npm install` có thể thay dependency ngoài ý muốn |
+| Quality | lint, unit/component/E2E theo policy | Build xanh không chứng minh hành vi |
+| Production build | output, budgets, SHA | Development output không đại diện release |
+| Security/supply chain | audit/quét theo policy tổ chức | Dependency hoặc secret có thể tạo rủi ro trước deploy |
+| Deploy preview/staging | URL, deploy ID, config version | Cần kiểm tra hạ tầng và routing thật |
+| Smoke test | kết quả HTTP/UI theo version | Upload thành công không chứng minh route/API đúng |
+| Promotion production | approver, artefact digest/tag | Ngăn nhầm branch hoặc artefact |
+| Observe | error rate, latency, rollback decision | Lỗi có thể chỉ xuất hiện khi có traffic thật |
+
+E2E đầy đủ có thể chậm, nhưng đừng biến điều đó thành lý do bỏ mọi xác minh trước production. Chạy suite mở rộng theo lịch hoặc trước release lớn, và giữ một smoke suite rất nhỏ cho mỗi deploy: trang chính, route sâu, một API/luồng quan trọng và kiểm tra version.
+
+### Ví dụ workflow CI
+
+Ví dụ GitHub Actions sau minh họa thứ tự; tên script, project và lệnh deploy phải được thay theo workspace/provider thật. Job deploy chỉ chạy khi các job trước thành công và token được lấy từ secret store.
+
+```yaml
+name: release-spa
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --watch=false
+      - run: npx ng build --configuration production
+      - run: tar -C dist -czf angular-dist.tgz storefront/browser
+      - uses: actions/upload-artifact@v4
+        with:
+          name: angular-dist-${{ github.sha }}
+          path: angular-dist.tgz
+          if-no-files-found: error
+
+  deploy:
+    needs: verify-and-build
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: angular-dist-${{ github.sha }}
+      - run: tar -xzf angular-dist.tgz
+      - run: npx wrangler pages deploy storefront/browser --project-name storefront
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+```
+
+Không copy mù lệnh `npm test` nếu dự án dùng script, browser runner hoặc flags khác. Trước khi áp dụng, kiểm tra `package.json`, Angular CLI version và output path. Nếu workflow chạy trên fork hoặc pull request không tin cậy, không cấp deploy secret cho job đó.
+
+### Chiến lược rollout
+
+| Chiến lược | Cách hoạt động | Khi phù hợp | Trade-off |
+| --- | --- | --- | --- |
+| Deploy ngay | Bản mới nhận toàn bộ traffic | Thay đổi nhỏ, rủi ro thấp, rollback rất nhanh | Blast radius lớn nếu smoke test bỏ sót lỗi |
+| Preview → promote | Mỗi thay đổi có URL preview; bản được duyệt mới lên production | Hầu hết đội sản phẩm | Cần quản lý config và review preview |
+| Blue-green | Hai môi trường hoàn chỉnh; đổi traffic từ xanh sang lục | Cần rollback gần như tức thì | Tốn tài nguyên và vận hành route/DB cẩn thận |
+| Canary | Một phần traffic nhận bản mới trước | Traffic đủ lớn và có observability tốt | Phức tạp, có thể khó tái hiện lỗi theo cohort |
+
+Static Pages thường tự có deploy immutable/preview theo provider, rất thuận tiện để review và rollback. Container cần tag image bất biến như `2.8.0-a1b2c3d`, không chỉ dùng `latest`; tag có commit giúp biết chính xác image nào cần promotion hoặc rollback.
+
+Database migration là rủi ro riêng. Ưu tiên migration tương thích ngược: release mới đọc được schema cũ, migration thêm trước, xoá cột/đổi format sau khi không còn bản cũ. Rollback code không tự rollback database an toàn. Hãy có runbook migration riêng và bản backup đã được kiểm tra khôi phục.
+
+### Runbook rollback
+
+Rollback là thao tác khôi phục **artefact đã biết tốt**, không phải sửa nóng trực tiếp trong production. Viết sẵn câu trả lời cho ai có quyền làm, gọi lệnh nào và tiêu chí nào xác nhận phục hồi.
+
+1. **Phát hiện và phân loại.** Ghi release ID, thời điểm, route, error rate, ảnh hưởng người dùng. Xác định có phải sự cố release mới hay dependency/hạ tầng/API bên ngoài.
+2. **Dừng mở rộng.** Tạm dừng promotion/canary tiếp theo. Không thay đồng thời nhiều config để tránh mất dấu nguyên nhân.
+3. **Chọn bản an toàn.** Lấy deploy ID hoặc image digest của release trước đã qua smoke test. Kiểm tra migration/config có làm bản cũ không tương thích không.
+4. **Khôi phục traffic.** Với Pages, rollback về deployment trước qua dashboard/CLI theo provider. Với container, redeploy đúng image tag/digest cũ. Không rebuild từ branch cũ nếu artefact cũ còn tồn tại.
+5. **Xác minh.** Chạy smoke test URL gốc, route sâu, luồng chính và endpoint version. Theo dõi error/latency trong cửa sổ đã định.
+6. **Ghi nhận và sửa nguyên nhân.** Lưu timeline, ảnh hưởng, quyết định và bằng chứng. Thêm test, monitor hoặc cổng pipeline ở lớp thấp nhất có thể ngăn tái diễn.
+
+<Callout type="warn" title="Rollback không luôn an toàn tức thì">
+  Nếu release đã thay đổi schema, gửi message không tương thích hoặc thay format cache, chỉ quay image có thể gây lỗi mới. Đó là lý do migration tương thích ngược, version API và rollout dần cần được thiết kế trước release.
+</Callout>
+
+## Xác minh sau deploy và quan sát
+
+### Smoke test theo phiên bản
+
+Smoke test phải chống được false positive từ cache. Ghi URL deploy/version, mở ở browser sạch cache hoặc query version phù hợp, và kiểm tra response headers khi cần.
+
+```bash
+# Kiểm tra response, redirect và HTML entry.
+curl --fail --show-error --location https://app.example.com/
+
+# Route sâu chứng minh fallback SPA hoặc SSR routing hoạt động.
+curl --fail --show-error --location https://app.example.com/products/42
+
+# Kiểm tra endpoint version công khai nếu hệ thống cung cấp.
+curl --fail --show-error https://app.example.com/build-info.json
+```
+
+Sau đó kiểm tra bằng browser:
+
+- Mở trang đầu với cache lạnh; không có lỗi console, lỗi MIME hoặc chunk 404.
+- Dán trực tiếp một route Angular sâu và refresh; trang hoặc SSR response đúng.
+- Thực hiện luồng có rủi ro cao, ví dụ đăng nhập, lưu form hoặc tải danh sách.
+- Xem Network: URL API đúng môi trường, không có secret trong request/response/log và cache header khớp policy.
+- Nếu dùng SSR, xem page source/response HTML để xác nhận HTML có nội dung mong đợi và hydration không báo mismatch.
+
+### Tín hiệu cần theo dõi
+
+Quan sát release theo version hoặc deploy ID để có thể so sánh trước/sau. Tối thiểu nên có:
+
+| Tín hiệu | Câu hỏi trả lời | Ngưỡng/điều kiện hành động |
+| --- | --- | --- |
+| Tỷ lệ lỗi client/server | Release có tạo exception hoặc HTTP 5xx tăng không? | So với baseline; điều tra hoặc rollback khi vượt SLO/policy |
+| Latency, TTFB và LCP | Người dùng có chậm hơn không? | Đo theo route, khu vực, thiết bị nếu có |
+| 404 HTML/chunk | Fallback hoặc cache có sai không? | Một chunk hash 404 sau release là tín hiệu khẩn |
+| Tỷ lệ hydration mismatch | SSR/client có render không nhất quán không? | Điều tra trước khi lỗi UI lan rộng |
+| Tỷ lệ deploy/smoke test thất bại | Pipeline có đáng tin không? | Không promotion khi smoke test chưa đạt |
+
+Log cần có release ID/commit, request ID và route, nhưng không log header `Authorization`, cookie, body nhạy cảm hoặc biến secret. Error tracking hữu ích hơn khi upload source map riêng tư cho đúng release; đừng public source map chỉ để stack trace dễ đọc.
+
+## Lỗi thường gặp và trade-off
+
+| Cách làm | Hậu quả | Cách sửa có bằng chứng |
+| --- | --- | --- |
+| Upload cả `dist/` mà không kiểm tra output path | Host có thể phục vụ sai thư mục hoặc lộ server files | Kiểm tra output của build; static host chỉ nhận browser assets |
+| Static host không có SPA fallback | Refresh/dán route sâu trả 404 | Thêm fallback cuối cùng và smoke test route sâu |
+| Rewrite mọi request về `index.html` | JS/CSS/API có thể trả HTML và lỗi MIME | Giữ asset/API rules cụ thể; fallback chỉ dành cho route app |
+| Cache `index.html` như asset hash | User bị kẹt shell cũ sau deploy | Cache HTML ngắn/revalidate, assets hash cache dài |
+| Dùng `environment.ts` để “giấu” secret | Secret xuất hiện trong bundle | Chuyển secret sang server/secret manager và rotate giá trị đã lộ |
+| Build lại ở mỗi môi trường | Staging và production có thể chạy bytes khác | Build một artefact, promotion theo tag/digest |
+| Chạy `ng serve` trong Docker production | Không có behavior/hiệu năng production | Build trước, chạy SSR server entry đúng output |
+| Đưa Node SSR image lên static Pages | Không có process Node để chạy server | Dùng static SPA, container platform hoặc adapter Workers |
+| Gắn tag image `latest` | Không biết rollback bản nào | Tag bất biến theo version + commit/digest |
+| Rollback code sau destructive migration | Schema cũ có thể không còn tương thích | Migration additive/compatible, backup và runbook riêng |
+
+Mỗi lựa chọn có chi phí. Static SPA giảm vận hành nhưng đánh đổi HTML server. SSR cải thiện một số trải nghiệm đầu và SEO nhưng tăng bề mặt sự cố. Runtime config tăng tính linh hoạt nhưng thêm một request/failure mode. Điều cần giữ không phải là một mô hình duy nhất, mà là artefact truy vết được và cách chứng minh mô hình đang hoạt động sau mỗi release.
+
+## Checklist production và tóm tắt
+
+Trước khi promotion, xác nhận các điểm sau:
+
+- [ ] `npm ci` và production build chạy trên Node/lockfile đã pin; budget warnings/errors được review.
+- [ ] Artefact hoặc image có version, commit SHA, thời gian build và đường dẫn output đã được kiểm tra.
+- [ ] Static host chỉ upload browser assets; SSR host có server entry/runtime đúng loại.
+- [ ] URL gốc và route sâu đã được smoke test; fallback SPA không rewrite sai asset/API request.
+- [ ] HTML/runtime config cache ngắn hoặc revalidate; JS/CSS hash dùng cache dài `immutable` khi policy hỗ trợ.
+- [ ] URL API, domain, CORS và feature flag đúng môi trường; không có secret trong bundle, HTML, image, log hoặc Git.
+- [ ] CI deploy chỉ nhận secret qua store protected/masked, token có quyền tối thiểu và job không tin cậy không truy cập token.
+- [ ] Preview/staging đã qua smoke test trước promotion; release ID/deploy URL được ghi lại.
+- [ ] Có bản artefact/image trước đã biết tốt, quyền rollback rõ ràng và migration được đánh giá tương thích ngược.
+- [ ] Sau release, error rate, 404 chunk, latency/LCP và signal SSR được theo dõi theo version.
+
+Tóm lại: bắt đầu bằng production artefact có thể truy vết, chọn static SPA, container SSR hoặc edge theo nhu cầu render thật, rồi tách cấu hình công khai khỏi secrets. CI/CD phải tạo bằng chứng ở từng cổng; deploy chỉ hoàn tất khi route sâu, luồng quan trọng và chỉ số sau release đều ổn. Một rollback đã diễn tập và một cache policy đúng thường có giá trị hơn nhiều so với một lệnh deploy ngắn.
+
+<Cards>
+  <Card title="Kiểm soát production build" href="/docs/testing-performance-deploy/build-optimization" description="Tạo artefact nhỏ, có hash và budgets trước khi phát hành." />
+  <Card title="SSR và hydration" href="/docs/testing-performance-deploy/ssr-hydration" description="Hiểu render đa môi trường trước khi vận hành SSR." />
+  <Card title="Profiling hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="So sánh trải nghiệm sau release với baseline có số liệu." />
+  <Card title="Monitoring và xử lý sự cố" href="/docs/production-troubleshooting/monitoring" description="Thiết kế tín hiệu để phát hiện và điều tra regression production." />
+</Cards>

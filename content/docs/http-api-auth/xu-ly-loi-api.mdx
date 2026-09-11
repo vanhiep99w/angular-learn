@@ -1,10 +1,780 @@
 ---
 title: Xử lý lỗi API
-description: Chuẩn hóa lỗi, retry có kiểm soát và phản hồi trên giao diện.
+description: Phân loại, chuẩn hóa, retry và trình bày lỗi HTTP an toàn trong ứng dụng Angular.
 ---
 
-Trang này sẽ trình bày **Xử lý lỗi API** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang">
+  Xử lý lỗi tốt không chỉ là hiện một toast. Mục tiêu là giữ được nguyên nhân kỹ
+  thuật cho người vận hành, trả về trạng thái có ích cho giao diện và không làm lộ
+  chi tiết nội bộ hoặc dữ liệu nhạy cảm.
 </Callout>
+
+## Mục lục
+
+- [Bức tranh tổng quan](#bức-tranh-tổng-quan)
+  - [Từ request đến phản hồi cho người dùng](#từ-request-đến-phản-hồi-cho-người-dùng)
+  - [Đặt trách nhiệm đúng tầng](#đặt-trách-nhiệm-đúng-tầng)
+- [Phân loại lỗi trước khi xử lý](#phân-loại-lỗi-trước-khi-xử-lý)
+  - [Lỗi mạng và transport](#lỗi-mạng-và-transport)
+  - [Lỗi HTTP](#lỗi-http)
+  - [Lỗi domain và validation](#lỗi-domain-và-validation)
+  - [Hủy request không luôn là lỗi](#hủy-request-không-luôn-là-lỗi)
+- [Thiết kế error contract](#thiết-kế-error-contract)
+  - [Contract từ backend](#contract-từ-backend)
+  - [Chuẩn hóa ở biên HTTP](#chuẩn-hóa-ở-biên-http)
+  - [Không tin payload lỗi mù quáng](#không-tin-payload-lỗi-mù-quáng)
+- [Xử lý trong service và UI](#xử-lý-trong-service-và-ui)
+  - [Giữ lỗi có ý nghĩa cho use case](#giữ-lỗi-có-ý-nghĩa-cho-use-case)
+  - [Gắn lỗi validation vào reactive form](#gắn-lỗi-validation-vào-reactive-form)
+  - [Trạng thái màn hình rõ ràng](#trạng-thái-màn-hình-rõ-ràng)
+- [Interceptor: chính sách chung, không phải UI chung](#interceptor-chính-sách-chung-không-phải-ui-chung)
+- [Retry, timeout và fallback](#retry-timeout-và-fallback)
+  - [Chọn request được phép retry](#chọn-request-được-phép-retry)
+  - [Backoff, jitter và Retry-After](#backoff-jitter-và-retry-after)
+  - [Timeout có ngữ cảnh](#timeout-có-ngữ-cảnh)
+  - [Fallback không được che giấu dữ liệu cũ](#fallback-không-được-che-giấu-dữ-liệu-cũ)
+- [UX, observability và bảo mật](#ux-observability-và-bảo-mật)
+  - [Thông điệp theo ngữ cảnh](#thông-điệp-theo-ngữ-cảnh)
+  - [Quan sát mà không lộ bí mật](#quan-sát-mà-không-lộ-bí-mật)
+  - [Ranh giới bảo mật](#ranh-giới-bảo-mật)
+- [Kiểm thử các nhánh lỗi](#kiểm-thử-các-nhánh-lỗi)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Bức tranh tổng quan
+
+`HttpClient` phát lỗi qua **error channel** của `Observable`; với request HTTP
+phổ biến, lỗi đó là `HttpErrorResponse`. Nhưng “request thất bại” chưa nói được
+nguyên nhân hay cách phản hồi. Người dùng mất mạng, reverse proxy trả `502`, API
+trả validation `422`, và nghiệp vụ từ chối thao tác vì số dư không đủ là bốn tình
+huống khác nhau.
+
+Đừng bắt mọi lỗi rồi đổi thành “Đã có lỗi xảy ra”. Cách đó làm form không biết
+trường nào sai, UI không biết có nên cho thử lại, còn log mất mã lỗi để điều tra.
+Thay vào đó, phân loại lỗi ở ranh giới HTTP và đưa một model lỗi ổn định vào ứng
+dụng.
+
+### Từ request đến phản hồi cho người dùng
+
+```text
+┌───────────┐     ┌─────────────┐     ┌─────────────┐     ┌──────────────┐
+│ Component │ ──► │ API service │ ──► │ HttpClient  │ ──► │ API / proxy  │
+│ form, UI  │ ◄── │ map contract│ ◄── │ interceptor │ ◄── │ network      │
+└─────┬─────┘     └──────┬──────┘     └──────┬──────┘     └──────────────┘
+      │                  │                   │
+      │ message/state    │ AppError           │ policy: trace, retry
+      ▼                  ▼                   ▼
+Thông điệp đúng       error contract      metric không nhạy cảm
+ngữ cảnh UI           ổn định             và correlation ID
+```
+
+Luồng này có ba đầu ra khác nhau:
+
+1. **UI** nhận loại lỗi và trạng thái đủ để hướng dẫn người dùng: sửa form, thử
+   lại, đăng nhập lại, hoặc liên hệ hỗ trợ.
+2. **Ứng dụng** nhận `AppError` không phụ thuộc vào hình dạng bất ổn của từng
+   backend, gateway hoặc CDN.
+3. **Observability** nhận mã status, mã nghiệp vụ, thời gian và correlation ID
+   đã được lọc để kỹ sư đối chiếu sự cố.
+
+### Đặt trách nhiệm đúng tầng
+
+| Tầng | Nên làm | Không nên làm |
+| --- | --- | --- |
+| Backend/API | Quyết định status, mã domain, validation, quyền và correlation ID. | Tin client đã kiểm tra quyền hoặc dữ liệu. |
+| Interceptor | Thêm trace, retry có chính sách, phản ứng phiên tối thiểu và chuẩn hóa transport dùng chung. | Hiện toast, sửa form hoặc biết nội dung từng màn hình. |
+| API service | Đổi DTO/error contract thành model ứng dụng, chọn fallback thuộc endpoint. | Điều hướng hoặc thao tác trực tiếp với component. |
+| Component/facade | Quản lý loading/error UI, gắn lỗi form, chọn câu chữ theo hành động người dùng. | Parse response thô hay lặp chính sách retry cho mọi API. |
+
+Ví dụ, `POST /orders` trả `409` với mã `OUT_OF_STOCK`. API service có thể chuyển
+nó thành `AppError` loại `domain`; component biết đang là thao tác đặt hàng nên
+hiện “Sản phẩm vừa hết hàng”. Interceptor không biết ngữ cảnh này và không nên
+tự hiện thông báo chung “Conflict”.
+
+## Phân loại lỗi trước khi xử lý
+
+### Lỗi mạng và transport
+
+`HttpErrorResponse` có `status === 0` khi browser không nhận được HTTP response
+hợp lệ. Nguyên nhân có thể là mất kết nối, DNS, TLS, server không thể tới được,
+request bị browser chặn vì CORS, hoặc lỗi transport khác. Vì lý do an toàn,
+browser thường không cho JavaScript biết chi tiết chính xác.
+
+```ts
+import { HttpErrorResponse } from '@angular/common/http';
+
+function isTransportError(error: unknown): boolean {
+  return error instanceof HttpErrorResponse && error.status === 0;
+}
+```
+
+Vì vậy, đừng hiển thị “Bạn đang offline” chỉ từ `status === 0`. Có thể tham khảo
+`navigator.onLine`, nhưng giá trị này chỉ nói browser có kết nối mạng cục bộ hay
+không, không chứng minh API có thể truy cập. Thông điệp an toàn hơn là “Không thể
+kết nối đến dịch vụ. Hãy kiểm tra kết nối rồi thử lại.”
+
+<Callout type="warn" title="CORS không thể được sửa ở Angular">
+  Một lỗi CORS có thể trông giống lỗi mạng ở client. Thêm header
+  `Access-Control-Allow-Origin` vào request Angular không có tác dụng; server,
+  proxy hoặc gateway phải trả header CORS đúng. Đừng retry liên tục lỗi cấu hình
+  CORS vì nó chỉ tạo thêm request thất bại.
+</Callout>
+
+### Lỗi HTTP
+
+Khi server hoặc proxy trả response HTTP không thành công, `status` phản ánh mã
+mà client nhận được. Mã status giúp chọn chiến lược, còn payload lỗi (nếu có)
+đưa chi tiết domain hoặc validation.
+
+| Nhóm | Ví dụ | Ý nghĩa thực dụng ở client | Phản hồi mặc định |
+| --- | --- | --- | --- |
+| `400` | Request sai cấu trúc | Client gửi dữ liệu/hợp đồng không hợp lệ. | Ghi nhận lỗi tích hợp; chỉ hiện chi tiết nếu contract nói rõ. |
+| `401` | Credential thiếu/hết hạn | Chưa xác thực hợp lệ. | Refresh theo contract tối đa một lần, hoặc về login. |
+| `403` | Không có quyền | Phiên có thể vẫn hợp lệ. | Giữ phiên, hiện trang/thông điệp không có quyền. |
+| `404` | Tài nguyên không có | Có thể ID sai hoặc tài nguyên đã bị xóa. | Hiện trạng thái không tìm thấy; không retry. |
+| `409` | Xung đột phiên bản/domain | Dữ liệu thay đổi đồng thời hoặc quy tắc domain từ chối. | Tải lại/chỉ dẫn giải quyết theo mã domain. |
+| `422` | Validation ngữ nghĩa | Các trường hợp lệ về cú pháp nhưng không thỏa quy tắc. | Gắn lỗi theo field và tóm tắt trên form. |
+| `429` | Rate limit | Client gửi quá nhanh. | Tôn trọng `Retry-After` nếu contract cho phép. |
+| `5xx` | `500`, `502`, `503`, `504` | Lỗi phía server, gateway hoặc quá tải. | Có thể retry request an toàn với backoff. |
+
+Không phải mọi backend đều dùng cùng status. Có hệ thống trả `400` cho validation
+hoặc dùng mã riêng như `419` cho CSRF/session hết hạn. Hợp đồng của API là nguồn
+sự thật; bảng trên là điểm bắt đầu, không phải lý do để Angular tự diễn giải mọi
+mã theo một quy tắc cứng.
+
+### Lỗi domain và validation
+
+Lỗi **domain** nói rằng HTTP request hợp lệ nhưng thao tác không thỏa quy tắc
+nghiệp vụ. Ví dụ, `POST /transfers` có thể trả `409` cùng `INSUFFICIENT_FUNDS`.
+`409` cho biết có xung đột/không thể hoàn tất; `code` mới cho UI biết cần nói về
+số dư chứ không phải một xung đột kỹ thuật chung chung.
+
+Lỗi **validation** chỉ ra input nào cần sửa. Client vẫn phải validation nhanh
+trước khi gửi để có UX tốt, nhưng server luôn phải validation lại. Một người dùng
+có thể bỏ qua JavaScript; hơn nữa quy tắc như email đã tồn tại hoặc quota đã dùng
+hết chỉ server mới biết.
+
+```json
+{
+  "code": "VALIDATION_FAILED",
+  "message": "Dữ liệu không hợp lệ.",
+  "fieldErrors": {
+    "email": ["Email này đã được sử dụng."],
+    "quantity": ["Số lượng phải nhỏ hơn hoặc bằng tồn kho."]
+  },
+  "traceId": "01J..."
+}
+```
+
+Tách `code` máy đọc được khỏi `message` để client có thể dịch, thay đổi câu chữ
+và xử lý ổn định. Không viết logic theo nguyên câu `message`: câu chữ có thể đổi,
+được bản địa hóa hoặc do gateway sinh ra.
+
+### Hủy request không luôn là lỗi
+
+Hủy search khi người dùng gõ tiếp là hành vi bình thường. Với `switchMap`, request
+cũ bị unsubscribe khi request mới bắt đầu. Cũng vậy, rời màn hình có thể hủy một
+request đang chờ. Đừng gửi sự kiện “API failure” hay toast cho các luồng hủy có
+chủ đích.
+
+Tuy nhiên, hủy ở client không bảo đảm server chưa nhận hoặc chưa xử lý request.
+Đặc biệt với `POST`/`PATCH`, không dùng cancellation như một nút undo. Xem
+[HttpClient](/docs/http-api-auth/http-client) để biết chi tiết vòng đời và hủy
+request.
+
+## Thiết kế error contract
+
+### Contract từ backend
+
+Một contract lỗi nhất quán làm client đơn giản hơn rất nhiều. Backend có thể đặt
+hình dạng này trực tiếp trong body JSON hoặc theo chuẩn/problem format mà tổ chức
+đã chọn; điều quan trọng là ý nghĩa các trường được thống nhất.
+
+```ts
+export interface ApiErrorBody {
+  /** Mã ổn định để client xử lý, ví dụ VALIDATION_FAILED. */
+  code?: string;
+  /** Thông điệp có thể hiển thị nếu backend chủ đích cung cấp. */
+  message?: string;
+  /** Lỗi theo tên field của command API. */
+  fieldErrors?: Record<string, string[]>;
+  /** ID để đối chiếu với log backend; không phải secret. */
+  traceId?: string;
+}
+```
+
+Một contract hữu ích thường có:
+
+- **`code`**: giá trị ổn định, có tài liệu. Ví dụ `EMAIL_TAKEN`,
+  `VERSION_CONFLICT`, `RATE_LIMITED`.
+- **`fieldErrors`**: map từ tên field trong command sang một hay nhiều lý do.
+  Quy ước tên field phải được frontend và backend đồng ý, kể cả nested path.
+- **`traceId`**: định danh sự cố để hỗ trợ tìm log. Trả nó cho người dùng chỉ khi
+  nó không chứa dữ liệu nhạy cảm và quy trình hỗ trợ thực sự dùng nó.
+- **`message`**: thông tin dành cho người dùng chỉ khi API cam kết nó an toàn để
+  hiển thị. Nó không nên là stack trace, câu SQL hay tên hạ tầng nội bộ.
+
+<Callout type="idea" title="Ưu tiên code hơn status khi quyết định domain">
+  Status trả lời loại thất bại HTTP rộng. `code` trả lời tình huống nghiệp vụ cụ
+  thể. Ví dụ, cả `EMAIL_TAKEN` và `INVITATION_EXPIRED` có thể là `409`, nhưng
+  form và UX cần xử lý khác nhau.
+</Callout>
+
+### Chuẩn hóa ở biên HTTP
+
+Định nghĩa một union type để phần còn lại của ứng dụng không phải đọc
+`HttpErrorResponse.error` trực tiếp. Hàm dưới giữ `status` và `traceId` phục vụ
+quan sát, nhưng chỉ đưa các loại lỗi mà UI có thể hành động.
+
+```ts
+import { HttpErrorResponse } from '@angular/common/http';
+
+export type AppError =
+  | { kind: 'network'; message: string; traceId?: string }
+  | { kind: 'unauthenticated'; status: 401; traceId?: string }
+  | { kind: 'forbidden'; status: 403; traceId?: string }
+  | { kind: 'validation'; status: number; fieldErrors: Record<string, string[]>; traceId?: string }
+  | { kind: 'domain'; status: number; code: string; message: string; traceId?: string }
+  | { kind: 'server'; status: number; traceId?: string }
+  | { kind: 'unexpected'; message: string; traceId?: string };
+
+function readApiErrorBody(value: unknown): ApiErrorBody | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+
+  const body = value as Record<string, unknown>;
+  const fieldErrors = body['fieldErrors'];
+  const validFieldErrors =
+    typeof fieldErrors === 'object' && fieldErrors !== null
+      ? Object.fromEntries(
+          Object.entries(fieldErrors as Record<string, unknown>)
+            .filter(([, messages]) => Array.isArray(messages))
+            .map(([field, messages]) => [
+              field,
+              messages.filter((message): message is string => typeof message === 'string'),
+            ]),
+        )
+      : undefined;
+
+  return {
+    code: typeof body['code'] === 'string' ? body['code'] : undefined,
+    message: typeof body['message'] === 'string' ? body['message'] : undefined,
+    fieldErrors: validFieldErrors,
+    traceId: typeof body['traceId'] === 'string' ? body['traceId'] : undefined,
+  };
+}
+
+export function toAppError(error: unknown): AppError {
+  if (!(error instanceof HttpErrorResponse)) {
+    return { kind: 'unexpected', message: 'Lỗi không xác định.' };
+  }
+
+  const body = readApiErrorBody(error.error);
+  const traceId = body?.traceId ?? error.headers.get('X-Trace-Id') ?? undefined;
+
+  if (error.status === 0) {
+    return { kind: 'network', message: 'Không thể kết nối đến dịch vụ.', traceId };
+  }
+  if (error.status === 401) return { kind: 'unauthenticated', status: 401, traceId };
+  if (error.status === 403) return { kind: 'forbidden', status: 403, traceId };
+  if (body?.fieldErrors && Object.keys(body.fieldErrors).length > 0) {
+    return { kind: 'validation', status: error.status, fieldErrors: body.fieldErrors, traceId };
+  }
+  if (body?.code && body.message) {
+    return { kind: 'domain', status: error.status, code: body.code, message: body.message, traceId };
+  }
+  if (error.status >= 500) return { kind: 'server', status: error.status, traceId };
+
+  return { kind: 'unexpected', message: 'Yêu cầu không thể hoàn tất.', traceId };
+}
+```
+
+`readApiErrorBody()` là một runtime guard nhỏ. Generic TypeScript không bảo đảm
+proxy hay server thực sự trả JSON đúng schema. Nếu `error.error` là HTML của
+load balancer, `ProgressEvent`, chuỗi hoặc JSON khác hình dạng, hàm vẫn tạo ra lỗi
+an toàn thay vì ném thêm lỗi trong chính error handler.
+
+Nên đặt `toAppError()` trong một module core/data-access dùng chung. Nhưng đừng
+buộc mọi endpoint phải có cùng fallback domain. Service gần use case vẫn có thể
+đổi `domain` code thành kết quả phù hợp hơn.
+
+### Không tin payload lỗi mù quáng
+
+Payload lỗi là dữ liệu từ bên ngoài. Không render trực tiếp `error.error.message`
+bằng `[innerHTML]`, không giả định nó luôn có `fieldErrors`, và không log nguyên
+body lỗi. Một reverse proxy có thể trả trang HTML; backend lỗi có thể trả stack
+trace do cấu hình sai; response có thể chứa email, token hoặc dữ liệu người khác.
+
+Khi backend sở hữu thông điệp người dùng, hãy coi đó là một phần của contract và
+kiểm tra schema. Nếu không có cam kết đó, map `code` sang bản dịch phía client.
+Ví dụ, `EMAIL_TAKEN` thành “Email này đã được sử dụng”, còn lỗi không có code trở
+thành thông điệp chung kèm nút thử lại khi phù hợp.
+
+## Xử lý trong service và UI
+
+### Giữ lỗi có ý nghĩa cho use case
+
+Service chuyển lỗi transport thành `AppError`, sau đó để component hoặc facade
+chọn UX. `catchError` phải **ném lại** lỗi đã chuẩn hóa nếu caller cần biết request
+không thành công; trả `of([])` cho mọi lỗi sẽ biến “không tải được danh sách” thành
+“danh sách rỗng”.
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { Observable, catchError, throwError } from 'rxjs';
+
+interface CreateProjectCommand {
+  name: string;
+}
+
+interface Project {
+  id: string;
+  name: string;
+}
+
+@Injectable({ providedIn: 'root' })
+export class ProjectApi {
+  private readonly http = inject(HttpClient);
+
+  create(command: CreateProjectCommand): Observable<Project> {
+    return this.http.post<Project>('/api/projects', command).pipe(
+      catchError((error: unknown) => throwError(() => toAppError(error))),
+    );
+  }
+}
+```
+
+Một facade có thể xử lý riêng `PROJECT_NAME_TAKEN` để mở dialog đổi tên, trong
+khi mọi mã domain khác đi theo thông báo mặc định. Nhờ union type, TypeScript ép
+mã xử lý từng `kind` thay vì vô tình đọc thuộc tính không tồn tại.
+
+```ts
+function messageForCreateProject(error: AppError): string {
+  if (error.kind === 'domain' && error.code === 'PROJECT_NAME_TAKEN') {
+    return 'Tên dự án đã tồn tại. Hãy chọn tên khác.';
+  }
+
+  switch (error.kind) {
+    case 'network':
+      return 'Không thể kết nối. Hãy kiểm tra mạng rồi thử lại.';
+    case 'unauthenticated':
+      return 'Phiên đăng nhập đã hết hạn.';
+    case 'forbidden':
+      return 'Bạn không có quyền tạo dự án.';
+    case 'server':
+      return 'Dịch vụ đang gặp sự cố. Hãy thử lại sau.';
+    default:
+      return 'Không thể tạo dự án. Hãy kiểm tra dữ liệu và thử lại.';
+  }
+}
+```
+
+### Gắn lỗi validation vào reactive form
+
+Lỗi server nên bổ sung cho validation có sẵn ở client, không ghi đè nó. Với form
+đăng ký, API trả `fieldErrors.email`; component có thể đặt lỗi `server` vào
+control `email` và đặt lỗi form-level cho lỗi không gắn với một trường.
+
+```ts
+import { FormGroup } from '@angular/forms';
+
+function applyServerValidation(form: FormGroup, error: AppError): void {
+  if (error.kind !== 'validation') return;
+
+  for (const [field, messages] of Object.entries(error.fieldErrors)) {
+    const control = form.get(field);
+    if (control) {
+      control.setErrors({ ...control.errors, server: messages[0] ?? 'Giá trị không hợp lệ.' });
+    } else {
+      form.setErrors({ ...form.errors, server: messages.join(' ') });
+    }
+  }
+}
+```
+
+Trong template, chỉ hiện lỗi server khi control đã được chạm hoặc form đã submit.
+Khi người dùng sửa trường, hãy xóa riêng lỗi `server` nếu nó không còn áp dụng;
+đừng gọi `setErrors(null)` vì hành động đó có thể xóa lỗi `required`, `email` hay
+validator bất đồng bộ vẫn còn hiệu lực.
+
+<Callout type="warn" title="Field name là một contract">
+  `form.get('shipping.address.postalCode')` chỉ hoạt động nếu backend dùng đúng
+  path đã thỏa thuận. Với form lồng nhau hoặc mảng động, hãy tài liệu hóa quy ước
+  path như `items.0.quantity` và kiểm thử nó giữa frontend/backend.
+</Callout>
+
+### Trạng thái màn hình rõ ràng
+
+Một màn hình tải danh sách cần phân biệt ít nhất `loading`, `ready`, `empty` và
+`error`. `empty` là request thành công nhưng không có bản ghi; `error` là không
+có dữ liệu đáng tin cậy cho lần tải hiện tại. Trộn hai trạng thái này khiến người
+dùng không biết cần tạo bản ghi đầu tiên hay kiểm tra mạng.
+
+Khi đã có dữ liệu cũ và thao tác refresh thất bại, có thể giữ dữ liệu cũ nhưng
+hiện banner “Không thể làm mới; dữ liệu có thể không mới”. Đây là fallback trung
+thực hơn việc thay bằng danh sách rỗng hoặc che lỗi hoàn toàn.
+
+```text
+Chưa có dữ liệu:  loading ──► ready / empty / error
+Đang có dữ liệu:  ready ──► refreshing ──► ready
+                                  │
+                                  └──► stale data + non-blocking error
+```
+
+## Interceptor: chính sách chung, không phải UI chung
+
+Functional interceptor là nơi phù hợp cho quy tắc áp dụng nhất quán trên nhiều
+request: gắn correlation ID, đo thời gian, retry request đọc, hoặc thực hiện
+cleanup phiên có điều phối sau `401`. Nó nên phát lại lỗi để API service và UI
+vẫn có thể dừng spinner, gắn validation hoặc render state.
+
+Ví dụ interceptor chỉ chuẩn hóa lỗi kỹ thuật. Nó không gọi snackbar và không
+điều hướng; các hành vi đó phụ thuộc vào ngữ cảnh use case.
+
+```ts
+import { HttpInterceptorFn } from '@angular/common/http';
+import { catchError, throwError } from 'rxjs';
+
+export const normalizeErrorInterceptor: HttpInterceptorFn = (request, next) =>
+  next(request).pipe(
+    catchError((error: unknown) => throwError(() => toAppError(error))),
+  );
+```
+
+Một rủi ro của chuẩn hóa quá sớm là interceptor có thể nhận lại `AppError` từ
+một tầng khác hoặc làm mất `HttpErrorResponse` mà retry cần xem header
+`Retry-After`. Chọn **một** vị trí chuẩn hóa trong chuỗi và bảo đảm retry/telemetry
+đứng trước hoặc vẫn có dữ liệu cần thiết. Nhiều ứng dụng đặt retry + telemetry ở
+interceptor, còn `toAppError()` ở data-access service để service giữ được ngữ
+nghĩa endpoint.
+
+Xem [Interceptors](/docs/http-api-auth/interceptors) để cấu hình thứ tự
+`withInterceptors([...])`, clone request bất biến và xử lý `401`/refresh đúng
+cách.
+
+## Retry, timeout và fallback
+
+### Chọn request được phép retry
+
+Retry là gửi lại request, không phải “chờ lâu hơn”. Chỉ retry khi cả hai câu sau
+đều đúng: thất bại có khả năng tạm thời **và** lặp request an toàn theo hợp đồng.
+`GET` và `HEAD` thường là điểm khởi đầu an toàn. `POST /payments` không an toàn
+chỉ vì lần đầu không có response; server có thể đã tạo thanh toán rồi.
+
+```ts
+import { HttpErrorResponse, HttpRequest } from '@angular/common/http';
+
+function shouldRetry(request: HttpRequest<unknown>, error: unknown): boolean {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  if (!(error instanceof HttpErrorResponse)) return false;
+
+  return error.status === 0 || error.status === 429 || error.status >= 500;
+}
+```
+
+`PUT` và `DELETE` có ngữ nghĩa idempotent trong HTTP, nhưng API triển khai thực tế
+có thể gửi email, tạo audit event hoặc gọi hệ thống ngoài ở mỗi lần thử. Đừng thêm
+chúng vào retry policy trước khi backend xác nhận an toàn. Với command cần retry,
+dùng idempotency key do server hỗ trợ và giới hạn attempt rõ ràng.
+
+### Backoff, jitter và Retry-After
+
+Backoff làm khoảng chờ tăng theo từng lần thử. Jitter là một phần ngẫu nhiên nhỏ
+để hàng nghìn client không cùng retry tại một thời điểm sau khi dịch vụ vừa hồi
+phục. Với `429`, server có thể gửi `Retry-After`; ưu tiên giá trị đó khi contract
+quy định đơn vị và giới hạn tối đa.
+
+```ts
+import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
+import { retry, throwError, timer } from 'rxjs';
+
+function retryDelayMs(error: unknown, attempt: number): number {
+  const retryAfter =
+    error instanceof HttpErrorResponse
+      ? Number(error.headers.get('Retry-After'))
+      : Number.NaN;
+
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+    return Math.min(retryAfter * 1_000, 30_000);
+  }
+
+  const backoff = Math.min(500 * 2 ** (attempt - 1), 8_000);
+  const jitter = Math.round(Math.random() * 250);
+  return backoff + jitter;
+}
+
+export const retryReadInterceptor: HttpInterceptorFn = (request, next) =>
+  next(request).pipe(
+    retry({
+      count: 2,
+      delay: (error: unknown, attempt) => {
+        if (!shouldRetry(request, error)) return throwError(() => error);
+        return timer(retryDelayMs(error, attempt));
+      },
+    }),
+  );
+```
+
+Ví dụ này hiểu `Retry-After` dạng số giây. Header cũng có thể là HTTP date; nếu
+API dùng dạng đó, viết parser và test riêng thay vì âm thầm diễn giải sai. `429`
+cũng không tự động có nghĩa mọi request nên retry: có thể người dùng cần chờ một
+hành động thủ công hoặc hệ thống cần giảm tải lâu hơn 30 giây.
+
+<Callout type="warn" title="Không retry 401 hoặc 403 theo policy chung">
+  `401` cần refresh một lần được điều phối theo contract xác thực; `403` thường
+  không thay đổi khi thử lại. Retry cả hai có thể tạo vòng lặp, spam endpoint auth
+  hoặc che lỗi phân quyền thật. Xem [Authentication](/docs/http-api-auth/authentication)
+  để thiết kế refresh token.
+</Callout>
+
+### Timeout có ngữ cảnh
+
+HTTP không có một timeout client toàn năng phù hợp cho mọi use case. Tìm kiếm có
+thể hết giá trị sau vài giây, tải báo cáo có thể được phép lâu hơn. Dùng RxJS
+`timeout` tại service hoặc interceptor có context rõ ràng, sau đó chuyển
+`TimeoutError` thành một lỗi ứng dụng có thể thử lại.
+
+```ts
+import { TimeoutError, catchError, throwError, timeout } from 'rxjs';
+
+search(query: string) {
+  return this.http.get<Project[]>('/api/projects/search', { params: { q: query } }).pipe(
+    timeout({ first: 5_000 }),
+    catchError((error: unknown) => {
+      if (error instanceof TimeoutError) {
+        return throwError(() => ({
+          kind: 'network',
+          message: 'Tìm kiếm mất quá nhiều thời gian. Hãy thử lại.',
+        } satisfies AppError));
+      }
+
+      return throwError(() => toAppError(error));
+    }),
+  );
+}
+```
+
+Timeout phía client hủy phần chờ của client; nó không bảo đảm server dừng xử lý.
+Backend vẫn cần timeout, cancellation và giới hạn tài nguyên riêng. Đừng đặt một
+mốc quá ngắn rồi retry: người dùng sẽ thấy dịch vụ chậm biến thành nhiều request
+đồng thời.
+
+### Fallback không được che giấu dữ liệu cũ
+
+Fallback đúng khi sản phẩm vẫn có thể cung cấp giá trị với dữ liệu thay thế và UI
+nói rõ giới hạn. Ví dụ, trang danh mục có thể giữ snapshot cache gần nhất khi
+refresh lỗi, kèm `isStale: true`. Fallback sai khi thay lỗi tải số dư bằng `0` hoặc
+trả `[]` cho lịch sử giao dịch: người dùng có thể đưa ra quyết định dựa trên dữ
+liệu sai.
+
+```ts
+import { Observable, catchError, map, of } from 'rxjs';
+
+interface CachedProjects {
+  projects: Project[];
+  isStale: boolean;
+}
+
+listWithFallback(): Observable<CachedProjects> {
+  return this.http.get<Project[]>('/api/projects').pipe(
+    map((projects) => ({ projects, isStale: false })),
+    catchError((error: unknown) => {
+      const cached = this.projectCache.read();
+      if (cached) return of({ projects: cached, isStale: true });
+      return throwError(() => toAppError(error));
+    }),
+  );
+}
+```
+
+Cache phải có chiến lược invalidation, giới hạn tuổi dữ liệu và ranh giới theo
+người dùng/quyền. Không dùng cache của người A làm fallback cho người B sau khi
+đăng xuất rồi đăng nhập lại.
+
+## UX, observability và bảo mật
+
+### Thông điệp theo ngữ cảnh
+
+Cùng một lỗi kỹ thuật có thể cần UX khác nhau. `GET /projects` lỗi mạng thường
+hiện vùng lỗi có nút “Thử lại”; `POST /project` lỗi mạng có thể giữ form và cho
+người dùng quyết định gửi lại. Toast chỉ phù hợp cho thông tin ngắn, không nên là
+nơi duy nhất chứa lỗi khiến thao tác bị chặn.
+
+| Loại lỗi | UI phù hợp | Hành động tiếp theo |
+| --- | --- | --- |
+| `validation` | Lỗi sát control + tóm tắt đầu form | Focus trường sai đầu tiên, giữ dữ liệu đã nhập. |
+| `domain` | Thông điệp theo use case/dialog | Đề xuất đổi dữ liệu, tải lại hoặc liên hệ quy trình phù hợp. |
+| `network`/`server` khi đọc | Empty/error state tại vùng nội dung | Nút retry rõ ràng. |
+| Lỗi refresh khi có dữ liệu cũ | Banner không chặn | Nói dữ liệu có thể cũ và cho refresh lại. |
+| `unauthenticated` | Điều hướng login sau khi lưu return URL an toàn | Không lặp toast cho mọi request đồng thời. |
+| `forbidden` | Trang hoặc trạng thái không có quyền | Không đăng xuất người dùng. |
+
+Luôn giữ input form khi request thất bại, trừ trường hợp bảo mật yêu cầu xóa như
+mật khẩu sau một luồng login. Vô hiệu hóa nút submit trong lúc gửi để giảm double
+click, nhưng cũng cần trả nút về trạng thái dùng được ở `finalize()` khi request
+lỗi.
+
+### Quan sát mà không lộ bí mật
+
+Một sự kiện lỗi tối thiểu giúp trả lời “endpoint nào lỗi nhiều?”, “lỗi xảy ra sau
+bao lâu?” và “trace nào cần tra ở backend?”. Log có cấu trúc tốt hơn `console.log`
+nguyên object lỗi.
+
+```ts
+interface ErrorTelemetry {
+  track(event: string, properties: Record<string, unknown>): void;
+}
+
+function recordHttpFailure(
+  telemetry: ErrorTelemetry,
+  request: Request,
+  error: AppError,
+  durationMs: number,
+): void {
+  telemetry.track('http_failed', {
+    method: request.method,
+    path: new URL(request.url, location.origin).pathname,
+    errorKind: error.kind,
+    status: 'status' in error ? error.status : undefined,
+    traceId: error.traceId,
+    durationMs,
+  });
+}
+```
+
+Ví dụ chỉ ghi **path**, không ghi full URL vì query string có thể chứa email, mã
+mời hoặc search term nhạy cảm. Cũng không ghi `Authorization`, cookie, access
+/refresh token, body đăng nhập, file upload, response body đầy đủ, hay lỗi gốc
+chưa được redact. Kiểm soát retention, quyền truy cập và sampling cho telemetry;
+log là một kho dữ liệu có rủi ro bảo mật riêng.
+
+Nếu dùng `X-Request-ID` do client tạo, backend cần phản chiếu hoặc liên kết nó
+với trace server. Nếu dùng chuẩn tracing như W3C `traceparent`, hãy dùng SDK đã
+được đánh giá thay vì tự nối chuỗi header. Header custom cross-origin có thể tạo
+CORS preflight, nên đo cả chi phí này.
+
+### Ranh giới bảo mật
+
+Error handling không được trở thành kênh rò rỉ thông tin. Những quy tắc chính:
+
+- Backend không trả stack trace, SQL, tên bảng, đường dẫn file, secret hay chi
+  tiết policy nội bộ trong response production.
+- UI không khác biệt quá chi tiết cho các lỗi xác thực nhạy cảm. Ví dụ login có
+  thể dùng “Email hoặc mật khẩu không đúng” thay vì xác nhận email nào tồn tại.
+- Không coi `401` là bằng chứng chỉ cần đăng nhập lại và không coi `403` là lý do
+  xóa token. Server mới quyết định authentication/authorization.
+- Không đưa `traceId` chứa định danh người dùng hoặc secret vào URL, analytics
+  public hay thông báo copy-paste nếu chính sách không cho phép.
+- Với cookie credential, lỗi CORS/CSRF là vấn đề phối hợp backend-client. Không
+  tắt CSRF protection chỉ để làm hết lỗi trên trình duyệt.
+
+## Kiểm thử các nhánh lỗi
+
+Kiểm thử error handling ở tầng `HttpClient` để xác nhận service nhận đúng error
+contract. `HttpTestingController` có thể mô phỏng HTTP error hoặc transport error.
+Đặt `provideHttpClient()` trước `provideHttpClientTesting()` để testing backend
+ghi đè đúng transport.
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { HttpClient, provideHttpClient } from '@angular/common/http';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
+
+TestBed.configureTestingModule({
+  providers: [provideHttpClient(), provideHttpClientTesting()],
+});
+
+const http = TestBed.inject(HttpClient);
+const controller = TestBed.inject(HttpTestingController);
+
+http.get('/api/projects').subscribe({
+  next: () => fail('Request phải lỗi'),
+  error: (error) => expect(toAppError(error).kind).toBe('validation'),
+});
+
+const request = controller.expectOne('/api/projects');
+request.flush(
+  { code: 'VALIDATION_FAILED', fieldErrors: { name: ['Bắt buộc.'] } },
+  { status: 422, statusText: 'Unprocessable Content' },
+);
+controller.verify();
+```
+
+Với transport error, mô phỏng error event và kiểm tra `status === 0` được map sang
+`network`. Với retry, kiểm tra số request thực tế đến testing backend, request
+`POST` không bị gửi lại và timer/backoff bằng fake timer hoặc test scheduler. Với
+form, kiểm tra lỗi server được merge cùng lỗi client thay vì xóa lỗi có sẵn.
+
+Danh sách ca tối thiểu:
+
+- `status === 0`, `401`, `403`, `404`, `429`, một `5xx` và response lỗi không
+  phải JSON;
+- validation cho field hợp lệ, field lồng nhau và field không tồn tại;
+- một mã domain có UX riêng, ví dụ `VERSION_CONFLICT`;
+- retry giới hạn cho `GET`, không retry mutation, có giới hạn `Retry-After`;
+- nhiều request `401` đồng thời chỉ khởi động một refresh nếu ứng dụng có flow đó;
+- fallback hiển thị nhãn stale và cache không vượt ranh giới user/session;
+- telemetry không chứa token, password, body hoặc full query string.
+
+## Lỗi thường gặp và trade-off
+
+| Sai lầm | Hậu quả | Cách cải thiện |
+| --- | --- | --- |
+| `catchError(() => of([]))` cho mọi list | UI báo “trống” khi thực ra không tải được dữ liệu. | Ném lại `AppError`; chỉ fallback cache khi UI báo `isStale`. |
+| Hiện `error.message`/body trực tiếp | Lộ chi tiết nội bộ hoặc câu chữ không ổn định. | Validate contract, map `code` sang message an toàn. |
+| Retry mọi `4xx`/mọi `POST` | Tăng tải, tạo thao tác trùng hoặc vòng lặp auth. | Chỉ retry lỗi tạm thời và request được chứng minh an toàn. |
+| Xử lý `401` như `403` | Đăng xuất sai hoặc che lỗi quyền. | Tách rõ unauthenticated và forbidden. |
+| Toast trong global interceptor | Nhiều toast giống nhau, không có ngữ cảnh form/màn hình. | Interceptor phát lại lỗi; UI/facade quyết định trình bày. |
+| Chỉ có validation client | Request bị bỏ qua vẫn đưa dữ liệu xấu vào server. | Server validate lại và trả field error có contract. |
+| Log object lỗi nguyên vẹn | Token, query hoặc response nhạy cảm đi vào telemetry. | Allowlist trường metric, redact trước khi gửi. |
+| Timeout ngắn + retry nhiều | Tự tạo áp lực lên server chậm và làm người dùng chờ lâu hơn. | Chọn timeout theo use case, giới hạn attempt, quan sát kết quả. |
+
+Chuẩn hóa lỗi làm giảm sự lặp lại, nhưng có trade-off: một model quá chung có thể
+làm mất chi tiết mà use case cần. Giữ `code`, status và trace ID có kiểm soát; chỉ
+ẩn chi tiết kỹ thuật khỏi UI, không xóa chúng khỏi khả năng chẩn đoán của hệ thống.
+
+## Checklist và tóm tắt
+
+Trước khi đưa một luồng API vào production, kiểm tra:
+
+- [ ] Phân biệt transport (`status === 0`), HTTP status, validation và domain code.
+- [ ] Backend có error contract được tài liệu hóa: `code`, `fieldErrors`, `traceId`
+  và thông điệp an toàn nếu cung cấp.
+- [ ] Client validate runtime tối thiểu trước khi đọc payload lỗi không tin cậy.
+- [ ] API service trả `AppError` có ý nghĩa; UI phân biệt `empty`, `error` và dữ
+  liệu cũ (`stale`).
+- [ ] Retry chỉ áp dụng request an toàn, lỗi tạm thời, có backoff/jitter/giới hạn
+  và tôn trọng `Retry-After` khi phù hợp.
+- [ ] `401` refresh có điều phối một lần; `403` không gây logout hay retry mù.
+- [ ] Form merge lỗi server với lỗi client, giữ input để người dùng sửa.
+- [ ] Telemetry chỉ nhận các trường allowlist, không nhận secret, body hay query
+  nhạy cảm.
+- [ ] Có test cho mạng, HTTP, contract sai, validation, retry, fallback và các
+  luồng xác thực đồng thời.
+
+Tóm lại, xử lý lỗi API là một thiết kế xuyên tầng. Backend trả contract rõ và giữ
+quyết định bảo mật. Interceptor áp dụng chính sách kỹ thuật có giới hạn. API
+service chuẩn hóa lỗi. UI dùng ngữ cảnh để chỉ dẫn người dùng. Khi mỗi tầng chỉ
+làm phần việc của mình, ứng dụng vừa dễ theo dõi khi sự cố xảy ra, vừa tránh biến
+một lỗi tạm thời thành trải nghiệm hoặc rủi ro bảo mật lớn hơn.
+
+<Cards>
+  <Card
+    title="HttpClient"
+    href="/docs/http-api-auth/http-client"
+    description="Cấu hình request, Observable và vòng đời gọi API trong Angular."
+  />
+  <Card
+    title="Interceptors"
+    href="/docs/http-api-auth/interceptors"
+    description="Tổ chức auth, retry và telemetry bằng functional interceptor."
+  />
+  <Card
+    title="Authentication"
+    href="/docs/http-api-auth/authentication"
+    description="Phân biệt 401/403, phiên và refresh credential an toàn."
+  />
+</Cards>

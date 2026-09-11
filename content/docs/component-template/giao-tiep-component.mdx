@@ -1,10 +1,539 @@
 ---
 title: Giao tiếp giữa component
-description: Truyền dữ liệu và sự kiện giữa component cha, con và các nhánh.
+description: Chọn đúng kênh để truyền dữ liệu, phát sự kiện, chia sẻ state và truy cập phần tử con trong Angular.
 ---
 
-Trang này sẽ trình bày **Giao tiếp giữa component** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu">
+  Sau bài này, bạn có thể xác định component nào sở hữu state, truyền dữ liệu xuống bằng input, báo hành động lên bằng output, dùng model input cho liên kết hai chiều có chủ đích, và chỉ đưa state dùng chung vào service khi thật sự cần.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan: dữ liệu phải có chủ sở hữu](#tổng-quan-dữ-liệu-phải-có-chủ-sở-hữu)
+  - [Hướng đi của dữ liệu](#hướng-đi-của-dữ-liệu)
+- [Bản đồ chọn kênh giao tiếp](#bản-đồ-chọn-kênh-giao-tiếp)
+- [Input: đưa dữ liệu từ cha xuống con](#input-đưa-dữ-liệu-từ-cha-xuống-con)
+  - [Input signal hiện đại](#input-signal-hiện-đại)
+  - [Input bắt buộc, alias và dữ liệu bất biến](#input-bắt-buộc-alias-và-dữ-liệu-bất-biến)
+- [Output: để con báo ý định lên cha](#output-để-con-báo-ý-định-lên-cha)
+  - [Luồng input và output hoàn chỉnh](#luồng-input-và-output-hoàn-chỉnh)
+  - [Đặt tên output theo sự kiện](#đặt-tên-output-theo-sự-kiện)
+- [Model input: liên kết hai chiều có kiểm soát](#model-input-liên-kết-hai-chiều-có-kiểm-soát)
+  - [Cơ chế banana-in-a-box](#cơ-chế-banana-in-a-box)
+  - [Khi nào model input phù hợp](#khi-nào-model-input-phù-hợp)
+- [Queries: tham chiếu đến view hoặc projected content](#queries-tham-chiếu-đến-view-hoặc-projected-content)
+  - [View query với viewChild](#view-query-với-viewchild)
+  - [Content query với contentChild](#content-query-với-contentchild)
+  - [Giới hạn của query](#giới-hạn-của-query)
+- [Service và shared state: giao tiếp qua một nguồn chung](#service-và-shared-state-giao-tiếp-qua-một-nguồn-chung)
+  - [Store nhỏ bằng service và signal](#store-nhỏ-bằng-service-và-signal)
+  - [Chọn phạm vi provider](#chọn-phạm-vi-provider)
+- [Chọn cách phù hợp](#chọn-cách-phù-hợp)
+- [Lỗi phổ biến và trade-off](#lỗi-phổ-biến-và-trade-off)
+- [Checklist thiết kế](#checklist-thiết-kế)
+- [Tóm tắt](#tóm-tắt)
+
+## Tổng quan: dữ liệu phải có chủ sở hữu
+
+Giao tiếp component không chỉ là chọn một API. Trước hết, hãy trả lời: **state này thuộc về ai?** State là dữ liệu có thể thay đổi và làm giao diện đổi theo, ví dụ sản phẩm đang được chọn, số lượng trong giỏ, hoặc trạng thái mở của hộp thoại.
+
+Trong một trang sản phẩm, `ProductPageComponent` hiểu giỏ hàng và tổng tiền. Vì vậy trang cha nên sở hữu danh sách sản phẩm đã chọn. `ProductCardComponent` chỉ hiểu cách hiển thị một sản phẩm và hành động người dùng bấm nút. Con nhận dữ liệu để hiển thị, rồi báo lại hành động; nó không tự sửa giỏ của cha.
+
+Cách phân chia này tạo một **nguồn sự thật duy nhất** (single source of truth): mỗi phần dữ liệu quan trọng có một nơi chịu trách nhiệm cập nhật. Khi lỗi xảy ra, bạn biết phải tìm ở đâu thay vì lần theo nhiều bản sao của cùng một giá trị.
+
+### Hướng đi của dữ liệu
+
+Luồng mặc định trong Angular là dữ liệu đi xuống, sự kiện đi lên:
+
+```text
+┌──────────────────────────┐
+│ Component cha            │
+│ sở hữu product và cart   │
+└────────────┬─────────────┘
+             │ [product] — dữ liệu xuống
+             ▼
+┌──────────────────────────┐
+│ ProductCardComponent     │
+│ hiển thị và nhận thao tác│
+└────────────┬─────────────┘
+             │ (added) — ý định lên
+             ▼
+┌──────────────────────────┐
+│ Component cha            │
+│ cập nhật cart rồi render │
+└──────────────────────────┘
+```
+
+Điều này không có nghĩa mọi dữ liệu phải đi qua nhiều tầng cha-con. Khi hai component xa nhau cùng cần một state, service hoặc store có phạm vi phù hợp sẽ là đường đi ngắn hơn. Phần [Service và shared state](#service-và-shared-state-giao-tiếp-qua-một-nguồn-chung) giải quyết trường hợp đó.
+
+<Callout type="idea" title="Quy tắc mặc định">
+  Nếu quan hệ là trực tiếp giữa cha và con, bắt đầu bằng input/output. Chỉ đổi sang model input, query hoặc service khi vấn đề thực tế không còn khớp với luồng một chiều này.
+</Callout>
+
+## Bản đồ chọn kênh giao tiếp
+
+Dùng câu hỏi sau để chọn kênh trước khi viết mã:
+
+| Tình huống | Cách nên dùng | Lý do |
+| --- | --- | --- |
+| Cha cung cấp dữ liệu cấu hình hoặc dữ liệu hiển thị cho con | `input()` | Quyền ghi vẫn ở cha; API của con rõ ràng. |
+| Con cần báo một thao tác rời rạc, như chọn, xóa hoặc lưu | `output()` | Con phát sự kiện, cha quyết định cập nhật state hay không. |
+| Component điều khiển một giá trị có thể sửa, như slider hoặc ô chọn số lượng | `model()` | Liên kết hai chiều ngắn gọn cho một giá trị có chủ đích. |
+| Component cần focus phần tử, gọi một API UI của con, hoặc đọc projected content | `viewChild()` / `contentChild()` | Cần tham chiếu đến phần tử hoặc component đã được Angular tạo. |
+| Hai nhánh xa nhau cùng đọc/ghi cùng một state | service/store được inject | Tránh chuyền input/output qua các component trung gian không liên quan. |
+
+Bảng này là điểm bắt đầu, không phải luật cứng. Ví dụ, một hộp thoại có thể nhận `open` qua input và phát `closed` qua output. Nếu nó là một control tái sử dụng nhỏ, `model()` cho `open` cũng có thể hợp lý. Hãy ưu tiên API làm người đọc thấy rõ ai được phép thay đổi giá trị.
+
+## Input: đưa dữ liệu từ cha xuống con
+
+**Input** là API công khai để component cha gán giá trị cho component con. Với API signal hiện đại, `input()` trả về một `InputSignal`. Component con đọc giá trị bằng cách gọi signal, chẳng hạn `this.product()`.
+
+### Input signal hiện đại
+
+Ví dụ dưới đây tách thẻ sản phẩm khỏi state của trang. `ProductCardComponent` không biết giỏ hàng nằm ở đâu; nó chỉ nhận một `Product` để render.
+
+```ts
+import { Component, input } from '@angular/core';
+
+type Product = {
+  id: number;
+  name: string;
+  price: number;
+};
+
+@Component({
+  selector: 'app-product-card',
+  standalone: true,
+  template: `
+    <article>
+      <h3>{{ product().name }}</h3>
+      <p>{{ product().price }} đ</p>
+    </article>
+  `,
+})
+export class ProductCardComponent {
+  readonly product = input.required<Product>();
+}
+```
+
+Cha truyền giá trị bằng property binding. Tên ở trong ngoặc vuông là tên input công khai; biểu thức ở bên phải được đánh giá trong context của cha.
+
+```ts
+import { Component } from '@angular/core';
+import { ProductCardComponent } from './product-card.component';
+
+@Component({
+  selector: 'app-product-page',
+  standalone: true,
+  imports: [ProductCardComponent],
+  template: `<app-product-card [product]="featuredProduct" />`,
+})
+export class ProductPageComponent {
+  readonly featuredProduct = {
+    id: 1,
+    name: 'Bàn phím cơ',
+    price: 1_290_000,
+  };
+}
+```
+
+Khi `featuredProduct` đổi, Angular cung cấp giá trị mới cho input và template của con đọc lại `product()`. Con không cần tự đồng bộ một bản sao chỉ để hiển thị dữ liệu đó.
+
+### Input bắt buộc, alias và dữ liệu bất biến
+
+`input.required<Product>()` nói rằng nơi sử dụng phải truyền `product`. Đây là lựa chọn tốt khi component không có ý nghĩa nếu thiếu dữ liệu đó. Với giá trị tùy chọn, đặt giá trị mặc định để template luôn có kiểu dữ liệu dự đoán được:
+
+```ts
+readonly compact = input(false);
+readonly pageSize = input(20);
+```
+
+Đôi khi tên TypeScript nên khác tên template để tránh va chạm hoặc giữ tương thích API cũ. Khi đó dùng alias:
+
+```ts
+readonly productId = input.required<number>({ alias: 'id' });
+```
+
+Nơi dùng viết `<app-product-card [id]="featuredProduct.id" />`, còn bên trong con vẫn đọc `this.productId()`.
+
+Input là dữ liệu do cha sở hữu. Đừng sửa trực tiếp object nhận qua input, vì cha và con đang cùng giữ tham chiếu đến object đó:
+
+```ts
+// Không nên: làm thay đổi object mà component cha đang sở hữu.
+this.product().price = 0;
+```
+
+Nếu con cần đề nghị thay đổi, hãy phát output. Nếu con cần state chỉnh sửa tạm thời, hãy tạo state cục bộ riêng và chỉ gửi kết quả khi người dùng xác nhận. Quy tắc này ngăn UI ở nơi khác bị đổi ngầm mà không rõ lệnh cập nhật xuất phát từ đâu.
+
+<Callout type="warn" title="Input không phải bản sao tự động">
+  `input()` giúp Angular theo dõi giá trị input, nhưng không deep-clone object. Khi nhận mảng hoặc object, hãy xem nó là dữ liệu đọc. Muốn tạo giá trị mới, dùng `map`, spread (`{ ...value }`) hoặc để cha cập nhật state của mình.
+</Callout>
+
+Trong mã Angular cũ, bạn có thể gặp `@Input() product!: Product`. Nó vẫn hoạt động. `input()` có lợi thế là giá trị là signal, có kiểu rõ hơn cho input bắt buộc và phù hợp với API signal hiện đại. Trong cùng một ứng dụng, điều quan trọng là giữ quy ước nhất quán và hiểu chiều dữ liệu, không phải thay mọi decorator ngay lập tức.
+
+## Output: để con báo ý định lên cha
+
+**Output** là kênh sự kiện từ con lên nơi sử dụng nó. Output không nên là một lời ra lệnh như “hãy sửa giỏ hàng thế này”. Nó nên mô tả điều vừa xảy ra hoặc ý định của người dùng, chẳng hạn `added`, `removed` hoặc `submitted`. Cha mới là nơi quyết định phản ứng.
+
+### Luồng input và output hoàn chỉnh
+
+Mở rộng `ProductCardComponent`: nút trong con phát sản phẩm vừa được người dùng chọn. Cha lắng nghe `(added)` và cập nhật state giỏ hàng của chính nó.
+
+```ts
+import { Component, input, output, signal } from '@angular/core';
+
+type Product = {
+  id: number;
+  name: string;
+  price: number;
+};
+
+@Component({
+  selector: 'app-product-card',
+  standalone: true,
+  template: `
+    <article>
+      <h3>{{ product().name }}</h3>
+      <button type="button" (click)="addToCart()">Thêm vào giỏ</button>
+    </article>
+  `,
+})
+export class ProductCardComponent {
+  readonly product = input.required<Product>();
+  readonly added = output<Product>();
+
+  addToCart(): void {
+    this.added.emit(this.product());
+  }
+}
+
+@Component({
+  selector: 'app-product-page',
+  standalone: true,
+  imports: [ProductCardComponent],
+  template: `
+    <app-product-card
+      [product]="featuredProduct"
+      (added)="addToCart($event)"
+    />
+
+    <p>Số mặt hàng: {{ cart().length }}</p>
+  `,
+})
+export class ProductPageComponent {
+  readonly featuredProduct: Product = {
+    id: 1,
+    name: 'Bàn phím cơ',
+    price: 1_290_000,
+  };
+  readonly cart = signal<Product[]>([]);
+
+  addToCart(product: Product): void {
+    this.cart.update((items) => [...items, product]);
+  }
+}
+```
+
+Luồng chạy theo thứ tự:
+
+1. Cha truyền `featuredProduct` qua `[product]`.
+2. Con render input bằng `product()`.
+3. Người dùng bấm nút; handler của con gọi `added.emit(...)`.
+4. Binding `(added)` ở cha nhận payload trong `$event`.
+5. Cha cập nhật `cart`; template cha tự render lại số mặt hàng.
+
+Con tái sử dụng được ở một trang khác vì nó không import `CartStore`, không biết tổng tiền và không quyết định chính sách thêm hàng. Một trang khác có thể nghe `(added)` để mở hộp thoại đăng nhập thay vì thêm giỏ.
+
+### Đặt tên output theo sự kiện
+
+Tên output nên là điều đã xảy ra hoặc yêu cầu từ người dùng: `selected`, `deleted`, `saved`, `closed`. Payload nên là dữ liệu tối thiểu mà cha cần để quyết định.
+
+```ts
+readonly selected = output<number>();
+readonly deleted = output<{ id: number; reason: 'user' | 'expired' }>();
+```
+
+Tránh thêm tiền tố `on`, như `onSelected`, vì nơi dùng vốn đã có cú pháp sự kiện: `(selected)="choose($event)"` dễ đọc hơn `(onSelected)="choose($event)"`. Cũng tránh đặt output trùng tên sự kiện DOM phổ biến như `click` hoặc `change`; người đọc sẽ khó biết đó là DOM event hay API của component.
+
+Output không “bubbling” như sự kiện DOM. Một output chỉ được nơi trực tiếp sử dụng component đó lắng nghe. Nếu ông-bà cần biết sự kiện, component cha phải chuyển tiếp có chủ đích hoặc, thường tốt hơn, đặt state ở một service dùng chung phù hợp.
+
+## Model input: liên kết hai chiều có kiểm soát
+
+**Model input** dùng `model()` cho một giá trị mà component con vừa hiển thị vừa được phép thay đổi. Nó phù hợp với component đóng vai trò control, ví dụ bộ chọn số lượng, toggle, date picker hoặc ô tìm kiếm tùy biến.
+
+Khác với input thường, model input là writable signal trong component con. Mỗi khi con gọi `set()` hoặc `update()`, Angular thông báo giá trị mới cho nơi dùng qua output thay đổi tương ứng.
+
+### Cơ chế banana-in-a-box
+
+`QuantityPickerComponent` nhận và thay đổi `quantity`. Cha dùng `[(quantity)]` — còn gọi vui là “banana-in-a-box” — để ghép cả chiều vào lẫn chiều ra.
+
+```ts
+import { Component, model, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-quantity-picker',
+  standalone: true,
+  template: `
+    <button type="button" (click)="decrease()">−</button>
+    <strong>{{ quantity() }}</strong>
+    <button type="button" (click)="increase()">+</button>
+  `,
+})
+export class QuantityPickerComponent {
+  readonly quantity = model.required<number>();
+
+  increase(): void {
+    this.quantity.update((value) => value + 1);
+  }
+
+  decrease(): void {
+    this.quantity.update((value) => Math.max(1, value - 1));
+  }
+}
+
+@Component({
+  selector: 'app-cart-line',
+  standalone: true,
+  imports: [QuantityPickerComponent],
+  template: `
+    <app-quantity-picker [(quantity)]="quantity" />
+    <p>Số lượng đã chọn: {{ quantity() }}</p>
+  `,
+})
+export class CartLineComponent {
+  readonly quantity = signal(1);
+}
+```
+
+Về mặt khái niệm, `[(quantity)]="quantity"` tương đương truyền giá trị vào và xử lý sự kiện `quantityChange` để ghi lại giá trị mới. Với signal của cha, Angular có thể liên kết trực tiếp signal đó với model input. Bạn **không** tự khai báo thêm `output()` tên `quantityChange` cho cùng model; Angular đã tạo cơ chế thay đổi này.
+
+```text
+CartLineComponent                 QuantityPickerComponent
+quantity signal ── [(quantity)] ─► quantity model
+       ▲                                  │
+       └──── giá trị mới khi update() ────┘
+```
+
+### Khi nào model input phù hợp
+
+Dùng model input khi tất cả điều sau đều đúng:
+
+- Giá trị là một phần trạng thái tự nhiên của control, như `checked`, `value` hoặc `quantity`.
+- Con thực sự cần sửa giá trị đó do tương tác của người dùng.
+- API hai chiều giúp nơi dùng ngắn hơn mà vẫn rõ ý nghĩa.
+
+Không dùng `model()` chỉ để giảm số dòng cho mọi input. Với `ProductCardComponent`, “thêm vào giỏ” là một hành động, không phải giá trị hai chiều. `output()` vẫn diễn đạt đúng hơn. Tương tự, một object lớn như `order` thường không nên là model vì không rõ component con được phép sửa trường nào và khi nào.
+
+<Callout type="warn" title="Hai chiều không thay thế thiết kế state">
+  `[(...)]` tiện cho một control nhỏ, nhưng có thể che khuất nơi ghi state nếu dùng dày đặc. Với state quan trọng của trang, hãy giữ hàm cập nhật có tên rõ ràng ở cha hoặc store, ví dụ `addItem`, `removeItem`, `applyCoupon`.
+</Callout>
+
+## Queries: tham chiếu đến view hoặc projected content
+
+**Query** giúp component lấy tham chiếu đến một phần tử DOM, directive hoặc component đã tồn tại trong cây render. Query không phải kênh truyền dữ liệu chính. Nó phù hợp cho thao tác UI mang tính mệnh lệnh nhỏ, chẳng hạn focus ô tìm kiếm, đo kích thước phần tử, hoặc gọi `open()` của một dialog con.
+
+API query hiện đại trả về signal. Vì view và content chỉ tồn tại sau khi Angular render, giá trị query có thể chưa có trong thời điểm khởi tạo component.
+
+### View query với viewChild
+
+`viewChild()` tìm trong **view do chính component khai báo**. Ví dụ, nút “Tìm kiếm” gọi focus trên input cùng template:
+
+```ts
+import { Component, ElementRef, viewChild } from '@angular/core';
+
+@Component({
+  selector: 'app-product-search',
+  standalone: true,
+  template: `
+    <input #searchInput type="search" placeholder="Tìm sản phẩm" />
+    <button type="button" (click)="focusSearch()">Tìm kiếm</button>
+  `,
+})
+export class ProductSearchComponent {
+  readonly searchInput = viewChild.required<ElementRef<HTMLInputElement>>('searchInput');
+
+  focusSearch(): void {
+    this.searchInput().nativeElement.focus();
+  }
+}
+```
+
+`#searchInput` là template reference variable. `viewChild.required(...)` bảo Angular rằng phần tử này phải có mặt; nếu template đổi và không còn nó, lỗi sẽ lộ sớm thay vì trả về `undefined` âm thầm.
+
+Bạn cũng có thể query một component con bằng class của nó, ví dụ `viewChild(ProductSearchComponent)`. Tuy nhiên, gọi nhiều phương thức trên con biến quan hệ cha-con thành phụ thuộc chặt. Nếu mục tiêu là truyền dữ liệu hoặc báo sự kiện, hãy quay lại input/output.
+
+### Content query với contentChild
+
+`contentChild()` tìm trong **nội dung mà nơi dùng chiếu vào** qua `<ng-content />`, không tìm trong template nội bộ. Đây là lựa chọn cho component vỏ, như panel hoặc dialog, cần biết có title được projected hay không.
+
+```ts
+import { Component, contentChild } from '@angular/core';
+import { PanelTitleDirective } from './panel-title.directive';
+
+@Component({
+  selector: 'app-panel',
+  standalone: true,
+  template: `
+    @if (title()) {
+      <header><ng-content select="[panelTitle]" /></header>
+    }
+    <section><ng-content /></section>
+  `,
+})
+export class PanelComponent {
+  readonly title = contentChild(PanelTitleDirective);
+}
+```
+
+Trong ví dụ này, `PanelTitleDirective` đánh dấu phần tử được người dùng đặt vào `<app-panel>`. `title()` có giá trị khi content được chiếu có directive đó. Nếu component cần làm việc với con do **nó tự tạo trong template**, dùng `viewChild()`; nếu cần nhìn nội dung do bên ngoài đưa vào, dùng `contentChild()`.
+
+### Giới hạn của query
+
+- Không đọc query trong field initializer rồi giả định nó đã có giá trị. Hãy đọc nó trong handler chạy sau khi render, trong `effect` phù hợp, hoặc kiểm tra giá trị optional trước khi dùng.
+- Chỉ dùng `ElementRef` cho thao tác DOM không có API Angular thay thế. Việc sửa `innerHTML`, class hoặc style trực tiếp dễ đi ngược với binding và có thể tạo vấn đề bảo mật.
+- Đừng dùng query để cha đọc và sửa state nội bộ của con. Khi đó component con khó tái sử dụng và khó kiểm thử.
+- Query có thể đổi khi nhánh `@if`, `@for` hoặc projected content thay đổi. Vì nó là signal, hãy luôn xử lý trường hợp query optional biến mất.
+
+## Service và shared state: giao tiếp qua một nguồn chung
+
+Input/output hoạt động tốt khi hai component có quan hệ trực tiếp. Nhưng xét `HeaderCartComponent` ở thanh đầu trang và `ProductListComponent` ở nội dung trang: chúng là hai nhánh xa nhau. Nếu chuyền `cart` và `added` qua nhiều component trung gian chỉ để nối hai nhánh, các component trung gian sẽ mang API không thuộc trách nhiệm của chúng.
+
+Khi đó, đưa state chung vào service được inject. Service là một đối tượng do dependency injection quản lý; các component trong cùng phạm vi provider nhận cùng một instance. Service phải là nơi giữ và cập nhật state, thay vì chỉ là một “đường ống” event không có quy tắc.
+
+### Store nhỏ bằng service và signal
+
+Ví dụ `CartStore` giữ state giỏ hàng. Nó chỉ công khai signal đọc `lines` và các phương thức biểu đạt hành động nghiệp vụ. Không component nào được lấy writable signal nội bộ để tự sửa mảng.
+
+```ts
+import { Injectable, signal } from '@angular/core';
+
+type Product = {
+  id: number;
+  name: string;
+  price: number;
+};
+
+type CartLine = {
+  product: Product;
+  quantity: number;
+};
+
+@Injectable({ providedIn: 'root' })
+export class CartStore {
+  private readonly linesState = signal<CartLine[]>([]);
+  readonly lines = this.linesState.asReadonly();
+
+  add(product: Product): void {
+    this.linesState.update((lines) => {
+      const current = lines.find((line) => line.product.id === product.id);
+
+      if (!current) {
+        return [...lines, { product, quantity: 1 }];
+      }
+
+      return lines.map((line) =>
+        line.product.id === product.id
+          ? { ...line, quantity: line.quantity + 1 }
+          : line,
+      );
+    });
+  }
+
+  remove(productId: number): void {
+    this.linesState.update((lines) =>
+      lines.filter((line) => line.product.id !== productId),
+    );
+  }
+}
+```
+
+Cả danh sách sản phẩm lẫn header inject cùng store. Một component phát sinh hành động, component còn lại chỉ đọc state đã cập nhật:
+
+```ts
+import { Component, inject } from '@angular/core';
+import { CartStore } from './cart.store';
+
+@Component({
+  selector: 'app-header-cart',
+  standalone: true,
+  template: `<span>Giỏ hàng: {{ cart.lines().length }}</span>`,
+})
+export class HeaderCartComponent {
+  readonly cart = inject(CartStore);
+}
+```
+
+Đây vẫn là luồng dữ liệu dễ theo dõi: hành động đi vào `CartStore`, store tạo state mới, mọi template đang đọc `lines()` cập nhật. Khác biệt là component không cần có quan hệ cha-con trực tiếp.
+
+### Chọn phạm vi provider
+
+`providedIn: 'root'` tạo một instance dùng chung trong toàn ứng dụng. Đây là lựa chọn hợp lý cho state toàn cục thật sự, như phiên đăng nhập, cấu hình ứng dụng hoặc giỏ hàng tồn tại xuyên các route.
+
+Không phải state dùng chung nào cũng là toàn cục. Một wizard mở ở nhiều tab, một trang admin có bộ lọc riêng, hoặc một dialog có state tạm thời nên có instance riêng cho mỗi vùng. Đặt service vào `providers` của component vỏ để component đó và các component con dùng chung một instance, rồi state tự được hủy khi vỏ bị hủy:
+
+```ts
+@Component({
+  selector: 'app-checkout-shell',
+  standalone: true,
+  providers: [CartStore],
+  template: `<app-checkout-form />`,
+})
+export class CheckoutShellComponent {}
+```
+
+Phạm vi provider là một quyết định kiến trúc. Nếu đặt nhầm ở `root`, state có thể còn lại khi người dùng rời màn hình. Nếu đặt service ở từng component lá, mỗi lá nhận một instance riêng và chúng không còn chia sẻ dữ liệu. Nói ngắn gọn: đặt provider ở tổ tiên gần nhất bao trùm đúng các component cần dùng chung state.
+
+## Chọn cách phù hợp
+
+Trước khi thêm một kênh giao tiếp, đi theo thứ tự này:
+
+1. **Xác định chủ sở hữu state.** State chỉ phục vụ một component thì để local. State là kết quả của màn hình thì thường để ở cha hoặc container. State vượt qua nhiều nhánh thì cân nhắc store.
+2. **Kiểm tra quan hệ trực tiếp.** Cha truyền dữ liệu cho con bằng `input()`. Con báo thao tác bằng `output()`.
+3. **Nhận diện control hai chiều.** Nếu con là control sửa một giá trị rõ ràng, dùng `model()` có thể làm API gọn hơn. Nếu đó là hành động nghiệp vụ, giữ output.
+4. **Chỉ query khi cần tham chiếu render.** Focus, đo DOM và API UI mệnh lệnh là lý do tốt. Dùng query để trao đổi dữ liệu là dấu hiệu API component chưa rõ.
+5. **Nâng lên service khi đường truyền đã quá dài.** Nếu phải chuyển tiếp input/output qua component không dùng chúng, shared state có phạm vi rõ ràng sẽ đơn giản hơn.
+
+<Callout type="idea" title="Một phép thử nhanh">
+  Hãy thử mô tả quan hệ bằng một câu. “Cha cung cấp sản phẩm, con báo sản phẩm được chọn” dẫn đến input/output. “Hai component ở hai nhánh cùng xem giỏ hàng” dẫn đến store. Nếu câu mô tả không rõ, hãy làm rõ quyền sở hữu state trước khi chọn API.
+</Callout>
+
+## Lỗi phổ biến và trade-off
+
+| Lỗi hoặc lựa chọn | Hệ quả | Cách sửa |
+| --- | --- | --- |
+| Con sửa object nhận từ input | State của cha đổi ngầm; nơi khác có thể render sai mà không rõ nguyên nhân. | Phát output và để cha tạo object hoặc mảng mới. |
+| Dùng output như event bus toàn ứng dụng | Phải chuyển tiếp sự kiện qua nhiều tầng; API component bị phình to. | Dùng service/store có phạm vi phù hợp cho state giữa nhánh xa. |
+| Dùng service `root` cho mọi state | State tạm thời tồn tại lâu, test dễ ảnh hưởng lẫn nhau. | Đặt provider ở component vỏ khi state chỉ thuộc một vùng UI. |
+| Dùng `model()` cho object lớn | Không rõ trường nào được phép ghi; thay đổi lan truyền khó lần theo. | Dùng input một chiều và output cho các thao tác có tên rõ ràng. |
+| Dùng `viewChild()` để gọi logic nghiệp vụ của con | Cha phụ thuộc API nội bộ của con; tái sử dụng và test khó hơn. | Thiết kế input/output hoặc tách logic vào service. |
+| Quên trường hợp query chưa tồn tại | Lỗi khi phần tử nằm trong `@if` hoặc content bị thay đổi. | Dùng query optional, kiểm tra giá trị hoặc dùng `.required()` khi template bảo đảm tồn tại. |
+
+Mỗi cách đều có trade-off. Input/output làm luồng rõ nhưng có thể dài nếu component nằm xa. Service giảm “prop drilling” nhưng che quan hệ dữ liệu nếu store quá lớn hoặc có quá nhiều phương thức chung chung. Model input giảm boilerplate nhưng có thể làm quyền ghi khó thấy. Query rất trực tiếp, vì thế cũng dễ tạo coupling nhất.
+
+## Checklist thiết kế
+
+Trước khi hoàn thành một component mới, tự kiểm tra:
+
+- [ ] Tôi biết component hoặc store nào sở hữu mỗi state có thể thay đổi.
+- [ ] Input của component là dữ liệu cấu hình hoặc dữ liệu để render, không phải bản sao state để con tự sửa.
+- [ ] Output mô tả sự kiện hoặc ý định; payload đủ nhỏ và có kiểu rõ ràng.
+- [ ] Tôi chỉ dùng `model()` cho giá trị mà component con được phép thay đổi trực tiếp.
+- [ ] Query chỉ phục vụ tham chiếu DOM/component sau render, không thay input/output.
+- [ ] Service có phạm vi provider đúng với vùng cần chia sẻ state.
+- [ ] State được cập nhật qua hàm có tên rõ ràng, không bị mutate từ nhiều nơi.
+
+Nếu chưa đánh dấu được một mục, đừng thêm API mới ngay. Hãy quay lại câu hỏi “state thuộc về ai?”; câu trả lời thường chỉ ra kênh giao tiếp đơn giản nhất.
+
+## Tóm tắt
+
+- `input()` đưa dữ liệu từ cha xuống con. Con đọc dữ liệu và không tự mutate state của cha.
+- `output()` đưa sự kiện hoặc ý định từ con lên cha. Cha quyết định cập nhật state.
+- `model()` dành cho control có một giá trị hai chiều rõ ràng, không phải thay thế cho mọi output.
+- `viewChild()` đọc view nội bộ; `contentChild()` đọc nội dung được chiếu vào. Cả hai dùng cho tham chiếu render, không phải quản lý state.
+- Service/store giải quyết state giữa các nhánh xa nhau. Phạm vi provider quyết định ai thật sự chia sẻ instance.
+
+<Cards>
+  <Card title="Data binding" href="/docs/component-template/data-binding" description="Ôn lại cú pháp property binding, event binding và two-way binding trong template." />
+  <Card title="Content projection" href="/docs/component-template/content-projection" description="Tìm hiểu cách component nhận nội dung do nơi sử dụng cung cấp qua ng-content." />
+  <Card title="Signals và Zone.js" href="/docs/nen-tang/signals-va-zonejs" description="Hiểu signal, cách cập nhật state và lý do template phản ứng với dữ liệu mới." />
+</Cards>

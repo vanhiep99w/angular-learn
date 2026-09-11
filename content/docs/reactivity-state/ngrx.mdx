@@ -1,10 +1,777 @@
 ---
 title: NgRx
-description: Khi nào cần store tập trung và các khái niệm cốt lõi của NgRx.
+description: Chọn Store hoặc SignalStore, tổ chức state bằng action, reducer, selector, effect và kiểm thử luồng dữ liệu trong Angular.
 ---
 
-Trang này sẽ trình bày **NgRx** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của bài">
+  NgRx là một bộ công cụ quản lý state có quy ước rõ ràng. Bài này giúp bạn quyết định có thật sự cần NgRx không, rồi đi từ luồng Store cổ điển đến SignalStore hiện đại, xử lý bất đồng bộ và kiểm thử từng phần.
 </Callout>
+
+## Mục lục
+
+- [NgRx giải quyết bài toán gì?](#ngrx-giải-quyết-bài-toán-gì)
+  - [State, dữ liệu dẫn xuất và side effect](#state-dữ-liệu-dẫn-xuất-và-side-effect)
+  - [Luồng dữ liệu một chiều](#luồng-dữ-liệu-một-chiều)
+- [Khi nào cần NgRx?](#khi-nào-cần-ngrx)
+  - [Dấu hiệu NgRx tạo giá trị](#dấu-hiệu-ngrx-tạo-giá-trị)
+  - [Khi chưa nên dùng](#khi-chưa-nên-dùng)
+  - [Bảng chọn công cụ](#bảng-chọn-công-cụ)
+- [Hai hướng: Store và SignalStore](#hai-hướng-store-và-signalstore)
+  - [NgRx Store](#ngrx-store)
+  - [NgRx SignalStore](#ngrx-signalstore)
+  - [Chọn theo ranh giới, không theo trào lưu](#chọn-theo-ranh-giới-không-theo-trào-lưu)
+- [Store: các khái niệm cốt lõi](#store-các-khái-niệm-cốt-lõi)
+  - [Action: sự kiện đã xảy ra](#action-sự-kiện-đã-xảy-ra)
+  - [Reducer: chuyển state thuần](#reducer-chuyển-state-thuần)
+  - [Selector: đọc và dẫn xuất](#selector-đọc-và-dẫn-xuất)
+  - [Effect: ranh giới với thế giới bên ngoài](#effect-ranh-giới-với-thế-giới-bên-ngoài)
+- [Ví dụ Store hoàn chỉnh: danh sách công việc](#ví-dụ-store-hoàn-chỉnh-danh-sách-công-việc)
+  - [Mô hình state và actions](#mô-hình-state-và-actions)
+  - [Reducer và feature selector](#reducer-và-feature-selector)
+  - [Selectors dẫn xuất](#selectors-dẫn-xuất)
+  - [Effect tải dữ liệu](#effect-tải-dữ-liệu)
+  - [Đăng ký và dùng trong component](#đăng-ký-và-dùng-trong-component)
+- [Async đúng cách với effects](#async-đúng-cách-với-effects)
+  - [Chọn flattening operator](#chọn-flattening-operator)
+  - [Lỗi, hủy và trạng thái tải](#lỗi-hủy-và-trạng-thái-tải)
+  - [Không phải mọi side effect đều phát action](#không-phải-mọi-side-effect-đều-phát-action)
+- [SignalStore: local store theo Signals](#signalstore-local-store-theo-signals)
+  - [Ví dụ SignalStore](#ví-dụ-signalstore)
+  - [SignalStore và effect](#signalstore-và-effect)
+- [Kiểm thử NgRx](#kiểm-thử-ngrx)
+  - [Reducer và selector](#reducer-và-selector)
+  - [Effect](#effect)
+  - [Component dùng Store](#component-dùng-store)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Biến action thành command mơ hồ](#biến-action-thành-command-mơ-hồ)
+  - [Lưu dữ liệu dẫn xuất hoặc state trùng lặp](#lưu-dữ-liệu-dẫn-xuất-hoặc-state-trùng-lặp)
+  - [Đặt HTTP trong component hoặc reducer](#đặt-http-trong-component-hoặc-reducer)
+  - [Chọn sai concurrency](#chọn-sai-concurrency)
+  - [Dùng global Store cho state ngắn hạn](#dùng-global-store-cho-state-ngắn-hạn)
+  - [Tin rằng bất biến là miễn phí](#tin-rằng-bất-biến-là-miễn-phí)
+- [Checklist quyết định](#checklist-quyết-định)
+- [Tóm tắt](#tóm-tắt)
+
+## NgRx giải quyết bài toán gì?
+
+NgRx cung cấp một cách tổ chức state có **nguồn sự thật rõ ràng**, thay đổi có thể quan sát, và luồng dữ liệu một chiều. Nó đặc biệt hữu ích khi nhiều phần xa nhau của ứng dụng cùng đọc một state, nhiều quy tắc nghiệp vụ cùng ghi state đó, hoặc nhóm cần lần lại nguyên nhân của một thay đổi.
+
+NgRx không làm state tự động trở nên đơn giản. Nó đổi sự tiện tay ban đầu lấy cấu trúc: thay vì component gọi trực tiếp service rồi sửa field, ứng dụng mô tả sự kiện bằng action, tính state kế tiếp bằng reducer, và để effect làm việc với HTTP, router hoặc API trình duyệt.
+
+### State, dữ liệu dẫn xuất và side effect
+
+Trước khi thêm Store, phân loại dữ liệu. Ba loại sau có vòng đời và nơi đặt code khác nhau:
+
+| Loại | Ví dụ danh sách công việc | Nơi phù hợp |
+| --- | --- | --- |
+| State gốc | `tasks`, bộ lọc hiện tại, `status`, lỗi | Store hoặc SignalStore sở hữu feature |
+| Dữ liệu dẫn xuất | công việc đang hiển thị, số việc chưa xong | Selector hoặc `computed`; không lưu bản sao |
+| Side effect | gọi HTTP, ghi URL, analytics, thông báo | Effect hoặc method có ranh giới rõ ràng |
+
+Ví dụ, `visibleTasks` có thể được tính từ `tasks` và `filter`. Nếu vừa lưu `visibleTasks` vừa lưu hai giá trị nguồn, mỗi action đổi filter tạo thêm nghĩa vụ giữ ba giá trị đồng bộ. Selector loại bỏ nghĩa vụ đó.
+
+### Luồng dữ liệu một chiều
+
+Với NgRx Store, UI không sửa state trực tiếp. UI phát một action mô tả điều vừa xảy ra; reducer tạo state mới; selector đưa snapshot phù hợp về cho UI. Nếu action yêu cầu I/O, effect thực hiện I/O và phát action kết quả.
+
+```text
+Người dùng nhấn “Tải lại”
+           │
+           ▼
+ component.dispatch(TasksActions.load())
+           │
+           ├──► reducer cập nhật status = "loading"
+           │              │
+           │              ▼
+           │       selector → UI render loading
+           │
+           ▼
+ effect gọi TasksApi.getAll()
+           │
+     thành công / thất bại
+           ▼
+ TasksActions.loadSuccess(...) / loadFailure(...)
+           │
+           ▼
+ reducer tạo state kế tiếp → selector → UI
+```
+
+Action là nhật ký sự kiện của ứng dụng, không phải một setter vô danh. Nhờ vậy DevTools có thể hiển thị thứ tự thay đổi; reducer có thể kiểm thử mà không cần Angular; effect có điểm tập trung để quy định retry, hủy request và mapping lỗi.
+
+## Khi nào cần NgRx?
+
+Điểm bắt đầu mặc định vẫn là state gần nơi sử dụng: `signal` trong component hoặc service được cung cấp theo feature. Xem [State cục bộ](/docs/reactivity-state/state-cuc-bo) trước khi đưa state lên root. NgRx đáng dùng khi cấu trúc của nó giải quyết một chi phí đang tồn tại, không phải để dự phòng cho một ứng dụng có thể lớn hơn trong tương lai.
+
+### Dấu hiệu NgRx tạo giá trị
+
+NgRx Store thường tạo giá trị khi nhiều dấu hiệu sau xuất hiện cùng lúc:
+
+- Nhiều route hoặc feature xa nhau phải đọc cùng một state có vòng đời dài, như session, giỏ hàng hoặc cache dữ liệu nghiệp vụ.
+- Có nhiều cách hợp lệ để thay đổi state và cần audit rõ: ai đã đổi, bằng action nào, theo thứ tự nào.
+- Dòng bất đồng bộ có điều phối đáng kể: hủy request cũ, chống gửi trùng, optimistic update, retry hoặc phản ứng với action khác.
+- Nhiều lập trình viên cùng sửa một feature. Các action, reducer và selector tạo hợp đồng giao tiếp giữa các phần.
+- Cần DevTools, replay action khi debug, hoặc kiểm thử chuyển state như hàm thuần.
+
+Một ví dụ cụ thể là màn hình đơn hàng: badge giỏ hàng ở header, trang checkout và một dialog khuyến mãi cùng đọc dữ liệu. Nếu thao tác thêm hàng có validation tồn kho, đồng bộ server và telemetry, luồng action rõ ràng thường dễ kiểm soát hơn một service root với nhiều method tự do sửa signal.
+
+### Khi chưa nên dùng
+
+Không dùng NgRx chỉ vì ứng dụng có nhiều component. Các trường hợp sau thường đơn giản hơn với Signals hoặc service cục bộ:
+
+- `isMenuOpen`, giá trị input, tab đang chọn, bước hiện tại của wizard chỉ thuộc một màn hình.
+- State bị hủy khi rời route và không cần chia sẻ ra ngoài feature.
+- Dữ liệu chỉ là kết quả của một HTTP request đơn lẻ, không cần điều phối action hay chia sẻ phức tạp.
+- Nhóm chưa định nghĩa được owner, lifetime và quy tắc ghi của state. Store không thay thế quyết định thiết kế này.
+
+<Callout type="warn" title="Không tối ưu hóa tổ chức quá sớm">
+  Store toàn cục tạo chi phí thật: action, reducer, selector, provider, test và quy ước đặt tên. Nếu một `signal` private cùng vài method đã diễn tả đủ quy tắc của feature, đó thường là lựa chọn tốt hơn.
+</Callout>
+
+### Bảng chọn công cụ
+
+| Nhu cầu chính | Điểm bắt đầu nên chọn | Nâng cấp khi |
+| --- | --- | --- |
+| State rất nhỏ của một component | `signal` trong component | Nhiều component cùng feature cần cùng state |
+| State dùng chung trong một feature | Service Signals hoặc SignalStore | Điều phối action toàn ứng dụng, audit và nhiều feature cùng phụ thuộc |
+| Stream theo thời gian: debounce, WebSocket, hủy | RxJS | Cần lưu snapshot đã chuẩn hóa để nhiều nơi đọc |
+| State dùng chung có quy tắc rõ, DevTools và nhiều side effect | NgRx Store | Chỉ khi phạm vi và chi phí biện minh được |
+
+Signals và RxJS không đối đầu với NgRx. Signal là primitive giữ giá trị hiện tại; RxJS là công cụ diễn tả stream. NgRx Store truyền thống dùng Observable cho luồng đọc/effects, còn SignalStore dùng Signals cho state và vẫn dùng RxJS tại ranh giới async.
+
+## Hai hướng: Store và SignalStore
+
+NgRx có hai cách tiếp cận bổ sung. Chúng không bắt buộc phải thay thế nhau toàn bộ trong một dự án.
+
+### NgRx Store
+
+`@ngrx/store` là Store dựa trên action/reducer/selector. State được quản lý theo cây feature; component phát action bằng `store.dispatch()` và thường đọc selector qua `store.selectSignal()` hoặc Observable `store.select()`.
+
+Nó phù hợp nhất cho state có tính sự kiện cao và được chia sẻ rộng: action là hợp đồng công khai, reducer là lịch sử chuyển state có thể dự đoán, effect là nơi điều phối I/O. Đây là lựa chọn mạnh khi cần trace bằng Redux DevTools hoặc nhiều feature phối hợp qua action.
+
+### NgRx SignalStore
+
+`@ngrx/signals` cung cấp `signalStore` để xây store từ các feature như `withState`, `withComputed`, `withMethods` và `withHooks`. Consumer đọc state qua signal, ví dụ `taskStore.tasks()`. Method của store là API ghi có chủ đích.
+
+SignalStore phù hợp cho state cục bộ hoặc theo feature: ít ceremony hơn action/reducer, tích hợp tự nhiên với template Signals, và vẫn đóng gói ownership. Nó không tự tạo action log/reducer pipeline như Store; nếu cần audit action xuyên ứng dụng, Store vẫn có lợi thế.
+
+### Chọn theo ranh giới, không theo trào lưu
+
+| Tiêu chí | NgRx Store | SignalStore |
+| --- | --- | --- |
+| API ghi | `dispatch(action)` | method, `patchState` |
+| Cách đọc hiện đại | `selectSignal(selector)` | signal trực tiếp |
+| Chuyển state | reducer thuần, action-driven | method của store |
+| Async | `@ngrx/effects` theo stream action | `rxMethod`, service/RxJS hoặc hook có chủ đích |
+| Trace action / DevTools | Mạnh, tự nhiên | Không phải action log tương đương Store |
+| Scope điển hình | shared/global hoặc feature cần event protocol | component/feature có state Signals |
+| Chi phí ceremony | Cao hơn | Thấp hơn |
+
+Không đưa mọi state vào một Store global và cũng không ép mọi feature dùng SignalStore. Một ứng dụng có thể dùng signal cục bộ cho dialog, SignalStore cho trang tìm kiếm và NgRx Store cho session/giỏ hàng. Điều quan trọng là **mỗi dữ liệu có một nguồn sự thật và một owner**.
+
+## Store: các khái niệm cốt lõi
+
+Bốn khái niệm sau tạo nên luồng Store. Chúng có trách nhiệm khác nhau; đặt logic vào sai lớp thường là nguồn của code khó test.
+
+### Action: sự kiện đã xảy ra
+
+Action là object có `type` và payload tùy chọn. Đặt tên theo **sự kiện trong domain hoặc UI**, thường ở thì quá khứ hoặc ngữ cảnh cụ thể, thay vì đặt tên như một method setter chung chung.
+
+```ts
+import { createActionGroup, emptyProps, props } from '@ngrx/store';
+
+export const TasksActions = createActionGroup({
+  source: 'Tasks Page',
+  events: {
+    'Load Tasks': emptyProps(),
+    'Load Tasks Success': props<{ tasks: Task[] }>(),
+    'Load Tasks Failure': props<{ error: string }>(),
+    'Task Toggled': props<{ id: string }>(),
+  },
+});
+```
+
+`source` trả lời action đến từ đâu; event trả lời điều gì đã xảy ra. `createActionGroup` tạo các creator có type an toàn, chẳng hạn `TasksActions.loadTasks()` và `TasksActions.loadTasksSuccess({ tasks })`.
+
+Action không phải nơi gọi HTTP hoặc sửa state. Nó là dữ liệu mô tả sự kiện để reducer và effect phản ứng độc lập.
+
+### Reducer: chuyển state thuần
+
+Reducer nhận state hiện tại và action, sau đó trả về state kế tiếp. Nó phải là hàm thuần: cùng input luôn cho cùng output; không gọi HTTP, không đọc thời gian, không mutate input, không `dispatch` action khác.
+
+```ts
+const initialState: TasksState = {
+  tasks: [],
+  status: 'idle',
+  error: null,
+};
+
+export const tasksReducer = createReducer(
+  initialState,
+  on(TasksActions.loadTasks, (state) => ({
+    ...state,
+    status: 'loading',
+    error: null,
+  })),
+  on(TasksActions.loadTasksSuccess, (state, { tasks }) => ({
+    ...state,
+    tasks,
+    status: 'success',
+  })),
+);
+```
+
+`{ ...state, status: 'loading' }` tạo object ngoài mới. Với array/object lồng nhau, chỉ tạo reference mới trên nhánh đã đổi. Điều này giúp selector và change detection nhận biết thay đổi qua reference, đồng thời giữ state cũ có thể so sánh trong debugger.
+
+### Selector: đọc và dẫn xuất
+
+Selector là hàm thuần chọn một phần state hoặc tính dữ liệu dẫn xuất. `createSelector` memoize kết quả theo input selector: khi input reference không đổi, projector không cần tính lại.
+
+```ts
+export const selectVisibleTasks = createSelector(
+  tasksFeature.selectTasks,
+  tasksFeature.selectFilter,
+  (tasks, filter) =>
+    filter === 'all'
+      ? tasks
+      : tasks.filter((task) => task.done === (filter === 'done')),
+);
+```
+
+Memoization không biến một phép tính đắt thành miễn phí. Nếu reducer luôn tạo array mới dù nội dung không đổi, input selector vẫn đổi reference và projector vẫn chạy. Hãy giữ reducer chính xác trước, rồi mới đo đạc hiệu năng.
+
+Không gọi service, đọc router hay dùng `Date.now()` trong selector. Các input ẩn làm selector không còn thuần và làm kết quả khó cache, khó test.
+
+### Effect: ranh giới với thế giới bên ngoài
+
+Effect lắng nghe stream action và xử lý side effect: HTTP, router navigation, storage, WebSocket hoặc telemetry. Sau đó nó thường map kết quả thành action thành công/thất bại để reducer cập nhật state.
+
+```ts
+loadTasks$ = createEffect(() =>
+  this.actions$.pipe(
+    ofType(TasksActions.loadTasks),
+    switchMap(() =>
+      this.tasksApi.getAll().pipe(
+        map((tasks) => TasksActions.loadTasksSuccess({ tasks })),
+        catchError((error: unknown) =>
+          of(TasksActions.loadTasksFailure({ error: toMessage(error) })),
+        ),
+      ),
+    ),
+  ),
+);
+```
+
+Effect không nên trở thành nơi giữ state bí mật. Nếu effect cần biết state hiện tại để quyết định, kết hợp selector một cách rõ ràng; nếu quyết định là chuyển state đồng bộ, nó thường thuộc reducer. Effect là adapter giữa event nội bộ và thế giới không thuần bên ngoài.
+
+## Ví dụ Store hoàn chỉnh: danh sách công việc
+
+Ví dụ dưới đây đặt một feature `tasks` trong NgRx Store. Mục tiêu không phải sao chép mọi ứng dụng vào Store, mà cho thấy một lát cắt hoàn chỉnh từ sự kiện UI đến HTTP rồi trở về UI.
+
+### Mô hình state và actions
+
+Đầu tiên, định nghĩa kiểu dữ liệu và action trong `tasks.actions.ts`.
+
+```ts
+import { createActionGroup, emptyProps, props } from '@ngrx/store';
+
+export interface Task {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
+export type LoadStatus = 'idle' | 'loading' | 'success' | 'error';
+
+export const TasksActions = createActionGroup({
+  source: 'Tasks Page',
+  events: {
+    'Load Tasks': emptyProps(),
+    'Load Tasks Success': props<{ tasks: Task[] }>(),
+    'Load Tasks Failure': props<{ error: string }>(),
+    'Filter Changed': props<{ filter: 'all' | 'open' | 'done' }>(),
+  },
+});
+```
+
+`filter` là state gốc vì người dùng có thể đổi nó. `visibleTasks` không nằm trong action hay state: nó sẽ được selector dẫn xuất từ `tasks` và `filter`.
+
+### Reducer và feature selector
+
+`createFeature` tạo reducer cùng các selector cơ bản theo tên feature. State được giữ phẳng vừa đủ: `tasks` chứa entity; `status` và `error` mô tả vòng đời tải; `filter` mô tả lựa chọn UI cần chia sẻ trong feature.
+
+```ts
+import { createFeature, createReducer, on } from '@ngrx/store';
+import { TasksActions, type LoadStatus, type Task } from './tasks.actions';
+
+export interface TasksState {
+  tasks: Task[];
+  filter: 'all' | 'open' | 'done';
+  status: LoadStatus;
+  error: string | null;
+}
+
+const initialState: TasksState = {
+  tasks: [],
+  filter: 'all',
+  status: 'idle',
+  error: null,
+};
+
+export const tasksFeature = createFeature({
+  name: 'tasks',
+  reducer: createReducer(
+    initialState,
+    on(TasksActions.loadTasks, (state) => ({
+      ...state,
+      status: 'loading',
+      error: null,
+    })),
+    on(TasksActions.loadTasksSuccess, (state, { tasks }) => ({
+      ...state,
+      tasks,
+      status: 'success',
+    })),
+    on(TasksActions.loadTasksFailure, (state, { error }) => ({
+      ...state,
+      status: 'error',
+      error,
+    })),
+    on(TasksActions.filterChanged, (state, { filter }) => ({
+      ...state,
+      filter,
+    })),
+  ),
+});
+```
+
+Reducer phản ứng với mọi action liên quan đến state này. Việc `loadTasks` xóa `error` là một quy tắc UI có thể kiểm thử: lần tải mới không nên hiển thị lỗi của lần tải cũ trong khi đang chạy.
+
+### Selectors dẫn xuất
+
+`tasksFeature` đã tạo `selectTasks`, `selectFilter`, `selectStatus` và `selectError`. Thêm selector chỉ cho những giá trị mà feature cần dẫn xuất.
+
+```ts
+import { createSelector } from '@ngrx/store';
+import { tasksFeature } from './tasks.reducer';
+
+export const selectVisibleTasks = createSelector(
+  tasksFeature.selectTasks,
+  tasksFeature.selectFilter,
+  (tasks, filter) => {
+    if (filter === 'all') return tasks;
+
+    const done = filter === 'done';
+    return tasks.filter((task) => task.done === done);
+  },
+);
+
+export const selectOpenCount = createSelector(
+  tasksFeature.selectTasks,
+  (tasks) => tasks.filter((task) => !task.done).length,
+);
+```
+
+Nếu UI chỉ cần số công việc mở, nó đọc `selectOpenCount`; không nên tự lọc mảng trong nhiều component. Selector tập trung định nghĩa nghiệp vụ “mở” nghĩa là gì.
+
+### Effect tải dữ liệu
+
+Effect biến action khởi đầu thành action kết quả. `switchMap` được chọn vì người dùng bấm tải lại lần nữa thì request cũ không còn là kết quả mong muốn; subscription cũ được hủy nếu nguồn HTTP hỗ trợ hủy.
+
+```ts
+import { Injectable, inject } from '@angular/core';
+import { Actions, createEffect, ofType } from '@ngrx/effects';
+import { catchError, map, of, switchMap } from 'rxjs';
+import { TasksActions } from './tasks.actions';
+import { TasksApi } from './tasks.api';
+
+function toMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Không thể tải công việc.';
+}
+
+@Injectable()
+export class TasksEffects {
+  private readonly actions$ = inject(Actions);
+  private readonly tasksApi = inject(TasksApi);
+
+  readonly loadTasks$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(TasksActions.loadTasks),
+      switchMap(() =>
+        this.tasksApi.getAll().pipe(
+          map((tasks) => TasksActions.loadTasksSuccess({ tasks })),
+          catchError((error: unknown) =>
+            of(TasksActions.loadTasksFailure({ error: toMessage(error) })),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+```
+
+`catchError` nằm trong inner HTTP Observable. Nếu đặt nó ngoài `switchMap`, một lỗi có thể làm stream effect bên ngoài kết thúc và các action tải tiếp theo không còn được xử lý. Hãy bắt lỗi ở phạm vi request mà bạn muốn phục hồi.
+
+### Đăng ký và dùng trong component
+
+Với standalone Angular, đăng ký Store và Effects trong cấu hình ứng dụng. Feature có thể đăng ký root bằng `provideState`; với lazy route, thường đặt các provider này tại route để lifetime bám theo feature.
+
+```ts
+import { ApplicationConfig } from '@angular/core';
+import { provideEffects } from '@ngrx/effects';
+import { provideStore } from '@ngrx/store';
+import { provideState } from '@ngrx/store';
+import { TasksEffects } from './tasks/tasks.effects';
+import { tasksFeature } from './tasks/tasks.reducer';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideStore(),
+    provideState(tasksFeature),
+    provideEffects(TasksEffects),
+  ],
+};
+```
+
+Component có thể đọc selector như signal bằng `selectSignal`. Đây là điểm giao giữa Store Observable-based và template Signals; component không cần tự `subscribe()` chỉ để render.
+
+```ts
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { Store } from '@ngrx/store';
+import { TasksActions } from './tasks.actions';
+import { tasksFeature } from './tasks.reducer';
+import { selectOpenCount, selectVisibleTasks } from './tasks.selectors';
+
+@Component({
+  selector: 'app-task-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <button type="button" (click)="reload()">Tải lại</button>
+
+    @if (status() === 'loading') {
+      <p>Đang tải…</p>
+    } @else if (error(); as message) {
+      <p role="alert">{{ message }}</p>
+    }
+
+    <p>Còn {{ openCount() }} việc.</p>
+    <ul>
+      @for (task of visibleTasks(); track task.id) {
+        <li>{{ task.title }}</li>
+      }
+    </ul>
+  `,
+})
+export class TaskPageComponent {
+  private readonly store = inject(Store);
+
+  readonly visibleTasks = this.store.selectSignal(selectVisibleTasks);
+  readonly openCount = this.store.selectSignal(selectOpenCount);
+  readonly status = this.store.selectSignal(tasksFeature.selectStatus);
+  readonly error = this.store.selectSignal(tasksFeature.selectError);
+
+  reload(): void {
+    this.store.dispatch(TasksActions.loadTasks());
+  }
+}
+```
+
+Component chỉ biết ý định `loadTasks` và các projection cần render. Nó không cần biết endpoint, mapping lỗi hay cấu trúc đầy đủ của Store.
+
+## Async đúng cách với effects
+
+Effect là một RxJS pipeline. Toán tử flattening quyết định điều gì xảy ra khi action thứ hai đến trước khi công việc đầu tiên xong. Đây là một quy tắc nghiệp vụ, không phải chi tiết cú pháp.
+
+### Chọn flattening operator
+
+| Tình huống | Operator | Khi action mới đến |
+| --- | --- | --- |
+| Tìm kiếm, tải theo route, refresh chỉ cần kết quả mới nhất | `switchMap` | Hủy inner stream cũ, dùng stream mới |
+| Gửi form, tạo đơn hàng; không được bỏ qua thao tác | `concatMap` | Xếp hàng, chạy tuần tự |
+| Lưu nhiều item độc lập, cho phép đồng thời | `mergeMap` | Chạy song song |
+| Nút thanh toán phải khóa khi đang gửi | `exhaustMap` | Bỏ qua action mới đến cho đến khi xong |
+
+Đừng chọn `switchMap` mặc định. Ví dụ “lưu thay đổi” dùng `switchMap` có thể hủy lần lưu đầu khi người dùng bấm lần hai; “đặt hàng” dùng `mergeMap` có thể tạo hai đơn. Hãy viết test cho chính quy tắc concurrency đó.
+
+### Lỗi, hủy và trạng thái tải
+
+State async nên biểu diễn điều UI cần hiển thị, không chỉ giữ `tasks`. Một kiểu `status: 'idle' | 'loading' | 'success' | 'error'` cùng `error: string | null` thường đủ cho một request đơn. Nếu cần dữ liệu cũ vẫn hiển thị trong khi refresh, giữ `tasks` cũ và tách `isRefreshing` hoặc thiết kế trạng thái cụ thể hơn.
+
+Không chuyển mọi lỗi kỹ thuật nguyên văn sang Store. `HttpErrorResponse`, lỗi mạng và lỗi validation có cấu trúc khác nhau. Chuyển chúng thành thông điệp hoặc error model mà UI hiểu, còn log chi tiết có thể đi qua effect/monitoring.
+
+<Callout type="idea" title="Giữ một nguồn sự thật">
+  Không vừa để effect giữ `isLoading` trong field của class, vừa để reducer giữ `status`. Mọi trạng thái mà UI đọc cần nằm trong Store; effect chỉ phát action mô tả tiến trình và kết quả.
+</Callout>
+
+### Không phải mọi side effect đều phát action
+
+Một effect có thể chỉ thực hiện navigation hoặc analytics. Khi effect không tạo action kế tiếp, khai báo `{ dispatch: false }`; nếu quên, NgRx mong một action và có thể báo lỗi runtime.
+
+```ts
+readonly reportLoadFailure$ = createEffect(
+  () =>
+    this.actions$.pipe(
+      ofType(TasksActions.loadTasksFailure),
+      tap(({ error }) => this.analytics.track('tasks_load_failed', { error })),
+    ),
+  { dispatch: false },
+);
+```
+
+Side effect kiểu này vẫn nên phản ứng với action đã có, thay vì để component gọi analytics riêng. Nhờ đó, cùng một sự kiện thất bại có một điểm quan sát nhất quán.
+
+## SignalStore: local store theo Signals
+
+SignalStore phù hợp khi muốn đóng gói state theo feature nhưng không cần action/reducer protocol đầy đủ. Nó sử dụng Signals để đọc state; `withComputed` tạo state dẫn xuất; `withMethods` giới hạn nơi ghi state.
+
+### Ví dụ SignalStore
+
+Ví dụ sau là một store cấp feature cho cùng màn hình tasks. `rxMethod` nhận một Observable pipeline, vì HTTP vẫn là luồng bất đồng bộ cần `switchMap` và xử lý lỗi. `patchState` tạo state kế tiếp cho những field được cập nhật.
+
+```ts
+import { computed, inject } from '@angular/core';
+import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
+import { rxMethod } from '@ngrx/signals/rxjs-interop';
+import { tapResponse } from '@ngrx/operators';
+import { pipe, switchMap, tap } from 'rxjs';
+import { TasksApi } from './tasks.api';
+import type { Task } from './tasks.actions';
+
+type TasksStoreState = {
+  tasks: Task[];
+  filter: 'all' | 'open' | 'done';
+  status: 'idle' | 'loading' | 'success' | 'error';
+  error: string | null;
+};
+
+const initialTasksState: TasksStoreState = {
+  tasks: [],
+  filter: 'all',
+  status: 'idle',
+  error: null,
+};
+
+export const TasksStore = signalStore(
+  withState(initialTasksState),
+  withComputed(({ tasks, filter }) => ({
+    visibleTasks: computed(() => {
+      const currentFilter = filter();
+      const currentTasks = tasks();
+
+      if (currentFilter === 'all') return currentTasks;
+      return currentTasks.filter(
+        (task) => task.done === (currentFilter === 'done'),
+      );
+    }),
+  })),
+  withMethods((store, tasksApi = inject(TasksApi)) => ({
+    setFilter(filter: TasksStoreState['filter']): void {
+      patchState(store, { filter });
+    },
+    load: rxMethod<void>(
+      pipe(
+        tap(() => patchState(store, { status: 'loading', error: null })),
+        switchMap(() =>
+          tasksApi.getAll().pipe(
+            tapResponse({
+              next: (tasks) => patchState(store, { tasks, status: 'success' }),
+              error: () =>
+                patchState(store, {
+                  status: 'error',
+                  error: 'Không thể tải công việc.',
+                }),
+            }),
+          ),
+        ),
+      ),
+    ),
+  })),
+);
+```
+
+Cung cấp `TasksStore` tại component gốc của route/feature nếu state phải bị hủy khi rời trang. Trong component, inject store rồi gọi `taskStore.visibleTasks()` để đọc và `taskStore.load()` để khởi chạy tải. Nếu store được cung cấp root, nó có lifetime ứng dụng; chỉ làm vậy khi đó là chủ đích.
+
+### SignalStore và effect
+
+`@ngrx/effects` được thiết kế quanh stream `Actions` của NgRx Store. SignalStore không có action stream tương đương, nên đừng cố nhét `createEffect` vào SignalStore chỉ để có tên “effect”.
+
+Với SignalStore, dùng `rxMethod` khi cần pipeline RxJS và cập nhật state từ kết quả. Với side effect đơn giản như persist một preference, có thể dùng hook/method có cleanup và ranh giới rõ. Khi cần orchestration giữa nhiều feature bằng action, DevTools action timeline hoặc retry theo action, NgRx Store + Effects là mô hình phù hợp hơn.
+
+## Kiểm thử NgRx
+
+NgRx phân rã logic thành các mảnh có input/output rõ, nên test nhỏ thường có giá trị cao hơn test một luồng lớn duy nhất. Kiểm thử reducer và selector như TypeScript thuần; kiểm thử effect như một Observable; kiểm thử component bằng mock Store ở biên UI.
+
+### Reducer và selector
+
+Reducer không cần TestBed. Đưa state và action vào, rồi khẳng định state mới không mutate state cũ.
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { TasksActions } from './tasks.actions';
+import { tasksFeature } from './tasks.reducer';
+
+describe('tasks reducer', () => {
+  it('đặt trạng thái loading và xóa lỗi cũ', () => {
+    const previous = {
+      tasks: [],
+      filter: 'all' as const,
+      status: 'error' as const,
+      error: 'Mất mạng',
+    };
+
+    const next = tasksFeature.reducer(previous, TasksActions.loadTasks());
+
+    expect(next).toEqual({ ...previous, status: 'loading', error: null });
+    expect(next).not.toBe(previous);
+  });
+});
+```
+
+Với selector, test `projector` để bỏ Store runtime và kiểm tra trực tiếp nghiệp vụ dẫn xuất.
+
+```ts
+import { expect, it } from 'vitest';
+import { selectVisibleTasks } from './tasks.selectors';
+
+it('chỉ trả về công việc đang mở', () => {
+  const tasks = [
+    { id: '1', title: 'A', done: false },
+    { id: '2', title: 'B', done: true },
+  ];
+
+  expect(selectVisibleTasks.projector(tasks, 'open')).toEqual([tasks[0]]);
+});
+```
+
+Không test implementation detail như số lần selector được gọi trừ khi đó là yêu cầu hiệu năng đã đo. Giá trị nghiệp vụ trả ra là contract cần bảo vệ.
+
+### Effect
+
+Effect cần test ba điều: action đầu vào, lời gọi service và action đầu ra. Với test runner có TestBed, dùng `provideMockActions` để cấp action stream và mock API để kiểm soát response.
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { provideMockActions } from '@ngrx/effects/testing';
+import { firstValueFrom, of, Subject } from 'rxjs';
+import { TasksActions } from './tasks.actions';
+import { TasksEffects } from './tasks.effects';
+import { TasksApi } from './tasks.api';
+
+it('phát loadTasksSuccess khi API trả dữ liệu', async () => {
+  const actions$ = new Subject<ReturnType<typeof TasksActions.loadTasks>>();
+  const api = { getAll: () => of([{ id: '1', title: 'Đọc NgRx', done: false }]) };
+
+  TestBed.configureTestingModule({
+    providers: [
+      TasksEffects,
+      provideMockActions(() => actions$),
+      { provide: TasksApi, useValue: api },
+    ],
+  });
+
+  const effects = TestBed.inject(TasksEffects);
+  const result = firstValueFrom(effects.loadTasks$);
+
+  actions$.next(TasksActions.loadTasks());
+
+  await expect(result).resolves.toEqual(
+    TasksActions.loadTasksSuccess({
+      tasks: [{ id: '1', title: 'Đọc NgRx', done: false }],
+    }),
+  );
+});
+```
+
+Test trên dùng `of(...)` đồng bộ để làm rõ contract. Với debounce, retry, timer hoặc nhiều action đan xen, dùng `TestScheduler`/marble test để kiểm soát thời gian ảo; tránh test phụ thuộc `setTimeout` thật.
+
+### Component dùng Store
+
+Component không cần Store thật nếu chỉ cần xác nhận nó render selector và dispatch đúng action. `provideMockStore` cho phép override selector và spy `dispatch`.
+
+```ts
+import { provideMockStore } from '@ngrx/store/testing';
+
+await TestBed.configureTestingModule({
+  imports: [TaskPageComponent],
+  providers: [
+    provideMockStore({
+      selectors: [
+        { selector: selectOpenCount, value: 2 },
+        { selector: selectVisibleTasks, value: [] },
+      ],
+    }),
+  ],
+}).compileComponents();
+```
+
+Chỉ override selector mà component thực sự đọc. Test integration riêng có thể kiểm chứng reducer, effect và component cùng đăng ký đúng, nhưng không thay thế các unit test nhanh ở trên.
+
+## Lỗi thường gặp và trade-off
+
+### Biến action thành command mơ hồ
+
+```ts
+// Mơ hồ: ai đổi gì, vì sự kiện nào?
+setTasks({ tasks });
+
+// Rõ ngữ cảnh hơn
+TasksActions.loadTasksSuccess({ tasks });
+```
+
+Tên action không cần ép theo một quy tắc ngữ pháp duy nhất. Điều cần thiết là đọc DevTools vẫn hiểu được sự kiện, nguồn và payload. `Set Data` không cung cấp thông tin đó.
+
+### Lưu dữ liệu dẫn xuất hoặc state trùng lặp
+
+```ts
+// Tránh giữ cả hai trong state:
+{ tasks, openTasks }
+
+// Giữ nguồn; tính phần dẫn xuất trong selector:
+selectOpenCount(tasks)
+```
+
+Ngoại lệ tồn tại khi dữ liệu dẫn xuất rất đắt, là snapshot được server tính theo thời điểm, hoặc là một domain value có vòng đời độc lập. Khi đó hãy ghi rõ vì sao nó không thể tính lại từ state nguồn. Mặc định vẫn là một nguồn sự thật.
+
+### Đặt HTTP trong component hoặc reducer
+
+Reducer phải thuần; gọi HTTP trong reducer phá vỡ determinism. Component gọi HTTP rồi dispatch success/failure có thể hợp lý ở code rất nhỏ, nhưng khi nhiều nơi cần cùng luồng nó làm chính sách lỗi/cancellation bị phân tán.
+
+Đưa I/O theo action vào effect. Component giữ vai trò chuyển tương tác người dùng thành action; reducer giữ vai trò chuyển state đồng bộ. Ranh giới này làm luồng đọc được từ đầu đến cuối.
+
+### Chọn sai concurrency
+
+Đây là lỗi chức năng, không chỉ lỗi hiệu năng. `mergeMap` cho “Submit payment” có thể gửi hai giao dịch; `exhaustMap` cho nút refresh có thể bỏ qua refresh người dùng mong đợi. Xem bảng operator ở trên, nêu rõ semantics trong tên/test, và kiểm chứng action đến dồn dập.
+
+### Dùng global Store cho state ngắn hạn
+
+Đưa `isPopoverOpen` hoặc draft input dùng một lần vào root Store làm tăng action log và giữ state lâu hơn ý nghĩa của nó. State cục bộ vừa dễ xóa khi component bị hủy vừa giảm coupling giữa feature.
+
+Dùng Store global cho state có consumer và lifetime global thực sự. Nếu hai component gần nhau cần chung dữ liệu, service cấp feature hoặc SignalStore thường là tầng trung gian tốt.
+
+### Tin rằng bất biến là miễn phí
+
+Immutable update tạo allocation và selector dựa vào reference. Với collection lớn, clone toàn bộ array/object cho mỗi ký tự gõ có thể tốn chi phí; normalized entity state hoặc cấu trúc state nhỏ hơn có thể phù hợp hơn.
+
+Tuy nhiên, mutation trực tiếp để “tối ưu” làm mất lịch sử rõ ràng và phá memoization. Hãy đo profile trước, rồi tối ưu mô hình dữ liệu đúng điểm nóng thay vì bỏ quy tắc bất biến toàn hệ thống.
+
+## Checklist quyết định
+
+Trước khi thêm NgRx hoặc một feature Store mới, trả lời lần lượt:
+
+1. State này ai đọc, sống đến khi nào và ai có quyền ghi? Nếu câu trả lời chỉ là một component, bắt đầu với signal cục bộ.
+2. Có nhiều feature xa nhau, nhiều quy tắc ghi hoặc nhu cầu action audit không? Nếu có, NgRx Store là ứng viên mạnh.
+3. Feature cần một store Signals đóng gói nhưng không cần action timeline? Cân nhắc SignalStore cấp feature.
+4. Giá trị nào là nguồn state, giá trị nào có thể là selector/`computed`? Không lưu bản sao nếu có thể dẫn xuất.
+5. I/O, navigation, analytics và timer thuộc ranh giới nào? Với Store, đặt chúng trong effect; với SignalStore, dùng RxJS/rxMethod có chủ đích.
+6. Khi action đến liên tiếp, cần hủy, xếp hàng, chạy song song hay bỏ qua? Chọn `switchMap`, `concatMap`, `mergeMap` hoặc `exhaustMap` theo quy tắc nghiệp vụ.
+7. Có test reducer, selector, effect và component ở đúng tầng chưa? Test behavior, không test chi tiết framework không phải contract.
+
+## Tóm tắt
+
+- NgRx giải quyết chi phí phối hợp của state dùng chung bằng luồng một chiều: **action → reducer/effect → state → selector → UI**.
+- Dùng NgRx Store khi state/action có phạm vi rộng, cần audit, DevTools, nhiều producer hoặc async orchestration. Đừng dùng nó mặc định cho state UI ngắn hạn.
+- Action mô tả sự kiện; reducer là hàm thuần tạo state mới; selector dẫn xuất dữ liệu; effect làm I/O và phát action kết quả.
+- `selectSignal` cho phép component Angular hiện đại đọc selector như Signal. NgRx Store vẫn dùng RxJS khi xử lý action/effect.
+- SignalStore là lựa chọn ít ceremony cho state theo feature dựa trên Signals. Dùng `rxMethod` tại ranh giới async; nó không thay thế action stream của `@ngrx/effects`.
+- Chọn concurrency theo nghiệp vụ, biểu diễn loading/error rõ ràng, và kiểm thử từng tầng độc lập.
+
+Để củng cố nền tảng trước khi thiết kế effect, xem [RxJS căn bản](/docs/reactivity-state/rxjs-can-ban). Khi UI chỉ cần snapshot của stream, xem [Signals và RxJS](/docs/reactivity-state/signals-rxjs).

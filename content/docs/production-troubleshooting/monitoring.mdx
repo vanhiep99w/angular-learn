@@ -1,10 +1,487 @@
 ---
-title: Monitoring
-description: Theo dõi lỗi, hiệu năng phía người dùng và chỉ số vận hành.
+title: Monitoring frontend Angular
+description: Thiết kế observability cho Angular bằng RUM, Web Vitals, lỗi, trace, SLO, cảnh báo và quy trình incident an toàn dữ liệu.
 ---
 
-Trang này sẽ trình bày **Monitoring** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang">
+  Monitoring frontend không chỉ là gửi exception lên một dashboard. Mục tiêu là trả lời nhanh: người dùng nào đang bị ảnh hưởng, hành trình nào hỏng, bản phát hành nào liên quan và cần giảm tác động bằng cách nào.
 </Callout>
+
+## Mục lục
+
+- [Monitoring frontend là gì?](#monitoring-frontend-là-gì)
+  - [Ba trụ cột observability](#ba-trụ-cột-observability)
+  - [Tín hiệu tốt phải trả lời được câu hỏi vận hành](#tín-hiệu-tốt-phải-trả-lời-được-câu-hỏi-vận-hành)
+- [Luồng dữ liệu từ trình duyệt đến incident](#luồng-dữ-liệu-từ-trình-duyệt-đến-incident)
+  - [Ngữ cảnh chung của mọi sự kiện](#ngữ-cảnh-chung-của-mọi-sự-kiện)
+- [RUM và Web Vitals](#rum-và-web-vitals)
+  - [Đo trải nghiệm người dùng thật](#đo-trải-nghiệm-người-dùng-thật)
+  - [Đọc Web Vitals đúng ngữ cảnh](#đọc-web-vitals-đúng-ngữ-cảnh)
+  - [Ví dụ thu thập vital không chặn UI](#ví-dụ-thu-thập-vital-không-chặn-ui)
+- [Thu thập lỗi Angular và lỗi HTTP](#thu-thập-lỗi-angular-và-lỗi-http)
+  - [Phân loại trước khi cảnh báo](#phân-loại-trước-khi-cảnh-báo)
+  - [Ví dụ ErrorHandler và interceptor](#ví-dụ-errorhandler-và-interceptor)
+  - [Source map và stack trace production](#source-map-và-stack-trace-production)
+- [Trace và correlation với backend](#trace-và-correlation-với-backend)
+  - [Khi nào frontend cần trace](#khi-nào-frontend-cần-trace)
+  - [Nối telemetry với release](#nối-telemetry-với-release)
+- [Quyền riêng tư, bảo mật và chi phí](#quyền-riêng-tư-bảo-mật-và-chi-phí)
+  - [Danh sách dữ liệu được phép và bị cấm](#danh-sách-dữ-liệu-được-phép-và-bị-cấm)
+  - [Lấy mẫu và giữ dữ liệu](#lấy-mẫu-và-giữ-dữ-liệu)
+- [SLO, dashboard và alert có thể hành động](#slo-dashboard-và-alert-có-thể-hành-động)
+  - [Từ mục tiêu người dùng đến SLO](#từ-mục-tiêu-người-dùng-đến-slo)
+  - [Thiết kế alert không gây mệt mỏi](#thiết-kế-alert-không-gây-mệt-mỏi)
+- [Vận hành incident theo tín hiệu](#vận-hành-incident-theo-tín-hiệu)
+  - [Runbook cho cảnh báo regression sau release](#runbook-cho-cảnh-báo-regression-sau-release)
+  - [Ví dụ điều tra luồng thanh toán](#ví-dụ-điều-tra-luồng-thanh-toán)
+- [Lỗi phổ biến và trade-off](#lỗi-phổ-biến-và-trade-off)
+- [Checklist triển khai](#checklist-triển-khai)
+- [Tóm tắt](#tóm-tắt)
+
+## Monitoring frontend là gì?
+
+**Monitoring frontend** là việc đo và liên kết các tín hiệu phát sinh khi ứng dụng Angular chạy trên trình duyệt thật. Nó khác với việc chỉ xem server log: frontend nhìn thấy lỗi render, lỗi JavaScript, mạng người dùng, trình duyệt, route, tương tác và thời điểm người dùng cảm nhận trang chậm.
+
+Một dashboard chỉ hữu ích khi biến tín hiệu thành quyết định. Chẳng hạn, “`checkout` có lỗi” còn mơ hồ; “tỷ lệ phiên không hoàn tất thanh toán tăng từ `0,7%` lên `8,4%` trên release `web-2026.09.11.3`, tập trung ở `POST /orders` trả `502`” cho đội trực ca điểm bắt đầu điều tra rõ ràng.
+
+### Ba trụ cột observability
+
+Trong frontend, ba trụ cột thường bổ sung cho nhau:
+
+| Trụ cột | Dữ liệu trả lời | Ví dụ Angular | Điểm yếu nếu đứng một mình |
+| --- | --- | --- | --- |
+| **Metrics** (chỉ số có thể tổng hợp) | Có bao nhiêu, chậm bao lâu, xu hướng ra sao? | tỷ lệ route load lỗi, p75 LCP, số lần `HttpErrorResponse` theo endpoint | Biết có vấn đề nhưng thường không biết một phiên cụ thể đã đi qua đâu. |
+| **Logs/events** (sự kiện rời rạc) | Điều gì đã xảy ra trong ngữ cảnh nào? | `checkout_submit_failed`, lỗi template đã chuẩn hóa, feature flag đang bật | Quá nhiều trường hoặc log tự do làm chi phí và nhiễu tăng nhanh. |
+| **Traces** (chuỗi thao tác có liên hệ) | Một hành trình đã qua những bước và dịch vụ nào? | route `checkout` → `POST /orders` → payment API | Lấy mẫu thấp có thể bỏ lỡ ca hiếm; tự tạo trace ID sai có thể làm đứt chuỗi backend. |
+
+**RUM** (Real User Monitoring) là lớp thu thập ba loại tín hiệu này từ người dùng thật. RUM không thay thế synthetic test hay E2E. Synthetic test kiểm tra một kịch bản đã biết trong môi trường kiểm soát; RUM cho biết trình duyệt, mạng và dữ liệu thật ngoài production đang diễn ra thế nào.
+
+### Tín hiệu tốt phải trả lời được câu hỏi vận hành
+
+Trước khi thêm SDK monitoring, viết từng câu hỏi đội cần trả lời. Với mỗi câu hỏi, chọn tín hiệu tối thiểu và chủ sở hữu xử lý.
+
+| Câu hỏi | Tín hiệu tối thiểu | Phân nhóm cần có | Quyết định có thể đưa ra |
+| --- | --- | --- | --- |
+| Release mới có làm hỏng luồng đăng nhập không? | tỷ lệ thất bại `login_submit` | `release`, `route`, mã lỗi domain | dừng rollout hoặc rollback release |
+| Người dùng thấy trang chi tiết chậm ở đâu? | LCP, thời gian API, thời gian route-ready | loại thiết bị, mạng, route, release | tối ưu ảnh, API hoặc bundle đúng chỗ |
+| `500` có phải lỗi frontend không? | HTTP status, trace ID, request duration | endpoint đã chuẩn hóa, backend service, release | chuyển điều tra sang dịch vụ sở hữu API |
+| Alert có còn tác động không? | error budget, số phiên bị chặn, mốc thời gian | hành trình, vùng, release | đóng incident hoặc tiếp tục giảm tác động |
+
+<Callout type="idea" title="Bắt đầu hẹp">
+  Hãy chọn một hành trình có giá trị cao, ví dụ đăng nhập hoặc tạo đơn. Theo dõi một lỗi JavaScript, một lỗi HTTP, một custom event thành công/thất bại và một chỉ số trải nghiệm của hành trình đó trước. Chỉ mở rộng khi đội đã dùng được các tín hiệu này trong một lần điều tra thật hoặc diễn tập.
+</Callout>
+
+## Luồng dữ liệu từ trình duyệt đến incident
+
+Mỗi sự kiện nên mang ngữ cảnh chung nhưng không mang dữ liệu người dùng thô. Trình duyệt đẩy event bất đồng bộ; collector xác thực và lọc; nền tảng observability tổng hợp thành dashboard, truy vấn và alert. Người trực ca dùng release, route và trace để kiểm chứng giả thuyết, thay vì coi alert là kết luận.
+
+```text
+Người dùng trên browser
+        │ route, vital, error, event, trace context
+        ▼
+┌─────────────────────┐     batch / beacon     ┌──────────────────────┐
+│ Angular telemetry   │ ─────────────────────► │ Collector / SDK      │
+│ lọc và gắn context  │                        │ rate limit, scrub    │
+└──────────┬──────────┘                        └──────────┬───────────┘
+           │                                              │
+           │ release ID, route, trace ID                  ▼
+           │                                   ┌──────────────────────┐
+           └─────────────────────────────────► │ Metrics / logs/traces│
+                                               │ dashboard + alert    │
+                                               └──────────┬───────────┘
+                                                          │ alert có link
+                                                          ▼
+                                               ┌──────────────────────┐
+                                               │ On-call: xác nhận,   │
+                                               │giảm tác động, học lại│
+                                               └──────────────────────┘
+```
+
+### Ngữ cảnh chung của mọi sự kiện
+
+Dùng một schema ổn định. Một trường luôn có cùng nghĩa; không nhét JSON tùy ý vào `message`. Các tên dưới đây mang tính minh họa, cần map sang quy ước của nền tảng đang dùng.
+
+| Trường | Mục đích | Ví dụ an toàn | Không gửi |
+| --- | --- | --- | --- |
+| `release` | So sánh trước/sau deploy | `web-2026.09.11.3` hoặc commit rút gọn | branch name chứa tên ticket nhạy cảm nếu không cần |
+| `environment` | Tách production, staging | `production` | URL có query string thô |
+| `route_template` | Gom nhóm route | `/orders/:id` | `/orders/847293?email=...` |
+| `event_name` | Đếm hành vi/domain event | `checkout_submit_failed` | thông điệp lỗi tự do từ server |
+| `error_kind` | Gom nhóm lỗi | `http_5xx`, `unhandled_exception` | cả stack trace làm nhãn metric |
+| `trace_id` | Liên kết tới trace đã tồn tại | ID do tracer/collector cấp | session replay hoặc định danh cá nhân |
+| `sampled` | Hiểu tính đại diện dữ liệu | `true` hoặc `false` | — |
+
+`route_template` cần lấy từ định nghĩa route hoặc cơ chế normalize đáng tin cậy. Gửi `router.url` nguyên vẹn thường làm cardinality tăng vô hạn vì mỗi ID và query tạo một nhãn mới; đồng thời có thể lộ PII (personally identifiable information, dữ liệu định danh cá nhân).
+
+## RUM và Web Vitals
+
+### Đo trải nghiệm người dùng thật
+
+RUM nên trả lời hai lớp câu hỏi:
+
+1. **Tải trang có usable không?** Dùng Core Web Vitals và lỗi tải tài nguyên để thấy trang có hiển thị nội dung, phản hồi tương tác và ổn định bố cục hay không.
+2. **Hành trình nghiệp vụ có hoàn tất không?** Dùng event có chủ đích, ví dụ `checkout_started`, `checkout_submit_succeeded` và `checkout_submit_failed`. Web Vital tốt không chứng minh thanh toán đã chạy thành công.
+
+Không đo mọi click. Một event đáng gửi đại diện cho trạng thái nghiệp vụ hoặc mốc người dùng cảm nhận được: submit đơn, kết quả xác thực, route đã sẵn sàng, hoặc trạng thái lỗi không thể tiếp tục.
+
+### Đọc Web Vitals đúng ngữ cảnh
+
+| Chỉ số | Diễn giải ngắn | Ví dụ điều tra khi xấu | Cảnh báo khi diễn giải |
+| --- | --- | --- | --- |
+| **LCP** (Largest Contentful Paint) | Thời gian nội dung lớn nhất xuất hiện. | ảnh hero, font, TTFB, API chặn render, bundle lớn | LCP không tự chứng minh Angular render chậm. |
+| **INP** (Interaction to Next Paint) | Độ trễ từ tương tác đến lần vẽ phản hồi tiếp theo. | handler click nặng, change detection, main thread bị block | Chỉ nhìn trung bình sẽ che các tương tác rất chậm. Dùng percentile. |
+| **CLS** (Cumulative Layout Shift) | Mức bố cục dịch chuyển bất ngờ. | ảnh không có kích thước, banner chèn muộn, font swap | Shift do thao tác người dùng thường không cùng ý nghĩa với shift bất ngờ. |
+| **FCP** (First Contentful Paint) | Lần đầu người dùng thấy nội dung. | CSS, response HTML, JavaScript khởi tạo | FCP sớm không có nghĩa màn hình đã dùng được. |
+| **TTFB** (Time to First Byte) | Thời gian nhận byte đầu tiên của response. | CDN, SSR, server origin, mạng | Đây là tín hiệu biên frontend/backend, không quy kết ngay cho UI. |
+
+Phân tích theo percentile thay vì chỉ average. Ví dụ p75 LCP là giá trị mà 75% mẫu bằng hoặc thấp hơn; nó giúp đội thấy trải nghiệm của đa số thay vì bị vài phiên rất nhanh che mất. Luôn so sánh cùng route, release, loại thiết bị và khoảng thời gian đủ lưu lượng.
+
+### Ví dụ thu thập vital không chặn UI
+
+Thư viện RUM hoặc vendor SDK thường đã thu Web Vitals, có batching và sampling. Nếu tự tích hợp, callback chỉ chuẩn hóa dữ liệu rồi chuyển cho một gateway telemetry; không gọi API chậm trực tiếp trong callback.
+
+```ts
+// telemetry.service.ts
+import { Injectable } from '@angular/core';
+
+export interface TelemetryEvent {
+  name: string;
+  value?: number;
+  routeTemplate?: string;
+  release: string;
+  attributes?: Record<string, string | number | boolean>;
+}
+
+@Injectable({ providedIn: 'root' })
+export class TelemetryService {
+  private readonly release = 'web-2026.09.11.3';
+
+  track(event: TelemetryEvent): void {
+    const safeEvent = {
+      ...event,
+      release: this.release,
+      attributes: this.scrub(event.attributes),
+    };
+
+    // Thay bằng SDK/collector đã được đội phê duyệt.
+    // SDK nên batch, retry có giới hạn và không làm hỏng UI khi gửi thất bại.
+    navigator.sendBeacon('/telemetry', JSON.stringify(safeEvent));
+  }
+
+  private scrub(attributes: TelemetryEvent['attributes']) {
+    if (!attributes) return undefined;
+
+    return Object.fromEntries(
+      Object.entries(attributes).filter(([key]) =>
+        ['route', 'status', 'network_type', 'feature_enabled'].includes(key),
+      ),
+    );
+  }
+}
+```
+
+Ví dụ khi thư viện Web Vitals báo LCP, chỉ gửi giá trị, route template và release:
+
+```ts
+// Ví dụ callback; API cụ thể phụ thuộc thư viện RUM/Web Vitals đang dùng.
+onLCP((metric: { value: number }) => {
+  telemetry.track({
+    name: 'web_vital_lcp',
+    value: metric.value,
+    routeTemplate: '/products/:id',
+    release: 'ignored-by-service',
+  });
+});
+```
+
+<Callout type="warn" title="Đừng gửi trực tiếp URL hoặc element selector">
+  URL có query và selector DOM có thể chứa ID, email hoặc text người dùng. Nếu cần debug LCP element, dùng một nhãn đã allowlist như `product_hero_image`; không gửi HTML, nội dung field hoặc URL thô.
+</Callout>
+
+## Thu thập lỗi Angular và lỗi HTTP
+
+### Phân loại trước khi cảnh báo
+
+Một exception không phải lúc nào cũng là incident. Phân loại sớm giúp dashboard và alert không bị ngập:
+
+| Loại | Ví dụ | Có gửi error event? | Hành động mặc định |
+| --- | --- | --- | --- |
+| Lỗi chưa xử lý | lỗi template, promise bị reject, `TypeError` không được bắt | Có, theo fingerprint đã scrub | đánh giá tỷ lệ phiên và release |
+| Lỗi HTTP kỳ vọng | form báo `400` validation, `401` dẫn về đăng nhập | Có metric/domain event, thường không cần alert exception | theo dõi nếu tăng bất thường |
+| Lỗi HTTP không kỳ vọng | `5xx`, timeout, response sai shape | Có, kèm endpoint template và trace context | kiểm tra backend/CDN/release |
+| Lỗi người dùng hủy | đóng dialog, hủy upload có chủ đích | Thường không | không làm bẩn tỷ lệ lỗi |
+| Resource load failure | chunk script, font hoặc ảnh quan trọng tải thất bại | Có, đã bỏ query string | kiểm tra CDN, cache và deploy |
+
+Đặt fingerprint để gom các lỗi cùng nguyên nhân. Ví dụ fingerprint cho lỗi HTTP có thể là `http:POST:/api/orders:502`, không phải nguyên message server. Tuy nhiên, đừng biến mỗi mã đơn hàng hoặc URL có ID thành fingerprint mới.
+
+### Ví dụ ErrorHandler và interceptor
+
+`ErrorHandler` là một điểm chặn lỗi Angular. Nó không thay thế `try/catch` cho lỗi có thể phục hồi trong luồng nghiệp vụ. Component vẫn phải hiển thị validation, empty state và lỗi API mong đợi một cách rõ ràng.
+
+```ts
+// app-error-handler.ts
+import { ErrorHandler, Injectable } from '@angular/core';
+import { TelemetryService } from './telemetry.service';
+
+@Injectable()
+export class AppErrorHandler implements ErrorHandler {
+  constructor(private readonly telemetry: TelemetryService) {}
+
+  handleError(error: unknown): void {
+    const normalized = this.normalize(error);
+
+    this.telemetry.track({
+      name: 'unhandled_exception',
+      release: 'ignored-by-service',
+      attributes: {
+        error_name: normalized.name,
+        // Chỉ gửi message đã chuẩn hóa; không gửi object lỗi thô.
+        error_code: normalized.code,
+      },
+    });
+
+    // Giữ console trong development để debug local; production có thể dùng policy riêng.
+    console.error(error);
+  }
+
+  private normalize(error: unknown): { name: string; code: string } {
+    if (error instanceof Error) {
+      return { name: error.name, code: 'javascript_error' };
+    }
+    return { name: 'UnknownError', code: 'unknown_error' };
+  }
+}
+```
+
+Đăng ký handler khi bootstrap:
+
+```ts
+// app.config.ts
+import { ApplicationConfig, ErrorHandler } from '@angular/core';
+import { AppErrorHandler } from './app-error-handler';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    { provide: ErrorHandler, useClass: AppErrorHandler },
+  ],
+};
+```
+
+Với HTTP, interceptor nên đo request không thành công và vẫn trả lỗi về caller. Đừng nuốt lỗi để “dashboard đẹp hơn”; UI cần biết request thất bại để chuyển sang trạng thái phù hợp.
+
+```ts
+// telemetry.interceptor.ts
+import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
+import { inject } from '@angular/core';
+import { catchError, throwError } from 'rxjs';
+import { TelemetryService } from './telemetry.service';
+
+export const telemetryInterceptor: HttpInterceptorFn = (request, next) => {
+  const telemetry = inject(TelemetryService);
+  const startedAt = performance.now();
+
+  return next(request).pipe(
+    catchError((error: unknown) => {
+      if (error instanceof HttpErrorResponse) {
+        telemetry.track({
+          name: 'http_request_failed',
+          release: 'ignored-by-service',
+          attributes: {
+            method: request.method,
+            status: error.status,
+            // Chuẩn hóa theo endpoint template; không dùng request.urlWithParams.
+            endpoint: '/api/orders',
+            duration_ms: Math.round(performance.now() - startedAt),
+          },
+        });
+      }
+
+      return throwError(() => error);
+    }),
+  );
+};
+```
+
+Ví dụ này minh họa contract, không phải một hàm normalize URL hoàn chỉnh. Trong ứng dụng thật, tạo mapping endpoint tập trung hoặc để gateway/tracer chuẩn hóa. Một regex chung chung rất dễ nhóm sai endpoint hoặc vô tình giữ query nhạy cảm.
+
+### Source map và stack trace production
+
+Source map nối stack trace của bundle đã minify về file TypeScript và dòng mã có nghĩa. Để dùng an toàn:
+
+1. Build mỗi artefact với release/commit rõ ràng.
+2. Upload source map đúng release vào nền tảng error reporting trong CI.
+3. Không public source map nếu chính sách bảo mật của tổ chức không cho phép; gửi riêng tới vendor hoặc kho lỗi có kiểm soát truy cập.
+4. Xác nhận một lỗi thử ở staging được resolve về đúng commit trước khi dựa vào nó khi incident.
+
+<Callout type="error" title="Không dùng source map sai release">
+  Stack trace được resolve bằng source map của release khác có thể chỉ vào dòng mã sai. Nếu không chứng minh được artefact và release khớp nhau, ghi nhận stack trace là bằng chứng không đáng tin thay vì hotfix theo nó.
+</Callout>
+
+## Trace và correlation với backend
+
+### Khi nào frontend cần trace
+
+Metrics cho biết `POST /orders` có lỗi, nhưng trace cho thấy request đã dừng ở gateway, inventory hay payment. Trace đặc biệt có giá trị cho hành trình đi qua nhiều dịch vụ hoặc khi lỗi chỉ xảy ra theo một chuỗi thời gian.
+
+Ưu tiên dùng chuẩn hoặc SDK hiện có, chẳng hạn propagation context qua header do tracer quản lý. Frontend không nên tự tạo `traceparent` bằng chuỗi ngẫu nhiên nếu backend đang dùng OpenTelemetry hay một vendor khác. Hai đầu phải thống nhất format, sampling và CORS allowlist cho header.
+
+| Nhu cầu | Correlation tối thiểu | Lưu ý |
+| --- | --- | --- |
+| Ghép lỗi browser với request API | `trace_id` hoặc request ID do backend trả về | Chỉ cho phép header trên API tin cậy; không phát tán tới third-party. |
+| Ghép sự cố với deploy | `release` trên event, error và trace resource | Một release ID phải xác định được artefact bất biến. |
+| Theo dõi luồng dài | trace/span do SDK tạo | Sampling có thể bỏ trace; metrics vẫn là nguồn xu hướng. |
+| Hỗ trợ người dùng | incident ID hoặc correlation ID đã scrub | Không dùng email, token hay số đơn hàng làm ID correlation. |
+
+### Nối telemetry với release
+
+Release correlation biến một biểu đồ “error rate tăng” thành giả thuyết có thể kiểm tra. Khi deploy, pipeline cần công bố cùng một `release` cho bundle, source map và nền tảng observability. Telemetry client đọc release từ build-time constant hoặc runtime config đã kiểm soát, không lấy từ input người dùng.
+
+Một dashboard release tối thiểu nên hiển thị:
+
+- Thời điểm deploy, release hiện tại và release trước đó.
+- Error rate và số phiên bị ảnh hưởng theo `release` và `route_template`.
+- p75 LCP/INP của các route trọng yếu trước và sau deploy.
+- Tỷ lệ thành công của custom event, ví dụ `checkout_submit_succeeded / checkout_submit_started`.
+- Link từ alert đến truy vấn lỗi, trace liên quan, dashboard backend và hướng rollback.
+
+Release correlation không chứng minh nhân quả. Nếu error rate tăng sau deploy, cần kiểm tra đồng thời sự kiện backend, CDN, feature flag và phân bố browser. Tuy vậy, nó thu hẹp phạm vi điều tra đủ nhanh để đội giảm tác động trước.
+
+## Quyền riêng tư, bảo mật và chi phí
+
+### Danh sách dữ liệu được phép và bị cấm
+
+Telemetry là một luồng dữ liệu production. Áp dụng data minimization: chỉ thu trường thật sự cần để trả lời câu hỏi vận hành, giảm ngay từ browser và scrub lại ở collector.
+
+| Có thể thu khi đã được đội phê duyệt | Không thu trong telemetry frontend |
+| --- | --- |
+| release, môi trường, route template, mã HTTP, loại browser tổng quát | access token, refresh token, cookie, header `Authorization` |
+| thời lượng, Web Vitals, loại kết nối tổng quát | mật khẩu, OTP, nội dung form, body request/response thô |
+| lỗi đã fingerprint, stack trace đã scrub theo policy | email, số điện thoại, địa chỉ, số thẻ, định danh tài khoản |
+| feature flag dạng boolean, trace ID không định danh | URL query thô, DOM snapshot, replay màn hình khi chưa có consent/policy |
+
+Nếu sản phẩm cần session replay, legal basis, consent, vùng dữ liệu, giới hạn che mask và quyền truy cập phải được xác nhận trước. “Chỉ dùng để debug” không làm dữ liệu nhạy cảm trở nên an toàn. Với replay, mặc định mask mọi text/input rồi mở tối thiểu theo allowlist thường an toàn hơn cách thu tất cả rồi hứa sẽ lọc sau.
+
+<Callout type="warn" title="Scrub ở hai lớp">
+  Client có thể bị sửa, lỗi hoặc chạy phiên bản cũ. Vì vậy collector/backend phải tiếp tục reject key cấm, truncate payload, giới hạn kích thước và rate limit, ngay cả khi Angular service đã lọc dữ liệu.
+</Callout>
+
+### Lấy mẫu và giữ dữ liệu
+
+Sampling giảm chi phí và ảnh hưởng hiệu năng, nhưng cũng làm dữ liệu ít đầy đủ hơn. Một policy thường dùng là giữ 100% error nghiêm trọng đã scrub, lấy mẫu một phần RUM bình thường, và giữ trace chậm hoặc trace lỗi với tỷ lệ cao hơn trace thành công.
+
+| Quyết định | Lợi ích | Đổi lại | Hàng rào cần có |
+| --- | --- | --- | --- |
+| Lấy mẫu RUM theo tỷ lệ | giảm ingest và network | mẫu nhỏ có thể nhiễu ở route ít traffic | hiển thị sample rate; không alert trên mẫu quá nhỏ |
+| Giữ toàn bộ error fingerprint mới | phát hiện regression sớm | burst lỗi có thể tăng chi phí | quota, rate limit và deduplication |
+| Giữ trace lỗi lâu hơn | điều tra nguyên nhân tốt hơn | tăng dữ liệu liên kết | retention rõ ràng, access control |
+| Gửi bằng `sendBeacon` khi pagehide | ít mất event lúc đóng trang | payload có giới hạn, không bảo đảm tuyệt đối | batch nhỏ; không dùng để gửi dữ liệu bắt buộc |
+
+Đặt ngân sách cho telemetry: kích thước payload, số event mỗi phiên, tỷ lệ sampling, retention và chi phí theo release. Chính telemetry không được làm INP xấu hoặc tạo request storm khi backend đang lỗi.
+
+## SLO, dashboard và alert có thể hành động
+
+### Từ mục tiêu người dùng đến SLO
+
+**SLI** (Service Level Indicator) là phép đo, ví dụ tỷ lệ phiên hoàn tất thanh toán. **SLO** (Service Level Objective) là mục tiêu cho SLI trong khoảng thời gian, ví dụ `99,5%` phiên bắt đầu thanh toán hoàn tất trong 28 ngày. Error budget là phần không đạt mục tiêu được chấp nhận; với SLO `99,5%`, ngân sách lỗi là `0,5%`.
+
+Frontend SLO nên mô tả trải nghiệm hoặc outcome người dùng, không chỉ mô tả “SDK gửi event thành công”. Một bộ khởi đầu thực tế:
+
+| Hành trình | SLI | Mục tiêu ví dụ | Cách đo | Chủ sở hữu |
+| --- | --- | --- | --- | --- |
+| Đăng nhập | phiên `login_started` dẫn đến `login_succeeded` | ≥ 99,5% / 28 ngày | custom events đã deduplicate | đội identity + frontend |
+| Thanh toán | phiên `checkout_started` hoàn tất | ≥ 99,0% / 28 ngày | event outcome và mã lỗi domain | đội checkout |
+| Trang sản phẩm | p75 LCP của route chính | trong ngưỡng sản phẩm chọn | RUM đã lấy mẫu | frontend + platform |
+| Ổn định client | phiên không có unhandled exception | ≥ 99,9% / 28 ngày | error event theo session pseudonymous | frontend |
+
+Các con số là ví dụ, không phải ngưỡng phổ quát. Chọn mục tiêu từ baseline, kỳ vọng sản phẩm và khả năng hành động. Nếu không có traffic đủ để suy luận, dùng dashboard và review định kỳ trước khi bật paging.
+
+### Thiết kế alert không gây mệt mỏi
+
+Một alert tốt phải có người nhận, ngưỡng, khoảng đánh giá, mức tác động và runbook. Không alert cho từng exception đơn lẻ trừ khi nó liên quan bảo mật hoặc luồng rất quan trọng.
+
+| Alert | Điều kiện ví dụ | Mức phản ứng | Nội dung alert cần có |
+| --- | --- | --- | --- |
+| Regression checkout | failure rate tăng vượt baseline và đủ số phiên trong 10 phút | page on-call | release, route, dashboard, lỗi top, runbook rollback |
+| Lỗi client mới sau deploy | fingerprint mới tăng nhanh theo release | ticket hoặc page tùy tác động | release, first seen, affected sessions, stack đã resolve |
+| LCP degradation | p75 LCP xấu liên tục ở route có traffic | ticket giờ hành chính | route, device/network split, release và baseline |
+| Collector bị mất dữ liệu | ingest giảm bất thường trong khi traffic vẫn có | page platform | nguồn đối chiếu traffic, collector health, thời điểm |
+
+Dùng điều kiện theo **tỷ lệ và số lượng tối thiểu**. Một lỗi trong 2 phiên không giống 200 lỗi trong 2.000 phiên. Dùng cửa sổ thời gian đủ dài để giảm spike ngắn, nhưng không dài đến mức người dùng bị chặn hàng giờ mới có phản ứng.
+
+<Callout type="idea" title="Mỗi alert cần được diễn tập">
+  Trước khi bật paging, tạo lỗi vô hại ở staging hoặc canary. Xác nhận alert đến đúng kênh, link dashboard mở được, release xuất hiện, người trực ca biết rollback ở đâu và alert tự hồi phục khi tín hiệu trở lại bình thường.
+</Callout>
+
+## Vận hành incident theo tín hiệu
+
+### Runbook cho cảnh báo regression sau release
+
+Dùng trình tự này khi alert báo error rate, conversion hoặc vital xấu sau phát hành. Nó không thay thế quy trình incident/bảo mật của tổ chức.
+
+1. **Xác nhận tín hiệu.** Kiểm tra sample size, thời điểm bắt đầu, route/hành trình bị ảnh hưởng và collector health. Loại trừ dashboard bị chậm hoặc event schema vừa thay đổi.
+2. **Ước lượng tác động.** Đếm phiên bị chặn, hành trình có mất tiền/dữ liệu không và phân bố theo release, browser, vùng hoặc feature flag.
+3. **So sánh thay đổi.** Đối chiếu release hiện tại với release trước, deploy time, feature flags, cấu hình runtime, lỗi top và trace backend. Không chỉ nhìn diff frontend.
+4. **Giảm tác động.** Nếu hành trình quan trọng đang hỏng, rollback artefact hoặc tắt feature flag đã chuẩn bị. Ghi lại hành động, thời điểm và người thực hiện.
+5. **Khoanh vùng có giả thuyết.** Dùng trace/request ID, Network, source map và bước tái hiện nhỏ nhất. Mỗi giả thuyết phải có bằng chứng có thể bác bỏ.
+6. **Sửa và xác minh.** Thêm test gần nguyên nhân, deploy qua quy trình thường, chạy smoke test và theo dõi dashboard với release mới.
+7. **Học lại.** Ghi timeline, tác động, nguyên nhân đã xác nhận, lỗ hổng phát hiện và một guardrail cụ thể: test, alert, dashboard, feature flag hoặc checklist.
+
+Chi tiết cách dùng DevTools, source map và tái hiện nằm ở [Kỹ thuật debugging](/docs/production-troubleshooting/debugging). Quy trình tổng quát từ cảnh báo đến phục hồi nằm ở [Production & Troubleshooting](/docs/production-troubleshooting).
+
+### Ví dụ điều tra luồng thanh toán
+
+**Tín hiệu:** 7 phút sau release `web-2026.09.11.3`, alert báo `checkout_submit_failed` tăng từ baseline `0,7%` lên `8,4%`. Số phiên bắt đầu thanh toán đủ lớn nên đây không phải mẫu nhiễu.
+
+**Khoanh vùng:** Dashboard cho thấy lỗi tập trung ở `POST /api/orders` với `502`, chỉ ở release mới. Error client không tăng đáng kể. Trace ID của một request bị lỗi dẫn tới gateway timeout khi gọi inventory. Như vậy, chưa có bằng chứng kết luận template Angular là nguyên nhân.
+
+**Giảm tác động:** On-call tắt feature flag vừa thêm vào payload đơn hàng. Tỷ lệ thất bại trở về baseline trong 3 phút. Sau đó deploy bản sửa backend contract, chạy smoke test trên route `/checkout` và theo dõi release/flag trong cửa sổ bình thường.
+
+**Bài học:** Alert dựa trên outcome `checkout_submit_failed` phát hiện tác động nhanh hơn việc alert từng `502`. Trace và release thu hẹp điều tra, còn feature flag cho phép phục hồi mà không cần hotfix vội.
+
+<Callout type="warn" title="Không đóng incident chỉ vì biểu đồ giảm">
+  Tỷ lệ lỗi có thể giảm vì traffic giảm, sampling đổi hoặc người dùng đã bỏ luồng. Trước khi đóng, xác nhận release/flag đã đúng, smoke test thành công, mẫu có đủ số lượng và SLI quay về baseline trong khoảng quan sát đã thống nhất.
+</Callout>
+
+## Lỗi phổ biến và trade-off
+
+| Cách làm | Vì sao không đủ | Cách tốt hơn |
+| --- | --- | --- |
+| Gửi toàn bộ `Error` object, request và response | Có thể rò token, PII và payload nhạy cảm; chi phí khó kiểm soát. | Chuẩn hóa error code, allowlist attributes và scrub cả client lẫn collector. |
+| Alert cho mọi exception | On-call mệt mỏi, cảnh báo bị bỏ qua; lỗi nhỏ che incident thật. | Alert theo tỷ lệ phiên/outcome, fingerprint mới và mức tác động. |
+| Chỉ theo dõi average LCP | Một số phiên nhanh làm che trải nghiệm xấu của đa số. | Dùng p75/p95, phân nhóm route/device/network và so baseline. |
+| Dùng URL đầy đủ làm label metric | Cardinality nổ, truy vấn chậm và có nguy cơ lộ query. | Dùng route/endpoint template được normalize. |
+| Chỉ có frontend error reporting | Không thấy request đã qua gateway, service hay database thế nào. | Propagate trace context và link dashboard frontend với backend. |
+| Thu 100% mọi trace/RUM | Chi phí, network và privacy risk cao; chính SDK có thể ảnh hưởng UX. | Sampling có chủ đích, giữ lỗi/trace chậm theo policy, đặt quota. |
+| Gắn release thủ công trong nhiều file | Lệch version, source map và event khó đối chiếu. | Pipeline sinh một release ID và inject vào artefact/telemetry một lần. |
+| Tắt alert vì alert sai | Mất khả năng phát hiện regression thật. | Sửa schema, baseline, ngưỡng hoặc runbook; diễn tập lại trước khi bật. |
+
+## Checklist triển khai
+
+**Schema và dữ liệu**
+
+- [ ] Có release, environment, route/endpoint template, event name và error kind nhất quán.
+- [ ] Có allowlist trường telemetry; token, PII, form content, URL query và request body bị cấm.
+- [ ] Collector có scrub, payload limit, rate limit và access control độc lập với client.
+- [ ] Sampling rate, retention và ngân sách ingest được ghi rõ.
+
+**Tín hiệu và correlation**
+
+- [ ] Có RUM/Web Vitals cho route quan trọng và event outcome cho hành trình giá trị cao.
+- [ ] Lỗi Angular chưa xử lý, resource failure và HTTP không kỳ vọng được phân loại/fingerprint.
+- [ ] Source map khớp release được upload có kiểm soát và đã thử resolve ở staging.
+- [ ] Trace/request correlation với backend dùng chuẩn SDK và CORS allowlist phù hợp.
+- [ ] Pipeline gắn cùng release ID vào bundle, source map và telemetry.
+
+**Vận hành**
+
+- [ ] Dashboard trả lời được tác động, route, release, lỗi top và xu hướng trước/sau deploy.
+- [ ] SLI/SLO phản ánh outcome người dùng; ngưỡng alert có baseline và minimum volume.
+- [ ] Mỗi alert có owner, mức phản ứng, link điều tra và runbook giảm tác động.
+- [ ] Đã diễn tập một lỗi staging/canary từ lúc alert đến xác minh hồi phục.
+- [ ] Incident tạo ra ít nhất một guardrail kiểm chứng được cho lần phát hành sau.
+
+## Tóm tắt
+
+Observability frontend hiệu quả bắt đầu từ câu hỏi vận hành, không phải từ số lượng event. Kết hợp RUM và Web Vitals để thấy trải nghiệm thật; kết hợp lỗi và HTTP để biết triệu chứng; dùng trace cùng release ID để nối browser với hệ thống phía sau. Bảo vệ dữ liệu bằng allowlist, scrub hai lớp và sampling có chủ đích.
+
+Cuối cùng, dashboard và alert chỉ có giá trị khi dẫn tới một runbook có thể thực hiện: xác nhận tác động, giảm tác động, kiểm chứng nguyên nhân, xác minh bản sửa và biến bài học thành guardrail. Xem [Kỹ thuật debugging](/docs/production-troubleshooting/debugging) để đi sâu vào bước tái hiện và khoanh vùng khi tín hiệu đã phát hiện sự cố.

@@ -1,24 +1,181 @@
 ---
 title: Routing & Forms
-description: Điều hướng và xử lý biểu mẫu trong ứng dụng nhiều màn hình.
+description: Lộ trình xây dựng điều hướng và biểu mẫu Angular từ route đầu tiên đến form động có kiểu dữ liệu.
 ---
 
-Đây là trang khung cho nhóm **Routing & Forms**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+<Callout type="info" title="Bạn sẽ xây được gì?">
+  Sau nhóm bài này, bạn có thể tổ chức ứng dụng Angular nhiều màn hình, bảo vệ và chuẩn bị dữ liệu cho từng màn hình, rồi xây dựng biểu mẫu reactive có kiểm tra dữ liệu rõ ràng và dễ mở rộng.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Tổng quan](#tổng-quan)
+- [Mục tiêu sau nhóm này](#mục-tiêu-sau-nhóm-này)
+- [Đầu vào và cách học](#đầu-vào-và-cách-học)
+- [Mô hình tinh thần router và form](#mô-hình-tinh-thần-router-và-form)
+  - [Router: từ URL đến trạng thái giao diện](#router-từ-url-đến-trạng-thái-giao-diện)
+  - [Form: từ thao tác nhập đến dữ liệu miền](#form-từ-thao-tác-nhập-đến-dữ-liệu-miền)
+- [Thứ tự các bài học](#thứ-tự-các-bài-học)
+- [Lộ trình thực hành](#lộ-trình-thực-hành)
+  - [Giai đoạn 1: lập bản đồ điều hướng](#giai-đoạn-1-lập-bản-đồ-điều-hướng)
+  - [Giai đoạn 2: thêm ngữ cảnh và hiệu năng](#giai-đoạn-2-thêm-ngữ-cảnh-và-hiệu-năng)
+  - [Giai đoạn 3: tạo form đáng tin cậy](#giai-đoạn-3-tạo-form-đáng-tin-cậy)
+  - [Giai đoạn 4: mở rộng theo dữ liệu](#giai-đoạn-4-mở-rộng-theo-dữ-liệu)
+- [Checklist hoàn thành](#checklist-hoàn-thành)
+- [Bắt đầu học](#bắt-đầu-học)
 
-## Phạm vi dự kiến
+## Tổng quan
 
-Điều hướng và xử lý biểu mẫu trong ứng dụng nhiều màn hình. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+**Routing** quyết định người dùng nhìn thấy màn hình nào khi URL thay đổi. **Forms** quản lý dữ liệu người dùng nhập trước khi dữ liệu đó được gửi đến nghiệp vụ hoặc API. Hai phần này thường gặp nhau trong cùng một feature: mở trang chi tiết từ một tham số URL, nạp dữ liệu của bản ghi đó, hiển thị form chỉnh sửa và điều hướng đi khi lưu thành công.
 
-## Các bài trong nhóm
+Nhóm bài này dùng cách tiếp cận Angular hiện đại, ưu tiên standalone component, cấu hình route rõ ràng và Reactive Forms. Mục tiêu không phải là ghi nhớ mọi API ngay từ đầu. Hãy học cách dữ liệu đi qua ứng dụng, sau đó chọn API phù hợp cho từng bước.
 
-- **[Angular Router](/docs/routing-forms/angular-router)** — Định nghĩa route, outlet, link và đọc tham số điều hướng.
-- **[Nested và lazy routes](/docs/routing-forms/nested-lazy-routes)** — Tổ chức route lồng nhau và tải feature theo nhu cầu.
-- **[Guard và resolver](/docs/routing-forms/guards-resolvers)** — Kiểm soát điều hướng và chuẩn bị dữ liệu trước khi mở trang.
-- **[Reactive Forms](/docs/routing-forms/reactive-forms)** — Xây dựng form theo mô hình dữ liệu với API reactive.
-- **[Validation](/docs/routing-forms/validation)** — Validator đồng bộ, bất đồng bộ và hiển thị lỗi thân thiện.
-- **[Typed và dynamic forms](/docs/routing-forms/typed-dynamic-forms)** — Tận dụng kiểu dữ liệu và sinh biểu mẫu động.
+## Mục tiêu sau nhóm này
+
+Khi hoàn thành, bạn có thể:
+
+- Khai báo route, đặt `router-outlet`, tạo liên kết và đọc path/query parameters bằng [Angular Router](/docs/routing-forms/angular-router).
+- Chia cấu trúc route theo feature, dùng route lồng nhau và lazy loading qua [Nested và lazy routes](/docs/routing-forms/nested-lazy-routes).
+- Chặn hoặc chuyển hướng có chủ đích, đồng thời chuẩn bị dữ liệu trước khi component hiển thị với [Guard và resolver](/docs/routing-forms/guards-resolvers).
+- Mô hình hóa dữ liệu form bằng `FormControl`, `FormGroup` và `FormArray` trong [Reactive Forms](/docs/routing-forms/reactive-forms).
+- Hiển thị lỗi đúng thời điểm, kết hợp validator đồng bộ và bất đồng bộ trong [Validation](/docs/routing-forms/validation).
+- Giữ an toàn kiểu dữ liệu và sinh giao diện form từ schema bằng [Typed và dynamic forms](/docs/routing-forms/typed-dynamic-forms).
+
+<Callout type="idea" title="Kết quả thực tế">
+  Hãy coi đích đến là một feature “quản lý sản phẩm”: có danh sách, trang tạo mới, trang chỉnh sửa theo `id`, kiểm tra tên trùng và một vài trường có thể thêm/xóa. Feature này đủ nhỏ để hoàn thành, nhưng chứa gần như toàn bộ quyết định quan trọng của Router và Forms.
+</Callout>
+
+## Đầu vào và cách học
+
+Trước khi bắt đầu, bạn nên đã quen với component standalone, template binding, dependency injection cơ bản và TypeScript. Bạn không cần biết sẵn Router hay Forms, nhưng nên có một ứng dụng Angular chạy được để thử từng thay đổi nhỏ.
+
+Chuẩn bị một feature thực hành có các màn hình sau:
+
+| Màn hình | URL gợi ý | Mục đích học |
+| --- | --- | --- |
+| Danh sách sản phẩm | `/products` | Route gốc của feature, liên kết sang các màn hình khác. |
+| Tạo sản phẩm | `/products/new` | Form tạo mới và validation cơ bản. |
+| Sửa sản phẩm | `/products/:id/edit` | Đọc tham số, nạp dữ liệu và vá dữ liệu vào form. |
+| Không tìm thấy | `/not-found` | Xử lý URL không khớp route. |
+
+Cách học hiệu quả là **đọc một bài, thay đổi một phần của feature, rồi tự kiểm tra trên trình duyệt**. Đừng chờ đến cuối nhóm mới ghép mọi thứ lại; một route hoặc một validator nhỏ chạy đúng đã là phản hồi tốt để đi tiếp.
+
+<Callout type="warn" title="Không dùng guard như cơ chế bảo mật duy nhất">
+  Guard chỉ kiểm soát điều hướng ở phía trình duyệt. API vẫn phải xác thực và phân quyền độc lập; người dùng có thể gọi API trực tiếp mà không đi qua route của ứng dụng.
+</Callout>
+
+## Mô hình tinh thần router và form
+
+Router và form đều quản lý **trạng thái**, nhưng nguồn thay đổi của chúng khác nhau. Router biến URL thành cây component đang hiển thị. Form biến các thao tác nhập thành một mô hình dữ liệu có giá trị, trạng thái hợp lệ và lỗi.
+
+```text
+Người dùng thay đổi URL hoặc bấm liên kết
+                 │
+                 ▼
+┌────────────── Angular Router ──────────────┐
+│ khớp route → chạy guard/resolver → dựng UI │
+└──────────────────────┬─────────────────────┘
+                       │
+                       ▼
+              Component của màn hình
+                       │
+                       ▼
+┌────────────── Reactive Form ───────────────┐
+│ nhận input → cập nhật controls → validation│
+└──────────────────────┬─────────────────────┘
+                       │
+                       ▼
+              dữ liệu hợp lệ cho nghiệp vụ/API
+```
+
+### Router: từ URL đến trạng thái giao diện
+
+Một route là quy tắc ghép một URL với component hoặc feature cần hiển thị. Ví dụ, `/products/42/edit` có thể khớp route `products/:id/edit`; `42` trở thành path parameter để component biết sản phẩm nào cần sửa.
+
+Trước khi component được kích hoạt, Router có thể chạy guard để quyết định có được đi tiếp hay không. Resolver có thể nạp dữ liệu cần thiết trước khi trang xuất hiện. Route lồng nhau giúp biểu diễn phần giao diện dùng chung, còn lazy loading trì hoãn tải code của feature cho đến khi người dùng cần nó.
+
+Tóm lại: URL nên là nguồn sự thật cho **vị trí và ngữ cảnh điều hướng**. Đừng tự tạo nhiều biến cục bộ chỉ để mô phỏng URL hiện tại.
+
+### Form: từ thao tác nhập đến dữ liệu miền
+
+Reactive Form đặt mô hình form trong class TypeScript. Mỗi `FormControl` giữ giá trị và trạng thái của một trường; `FormGroup` gom các trường liên quan; `FormArray` quản lý danh sách trường có độ dài thay đổi, chẳng hạn các thẻ của sản phẩm.
+
+Khi người dùng nhập, control cập nhật giá trị rồi chạy validator. Chỉ khi form hợp lệ, component mới chuyển dữ liệu sang service hoặc API. Với typed forms, TypeScript hỗ trợ phát hiện trường bị thiếu hoặc sai kiểu ngay khi viết mã.
+
+Tóm lại: form là nguồn sự thật cho **dữ liệu đang soạn thảo**. Tránh đọc trực tiếp từng phần tử DOM khi dữ liệu đã thuộc về form model.
+
+## Thứ tự các bài học
+
+Các bài được sắp xếp theo quan hệ phụ thuộc. Ba bài Router đi trước để bạn có màn hình và ngữ cảnh điều hướng ổn định. Ba bài Forms đi sau để bạn xây dữ liệu nhập trên chính các màn hình đó.
+
+1. **[Angular Router](/docs/routing-forms/angular-router)** — Bắt đầu với route config, `router-outlet`, `routerLink` và parameters. Đây là nền để ứng dụng có nhiều màn hình.
+2. **[Nested và lazy routes](/docs/routing-forms/nested-lazy-routes)** — Tổ chức route của feature sau khi đã hiểu một route đơn. Học lazy loading khi feature bắt đầu có kích thước đáng kể.
+3. **[Guard và resolver](/docs/routing-forms/guards-resolvers)** — Thêm điều kiện điều hướng và dữ liệu đầu vào cho màn hình chỉnh sửa. Bài này dựa trên cấu trúc route ở hai bài trước.
+4. **[Reactive Forms](/docs/routing-forms/reactive-forms)** — Tạo form sản phẩm bằng model TypeScript thay vì chỉ xử lý input trong template.
+5. **[Validation](/docs/routing-forms/validation)** — Bổ sung quy tắc dữ liệu và trải nghiệm thông báo lỗi cho form vừa tạo.
+6. **[Typed và dynamic forms](/docs/routing-forms/typed-dynamic-forms)** — Hoàn thiện bằng typed form và các trường động, chỉ nên học khi form tĩnh đã rõ ràng.
+
+<Callout type="info" title="Có thể học riêng từng nhánh">
+  Nếu mục tiêu trước mắt là điều hướng, bạn có thể dừng sau bài guard/resolver. Nếu đã có màn hình và chỉ cần form, hãy bắt đầu từ Reactive Forms; tuy vậy, ví dụ trang sửa theo `:id` sẽ dễ hiểu hơn khi bạn đã biết Router cơ bản.
+</Callout>
+
+## Lộ trình thực hành
+
+Dùng cùng một feature sản phẩm xuyên suốt bốn giai đoạn. Mỗi giai đoạn tạo ra một mốc chạy được, vì vậy lỗi sẽ được khoanh vùng sớm thay vì dồn đến cuối.
+
+### Giai đoạn 1: lập bản đồ điều hướng
+
+- Tạo route cho danh sách, tạo mới, chỉnh sửa và trang không tìm thấy.
+- Đặt `router-outlet` ở layout chính; dùng `routerLink` để đi từ danh sách sang tạo mới và chỉnh sửa.
+- Đọc `id` từ URL tại trang chỉnh sửa và hiển thị nó trước khi nạp dữ liệu thật.
+
+**Mốc kiểm tra:** tải trực tiếp `/products/42/edit`, làm mới trang và xác nhận ứng dụng vẫn biết đang ở trang chỉnh sửa sản phẩm `42`.
+
+### Giai đoạn 2: thêm ngữ cảnh và hiệu năng
+
+- Đặt các route sản phẩm dưới một feature route hoặc route cha dùng chung layout.
+- Lazy load feature sản phẩm để mã của feature chỉ được tải khi mở `/products`.
+- Dùng resolver để nạp sản phẩm theo `id`; dùng guard phù hợp cho trang cần đăng nhập hoặc có dữ liệu chưa lưu.
+
+**Mốc kiểm tra:** điều hướng đến trang chỉnh sửa chỉ khi dữ liệu cần thiết đã sẵn sàng; thử một URL `id` không tồn tại và quyết định rõ sẽ chuyển hướng hay hiển thị lỗi.
+
+### Giai đoạn 3: tạo form đáng tin cậy
+
+- Tạo `FormGroup` cho `name`, `price`, `description` và vá dữ liệu resolver vào form sửa.
+- Thêm validator bắt buộc, độ dài tối thiểu và giá trị số hợp lệ.
+- Chỉ gửi dữ liệu khi form hợp lệ; đánh dấu controls đã chạm khi người dùng bấm lưu để lỗi không xuất hiện quá sớm.
+
+**Mốc kiểm tra:** để trống tên, nhập giá không hợp lệ, rồi sửa lại. Mỗi trạng thái phải có thông báo rõ ràng và nút lưu phải phản ánh tính hợp lệ của form.
+
+### Giai đoạn 4: mở rộng theo dữ liệu
+
+- Chuyển form sang typed forms để model sản phẩm và control khớp kiểu dữ liệu.
+- Dùng `FormArray` cho danh sách thẻ hoặc biến thể sản phẩm.
+- Thử xây một schema nhỏ để sinh các trường cấu hình được; giữ quy tắc nghiệp vụ phức tạp trong validator hoặc service thay vì template.
+
+**Mốc kiểm tra:** thêm và xóa một phần tử động, lưu lại, rồi kiểm tra payload không có trường thiếu hoặc sai kiểu ngoài ý muốn.
+
+## Checklist hoàn thành
+
+Trước khi rời nhóm bài này, hãy tự xác nhận:
+
+- [ ] URL có thể mở trực tiếp và khôi phục đúng màn hình sau khi làm mới.
+- [ ] Route feature được tổ chức theo trách nhiệm, không dồn mọi route vào một cấu hình lớn.
+- [ ] Guard trả về kết quả điều hướng có chủ đích; API không dựa vào guard để bảo mật.
+- [ ] Resolver, loading và trường hợp dữ liệu không tồn tại có trải nghiệm rõ ràng.
+- [ ] Form có một model duy nhất, không trộn lẫn quá nhiều trạng thái input trong component.
+- [ ] Lỗi validation chỉ xuất hiện vào thời điểm hợp lý và có hướng sửa cho người dùng.
+- [ ] Payload gửi đi được kiểm soát kiểu dữ liệu, nhất là với trường động.
+
+## Bắt đầu học
+
+Bắt đầu với Router để tạo khung màn hình cho feature, sau đó đi theo thứ tự cards bên dưới. Khi hoàn thành mỗi bài, quay lại feature sản phẩm và thực hiện đúng mốc kiểm tra của giai đoạn tương ứng.
+
+<Cards>
+  <Card title="1. Angular Router" href="/docs/routing-forms/angular-router" description="Khai báo route, outlet, link và parameters." />
+  <Card title="2. Nested và lazy routes" href="/docs/routing-forms/nested-lazy-routes" description="Tổ chức feature route và tải code theo nhu cầu." />
+  <Card title="3. Guard và resolver" href="/docs/routing-forms/guards-resolvers" description="Kiểm soát điều hướng và chuẩn bị dữ liệu." />
+  <Card title="4. Reactive Forms" href="/docs/routing-forms/reactive-forms" description="Tạo form theo mô hình dữ liệu reactive." />
+  <Card title="5. Validation" href="/docs/routing-forms/validation" description="Kiểm tra dữ liệu và hiển thị lỗi dễ hiểu." />
+  <Card title="6. Typed và dynamic forms" href="/docs/routing-forms/typed-dynamic-forms" description="Tăng an toàn kiểu dữ liệu và hỗ trợ form động." />
+</Cards>

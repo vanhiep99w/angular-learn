@@ -1,10 +1,512 @@
 ---
 title: SSR và hydration
-description: Render phía server, hydration và các lưu ý khi chạy đa môi trường.
+description: Chọn CSR, prerender hoặc SSR; hiểu hydration, bảo vệ code đa môi trường và chẩn đoán lỗi HTML không khớp trong Angular.
 ---
 
-Trang này sẽ trình bày **SSR và hydration** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang này">
+  SSR không thay thế việc tối ưu ứng dụng. Nó thay đổi nơi HTML đầu tiên được tạo. Hãy chọn chế độ render theo từng route, giữ HTML xác định và đo trải nghiệm thật trước khi mở rộng phạm vi triển khai.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan và từ vựng](#tổng-quan-và-từ-vựng)
+  - [Ba mô hình render](#ba-mô-hình-render)
+  - [Khi nào SSR có ích](#khi-nào-ssr-có-ích)
+- [Chọn chế độ render cho route](#chọn-chế-độ-render-cho-route)
+  - [Ma trận quyết định](#ma-trận-quyết-định)
+  - [Cấu hình hybrid rendering](#cấu-hình-hybrid-rendering)
+- [Cơ chế SSR và hydration](#cơ-chế-ssr-và-hydration)
+  - [Luồng một request](#luồng-một-request)
+  - [Hydration giữ lại DOM](#hydration-giữ-lại-dom)
+  - [Event replay và incremental hydration](#event-replay-và-incremental-hydration)
+- [Thiết lập một ứng dụng Angular có SSR](#thiết-lập-một-ứng-dụng-angular-có-ssr)
+  - [Tạo hoặc bổ sung SSR](#tạo-hoặc-bổ-sung-ssr)
+  - [Provider phía client và server](#provider-phía-client-và-server)
+  - [Kiểm tra kết quả đúng môi trường](#kiểm-tra-kết-quả-đúng-môi-trường)
+- [Viết code chạy được ở cả server và trình duyệt](#viết-code-chạy-được-ở-cả-server-và-trình-duyệt)
+  - [Platform guard cho API chỉ có trong browser](#platform-guard-cho-api-chỉ-có-trong-browser)
+  - [Tách side effect khỏi lúc khởi tạo](#tách-side-effect-khỏi-lúc-khởi-tạo)
+  - [Dependency và thư viện bên thứ ba](#dependency-và-thư-viện-bên-thứ-ba)
+- [Truyền dữ liệu từ server sang client](#truyền-dữ-liệu-từ-server-sang-client)
+  - [HTTP transfer cache](#http-transfer-cache)
+  - [TransferState cho dữ liệu không đi qua HttpClient](#transferstate-cho-dữ-liệu-không-đi-qua-httpclient)
+  - [Dữ liệu theo người dùng và bảo mật](#dữ-liệu-theo-người-dùng-và-bảo-mật)
+- [Chẩn đoán hydration mismatch](#chẩn-đoán-hydration-mismatch)
+  - [Nguồn HTML không xác định](#nguồn-html-không-xác-định)
+  - [Quy trình khoanh vùng](#quy-trình-khoanh-vùng)
+  - [Khi nào dùng ngSkipHydration](#khi-nào-dùng-ngskiphydration)
+- [Vận hành và trade-off](#vận-hành-và-trade-off)
+  - [Cache, CDN và nội dung động](#cache-cdn-và-nội-dung-động)
+  - [Quan sát và kiểm thử](#quan-sát-và-kiểm-thử)
+  - [Các lỗi lựa chọn thường gặp](#các-lỗi-lựa-chọn-thường-gặp)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Tổng quan và từ vựng
+
+**Server-side rendering (SSR)** là việc server chạy Angular để tạo HTML cho mỗi request. Trình duyệt nhận được nội dung có thể hiển thị ngay, rồi tải JavaScript để ứng dụng trở nên tương tác. **Hydration** là bước Angular phía client nhận lại HTML đó, ghép cây component vào DOM có sẵn và gắn listener thay vì xóa toàn bộ DOM để render lại.
+
+**Client-side rendering (CSR)** là mô hình SPA quen thuộc: server hoặc CDN trả về HTML vỏ tối thiểu, sau đó trình duyệt tải JavaScript và tự tạo giao diện. **Prerender** (còn gọi là static site generation/SSG) cũng tạo HTML ở phía server, nhưng làm tại thời điểm build thay vì cho từng request. Ba lựa chọn này có thể cùng tồn tại trong một ứng dụng Angular bằng cấu hình theo route.
+
+### Ba mô hình render
+
+| Mô hình | HTML đầu tiên được tạo khi nào? | Phù hợp nhất với | Chi phí chính |
+| --- | --- | --- | --- |
+| CSR | Sau khi JavaScript tải và chạy trong browser | Khu vực riêng tư, dashboard nhiều tương tác, nội dung không cần bot lập chỉ mục | Người dùng chờ JS trước khi thấy nội dung hoàn chỉnh; HTML đầu thường ít thông tin |
+| Prerender | Khi build/deploy | Trang marketing, tài liệu, danh mục ít thay đổi, URL hữu hạn | Nội dung có thể cũ cho tới build/revalidate tiếp theo; không biết request hoặc người dùng cụ thể |
+| SSR | Mỗi request đến server | Trang chi tiết công khai, SEO quan trọng, nội dung thay đổi thường xuyên hoặc phụ thuộc URL | Tăng tải và độ phức tạp runtime ở server; phải quản lý cache và lỗi backend |
+
+```text
+CSR
+Browser ── tải JS ──► Angular tạo HTML và gắn sự kiện
+
+Prerender
+Build ──► HTML tĩnh trên CDN ──► Browser hydrate khi tải JS
+
+SSR
+Request ──► Node server chạy Angular ──► HTML ──► Browser hydrate khi tải JS
+```
+
+SSR và prerender chỉ giúp **HTML đầu** đến sớm hơn. Chúng không làm bundle JavaScript tự nhỏ đi, không thay thế cache API, và không bảo vệ dữ liệu nhạy cảm. Sau hydration, ứng dụng vẫn là Angular chạy trong browser; [Build và tối ưu bundle](/docs/testing-performance-deploy/build-optimization) vẫn cần được đo và tối ưu độc lập.
+
+### Khi nào SSR có ích
+
+SSR thường đáng cân nhắc khi người dùng hoặc crawler cần đọc nội dung trước khi JavaScript hoàn tất. Ví dụ rõ ràng là trang sản phẩm `/products/42`: tiêu đề, giá và mô tả cần xuất hiện sớm, URL cần có metadata để chia sẻ, và dữ liệu thay đổi đủ thường xuyên để một file HTML build sẵn nhanh cũ.
+
+SSR không phải mặc định đúng cho mọi route. Với `/admin`, HTML phụ thuộc quyền và dữ liệu phiên đăng nhập; một client-only shell có thể đơn giản, rẻ và an toàn hơn về cache. Với trang điều khoản gần như không đổi, prerender trên CDN thường nhanh hơn SSR vì không cần khởi động Angular cho từng lượt truy cập.
+
+<Callout type="idea" title="Bắt đầu từ một route">
+  Hãy chọn một trang công khai có traffic và tiêu chí rõ ràng, chẳng hạn LCP hoặc khả năng bot đọc metadata. Ghi baseline CSR, triển khai SSR/prerender cho riêng trang đó, rồi so sánh cùng mạng và cache. Không nên chuyển toàn bộ ứng dụng sang SSR chỉ vì một trang cần SEO.
+</Callout>
+
+## Chọn chế độ render cho route
+
+### Ma trận quyết định
+
+Đặt câu hỏi theo route thay vì theo toàn bộ ứng dụng:
+
+| Câu hỏi | Nếu câu trả lời là “có” | Chế độ cần ưu tiên |
+| --- | --- | --- |
+| Nội dung gần như không đổi giữa các request và danh sách URL biết trước? | Có thể tạo HTML lúc build và cache rất lâu | Prerender |
+| Nội dung công khai, thay đổi thường xuyên hoặc cần phản ánh params URL ngay? | Server có thể lấy dữ liệu mới cho request | SSR |
+| Nội dung chỉ hiện sau đăng nhập, rất cá nhân hóa hoặc là công cụ nội bộ? | Không nên tạo/ghi cache HTML chung cho người dùng khác | CSR, hoặc SSR có xác thực và cache riêng tư được thiết kế kỹ |
+| Route cần phản hồi rất thấp trên CDN toàn cầu? | Tránh compute server cho từng request nếu dữ liệu cho phép | Prerender hoặc CSR với API phù hợp |
+| UI có widget browser-only như bản đồ, editor, chart? | Phần đó không an toàn khi server render | SSR cho shell/nội dung ổn định, hoãn hoặc chỉ render widget ở client |
+
+Mục tiêu là chọn **lời hứa dữ liệu** đúng. Prerender hứa một snapshot tại build. SSR hứa HTML được tính cho request. CSR hứa UI sau khi client đã khởi tạo. Nếu sản phẩm không cần lời hứa SSR, thêm SSR chỉ tạo thêm một nơi có thể lỗi.
+
+### Cấu hình hybrid rendering
+
+Angular SSR hiện đại cho phép mô tả render mode trong `app.routes.server.ts`. Ví dụ dưới đây prerender trang chủ và giới thiệu, SSR trang sản phẩm theo id, còn khu vực tài khoản vẫn là client rendering:
+
+```ts
+// src/app/app.routes.server.ts
+import { RenderMode, ServerRoute } from '@angular/ssr';
+
+export const serverRoutes: ServerRoute[] = [
+  {
+    path: '',
+    renderMode: RenderMode.Prerender,
+  },
+  {
+    path: 'about',
+    renderMode: RenderMode.Prerender,
+  },
+  {
+    path: 'products/:id',
+    renderMode: RenderMode.Server,
+  },
+  {
+    path: 'account/**',
+    renderMode: RenderMode.Client,
+  },
+  {
+    path: '**',
+    renderMode: RenderMode.Server,
+  },
+];
+```
+
+`RenderMode.Server` xử lý URL động khi request đến. `RenderMode.Prerender` chỉ có thể tạo những URL mà build biết được; một route có `:id` cần danh sách params ở build hoặc không nên prerender. `RenderMode.Client` trả HTML shell cho route đó và để client render như CSR.
+
+Các API, tên file và khả năng prerender params có thể khác giữa phiên bản Angular. Hãy kiểm tra `@angular/ssr` và cấu hình CLI của workspace trước khi sao chép nguyên khối; ví dụ này minh họa ranh giới route, không phải danh sách route bắt buộc cho mọi ứng dụng.
+
+<Callout type="warn" title="Route fallback cần chủ đích">
+  Một wildcard SSR có nghĩa server sẽ cố render cả URL không được phân loại rõ. Hãy xác định 404, redirect và route riêng tư trước. Đừng vô tình SSR một trang quản trị chỉ vì nó rơi vào `**`.
+</Callout>
+
+## Cơ chế SSR và hydration
+
+### Luồng một request
+
+Với route SSR, Angular chạy component tree trong tiến trình server. Các provider server-side lấy dữ liệu cần thiết, template sinh HTML và runtime trả HTML cho browser. Khi JavaScript tải xong, Angular client khởi tạo cùng route, đọc thông tin hydration trong HTML và nối lại ứng dụng với DOM hiện hữu.
+
+```text
+┌───────────┐ request /products/42 ┌──────────────────┐
+│ Browser   │ ───────────────────► │Angular SSR server│
+└─────┬─────┘                      └────────┬─────────┘
+      │                                     │ lấy dữ liệu
+      │ HTML + CSS + hydration metadata     ▼
+      │ ◄─────────────────────────────── API / database
+      ▼
+Hiển thị HTML ban đầu
+      │ tải JavaScript
+      ▼
+Angular client đối chiếu DOM, gắn listener và tiếp quản tương tác
+```
+
+Ở đây có hai lần chạy logic render: một lần trên server, một lần trong browser. Vì vậy template và dữ liệu ban đầu phải cho cùng một cấu trúc DOM. Ví dụ server render ba thẻ `<li>` nhưng client lập tức có bốn phần tử do một request khác, Angular không thể ghép chính xác các node đã có.
+
+### Hydration giữ lại DOM
+
+Không có hydration, client thường phải bỏ HTML server đã nhận rồi tạo DOM mới. Cách đó làm mất lợi ích tránh render lại và có thể gây nháy giao diện. Khi hydration bật, Angular tái sử dụng node server-rendered, khôi phục cấu trúc component và gắn các event listener cần thiết.
+
+Hydration không đồng nghĩa “không chạy code phía client”. Constructor, dependency injection và logic render của ứng dụng vẫn có thể chạy lại trong browser. Điểm quan trọng là code đó không được tạo kết quả markup khác với server ở thời điểm Angular đối chiếu DOM.
+
+### Event replay và incremental hydration
+
+Người dùng có thể click trước khi JavaScript hoặc hydration xong. `withEventReplay()` cho Angular ghi lại các tương tác sớm và phát lại sau khi phần ứng dụng liên quan đã sẵn sàng. Nó cải thiện cảm nhận phản hồi, nhưng không thay thế loading state cho request thật sự chậm.
+
+**Incremental hydration** là chiến lược hydrate từng vùng thay vì tiếp quản toàn bộ ngay lập tức. Nó có thể giảm công việc khởi tạo ban đầu cho trang lớn, nhưng khiến thời điểm event, trạng thái placeholder và cách debug phức tạp hơn. Chỉ dùng sau khi đo được chi phí hydration là nút thắt và sau khi xác minh API tương ứng được hỗ trợ trong phiên bản Angular đang dùng.
+
+## Thiết lập một ứng dụng Angular có SSR
+
+### Tạo hoặc bổ sung SSR
+
+Với ứng dụng mới, Angular CLI thường hỗ trợ tạo project có SSR ngay từ đầu. Với workspace hiện có, lệnh sau là điểm bắt đầu phổ biến:
+
+```bash
+ng add @angular/ssr
+```
+
+Schematic có thể tạo hoặc cập nhật entry server, server config và scripts build/serve tùy phiên bản CLI. Luôn review diff do lệnh sinh ra. Đặc biệt kiểm tra `package.json`, các file `main.server`, cấu hình app server và output deploy; server renderer là một runtime mới, không chỉ là một option trong browser build.
+
+Sau đó chạy các scripts đúng tên trong workspace. Một chuỗi kiểm tra thường có dạng:
+
+```bash
+ng build
+# Chạy server SSR theo script mà ng add tạo trong package.json.
+npm run serve:ssr:<ten-project>
+```
+
+Không tự suy ra tên project hoặc output directory. Mở `package.json` và `angular.json` của chính workspace để lấy lệnh phát hành đúng; application builder và các phiên bản Angular có thể đặt tên script khác nhau.
+
+### Provider phía client và server
+
+Hydration được đăng ký trong cấu hình dùng chung của ứng dụng. Server rendering được đăng ký trong cấu hình chỉ dùng khi render server. Ví dụ sau minh họa bố cục standalone phổ biến:
+
+```ts
+// src/app/app.config.ts
+import { ApplicationConfig } from '@angular/core';
+import { provideClientHydration, withEventReplay } from '@angular/platform-browser';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideClientHydration(withEventReplay()),
+  ],
+};
+```
+
+```ts
+// src/app/app.config.server.ts
+import { ApplicationConfig, mergeApplicationConfig } from '@angular/core';
+import { provideServerRendering, withRoutes } from '@angular/ssr';
+import { appConfig } from './app.config';
+import { serverRoutes } from './app.routes.server';
+
+const serverConfig: ApplicationConfig = {
+  providers: [provideServerRendering(withRoutes(serverRoutes))],
+};
+
+export const config = mergeApplicationConfig(appConfig, serverConfig);
+```
+
+Không gọi `provideClientHydration()` tùy tiện ở một component hoặc một feature module. Hydration cần có mặt ở bootstrap của client để Angular biết phải tiếp quản HTML server. Tương tự, provider hoặc token chỉ hợp lệ cho request server không nên bị inject vô điều kiện trong code chạy browser.
+
+### Kiểm tra kết quả đúng môi trường
+
+Một trang “trông đúng” sau khi JavaScript tải không chứng minh SSR và hydration đúng. Kiểm tra theo thứ tự:
+
+1. Mở URL bằng cửa sổ ẩn danh hoặc dùng `curl` với server SSR đang chạy. Nội dung chủ đạo, title và metadata cần đã có trong response HTML, không chỉ xuất hiện sau vài giây.
+2. Tắt JavaScript trong DevTools hoặc trình duyệt thử nghiệm. Route SSR/prerender vẫn phải cho HTML đọc được; nút tương tác có thể không hoạt động, đó là điều bình thường trước hydration.
+3. Bật JavaScript, mở Console và xem lỗi hydration. Mở Network để xác nhận dữ liệu ban đầu không bị gọi lại ngoài ý muốn.
+4. Thử điều hướng client-side, reload trực tiếp URL sâu như `/products/42`, URL không tồn tại và route riêng tư. Đây là các đường đi có cấu hình server khác nhau.
+
+<Callout type="info" title="SSR không thay thế accessibility">
+  HTML server-rendered giúp nội dung đến sớm, nhưng semantic HTML, `alt`, label form, heading và focus management vẫn phải được thiết kế như một ứng dụng CSR bình thường. Hãy kiểm tra chúng cả trước và sau hydration.
+</Callout>
+
+## Viết code chạy được ở cả server và trình duyệt
+
+### Platform guard cho API chỉ có trong browser
+
+Node không có `window`, `document`, `localStorage`, `sessionStorage`, `navigator`, `matchMedia` hay `IntersectionObserver` như browser. Đọc chúng trong field initializer, constructor hoặc template có thể làm SSR crash trước khi trang tạo HTML.
+
+Dùng `PLATFORM_ID` cùng `isPlatformBrowser` tại điểm cần API browser. Ví dụ service sau chỉ đọc token từ `localStorage` khi thật sự chạy trong trình duyệt:
+
+```ts
+import { Injectable, PLATFORM_ID, inject } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+
+@Injectable({ providedIn: 'root' })
+export class BrowserPreferencesService {
+  private readonly platformId = inject(PLATFORM_ID);
+
+  getTheme(): 'light' | 'dark' | null {
+    if (!isPlatformBrowser(this.platformId)) {
+      return null;
+    }
+
+    const theme = localStorage.getItem('theme');
+    return theme === 'light' || theme === 'dark' ? theme : null;
+  }
+}
+```
+
+Guard cần bao phủ **lúc truy cập**, không chỉ lúc gọi method. Đoạn sau vẫn lỗi trên server vì `window` đã bị đọc khi module được nạp:
+
+```ts
+// Không an toàn: module evaluation đã chạm vào browser global.
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+```
+
+Di chuyển việc đọc đó vào nhánh `isPlatformBrowser`, hoặc dùng abstraction/provider để server trả giá trị mặc định có chủ đích. Đừng “sửa” bằng cách khai báo `global.window = {}` ở server; mock không đầy đủ sẽ che lỗi và tạo hành vi không đáng tin.
+
+### Tách side effect khỏi lúc khởi tạo
+
+Component SSR-safe nên có trạng thái ban đầu xác định. Nếu giá trị chỉ biết ở browser, render placeholder ổn định trên server rồi cập nhật sau khi client tiếp quản. Điều này tránh việc server và client tạo markup khác nhau trong lượt render đầu.
+
+```ts
+import { Component, PLATFORM_ID, afterNextRender, inject, signal } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+
+@Component({
+  selector: 'app-theme-status',
+  template: `<p>Giao diện: {{ theme() }}</p>`,
+})
+export class ThemeStatusComponent {
+  private readonly platformId = inject(PLATFORM_ID);
+  readonly theme = signal<'system' | 'light' | 'dark'>('system');
+
+  constructor() {
+    if (isPlatformBrowser(this.platformId)) {
+      afterNextRender(() => {
+        this.theme.set(
+          matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+        );
+      });
+    }
+  }
+}
+```
+
+`afterNextRender` phù hợp cho thao tác sau render ở browser, ví dụ đo kích thước element hoặc khởi tạo widget DOM. Không dùng nó để lấy dữ liệu cần có trong HTML SSR; dữ liệu đó phải được đọc trong đường render server hoặc có placeholder rõ ràng.
+
+### Dependency và thư viện bên thứ ba
+
+Một package có thể compile được nhưng vẫn không SSR-safe nếu nó chạm `document` ngay khi import, tạo canvas trong constructor hoặc giả định có layout browser. Khoanh vùng dependency theo khả năng:
+
+| Loại dependency | Cách dùng an toàn hơn |
+| --- | --- |
+| Thư viện thuần tính toán/format dữ liệu | Import bình thường; vẫn đảm bảo input xác định giữa hai môi trường |
+| Widget chart, map, rich-text editor | Render container/placeholder trên server; dynamic import và khởi tạo sau render ở browser |
+| Analytics, chat, A/B testing | Chỉ nạp ở browser, có consent và không để script quyết định markup ban đầu |
+| Package chưa hỗ trợ SSR | Thay package, tách vùng client-only hoặc dùng `ngSkipHydration` như giải pháp tạm thời có kiểm soát |
+
+Nếu một thư viện phải chạy browser-only, vẫn render một fallback có nghĩa trên server: ảnh tĩnh cho chart, địa chỉ dạng text cho map, hoặc nút dẫn đến trang thay thế. Một `<div>` trống có thể tránh lỗi kỹ thuật nhưng làm trang SSR mất giá trị với người dùng và crawler.
+
+## Truyền dữ liệu từ server sang client
+
+Khi server đã gọi API để tạo HTML, client không nên gọi lại cùng dữ liệu ngay sau hydration. Request lặp làm tăng tải backend, có thể nhấp nháy state `loading` và tạo mismatch nếu dữ liệu thay đổi giữa hai lần gọi. Angular cung cấp HTTP transfer cache và `TransferState` để xử lý hai trường hợp dữ liệu khác nhau.
+
+### HTTP transfer cache
+
+Với hydration, Angular có thể đưa kết quả `HttpClient` của server vào HTML và dùng lại cho request tương ứng đầu tiên ở client. Đây là lựa chọn đầu tiên cho các GET/HEAD công khai, idempotent dùng để render trang.
+
+```ts
+// src/app/app.config.ts
+import { ApplicationConfig } from '@angular/core';
+import {
+  provideClientHydration,
+  withEventReplay,
+  withHttpTransferCacheOptions,
+} from '@angular/platform-browser';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideClientHydration(
+      withEventReplay(),
+      withHttpTransferCacheOptions({
+        filter: (request) => request.url.startsWith('/api/public/'),
+      }),
+    ),
+  ],
+};
+```
+
+Ví dụ filter chỉ cache API công khai cho HTML đầu. Tùy chính sách phiên bản Angular, GET/HEAD là nhóm request phù hợp mặc định; đừng bật cache POST hoặc request kèm header xác thực chỉ để giảm một request. Những request đó có thể có side effect hoặc trả dữ liệu riêng tư.
+
+Transfer cache chỉ giúp request đầu tương ứng khi app bootstrap. Nó không phải cache dữ liệu lâu dài, không thay thế HTTP cache header/CDN, và không tự đồng bộ dữ liệu thay đổi sau đó. Nếu browser cần refresh sau khi người dùng thao tác, service vẫn phải có chiến lược fetch/cache riêng.
+
+### TransferState cho dữ liệu không đi qua HttpClient
+
+Dùng `TransferState` khi dữ liệu được lấy bằng SDK riêng, được tính trên server, hoặc không đi theo `HttpClient`. Key phải đủ cụ thể cho route và input; một key chung như `PRODUCTS` có thể đưa dữ liệu của `/products/42` sang `/products/99`.
+
+```ts
+import { Injectable, PLATFORM_ID, inject } from '@angular/core';
+import { isPlatformServer } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { TransferState, makeStateKey } from '@angular/core';
+import { Observable, of, tap } from 'rxjs';
+
+interface ProductSummary {
+  id: string;
+  name: string;
+  price: number;
+}
+
+@Injectable({ providedIn: 'root' })
+export class FeaturedProductsService {
+  private readonly http = inject(HttpClient);
+  private readonly state = inject(TransferState);
+  private readonly platformId = inject(PLATFORM_ID);
+  private readonly stateKey = makeStateKey<ProductSummary[]>('featured-products:v1');
+
+  getFeatured(): Observable<ProductSummary[]> {
+    const transferred = this.state.get<ProductSummary[] | null>(this.stateKey, null);
+
+    if (transferred !== null) {
+      this.state.remove(this.stateKey);
+      return of(transferred);
+    }
+
+    return this.http.get<ProductSummary[]>('/api/public/products/featured').pipe(
+      tap((products) => {
+        if (isPlatformServer(this.platformId)) {
+          this.state.set(this.stateKey, products);
+        }
+      }),
+    );
+  }
+}
+```
+
+Ví dụ đọc state trước, rồi xóa nó sau khi client dùng để không giữ bản sao trong bộ nhớ lâu hơn cần thiết. Trên server, state được ghi vào response để client sử dụng. Trong ứng dụng thật, hãy bao gồm locale, params route hoặc tenant vào key nếu chúng ảnh hưởng dữ liệu.
+
+### Dữ liệu theo người dùng và bảo mật
+
+Bất cứ thứ gì trong HTML SSR hoặc `TransferState` đều được gửi cho browser và có thể xem bằng View Source/DevTools. Không đặt access token, secret, thông tin thanh toán đầy đủ, quyền nội bộ hoặc dữ liệu của người dùng khác vào state transfer.
+
+Cache HTML SSR có thêm rủi ro: nếu response của Alice được CDN cache theo URL chung `/account`, Bob có thể nhận HTML chứa tên Alice. Với HTML phụ thuộc cookie/authorization, dùng cache `private`/`no-store` phù hợp, phân tách cache key đúng hoặc không SSR route đó. Cách an toàn nhất cho trang riêng tư thường là render shell chung và lấy dữ liệu cá nhân sau khi xác thực ở client.
+
+## Chẩn đoán hydration mismatch
+
+Hydration mismatch xảy ra khi Angular client không thể ghép DOM hiện tại với cấu trúc mà template client mong đợi. Console thường báo hydration error, có thể kèm mã như `NG0500` hoặc thông tin node/component. Hãy xem message và DOM thật thay vì chỉ thêm `try/catch`; lỗi chỉ xuất hiện ở production hoặc dưới locale khác vẫn là lỗi dữ liệu/render cần sửa.
+
+### Nguồn HTML không xác định
+
+Các nguyên nhân phổ biến và cách thay thế:
+
+| Nguyên nhân | Vì sao server/client khác nhau | Cách sửa ưu tiên |
+| --- | --- | --- |
+| `Math.random()`, `Date.now()` trong template hoặc khi khởi tạo | Hai môi trường tính giá trị khác nhau | Tạo giá trị trên server và transfer, hoặc hiển thị sau hydration |
+| Format ngày/tiền theo timezone/locale mặc định | Server và browser có timezone/locale khác | Cấp locale/timezone xác định hoặc transfer kết quả cần hiển thị |
+| Đọc `localStorage`, viewport, media query để quyết định `@if` | Server không có state browser | Render shell ổn định; cập nhật trạng thái sau hydration |
+| Sửa DOM trực tiếp bằng native API/jQuery | Node thêm/xóa ngoài hiểu biết của Angular | Dùng binding Angular; hoãn widget DOM và cô lập nó |
+| HTML không hợp lệ, browser tự sửa cấu trúc | Parser browser tạo DOM khác HTML server dự kiến | Sửa nesting, đặc biệt `p`, `table`, `tbody`, list và interactive element lồng nhau |
+| Dữ liệu API đổi giữa SSR và request client | Hai lượt render nhận snapshot khác nhau | Dùng HTTP transfer cache/`TransferState` cho dữ liệu ban đầu |
+
+Ví dụ sau không xác định vì timestamp đổi ở mỗi môi trường:
+
+```ts
+@Component({
+  selector: 'app-build-time',
+  template: `<p>Render lúc: {{ renderedAt }}</p>`,
+})
+export class BuildTimeComponent {
+  readonly renderedAt = new Date().toLocaleTimeString();
+}
+```
+
+Đừng tạo timestamp trong component nếu nó phải hiện trong HTML SSR. Hãy lấy từ API/server, chuyển nó sang client, hoặc hiển thị một nhãn ổn định như “Cập nhật gần đây” rồi cập nhật đồng hồ sau hydration.
+
+### Quy trình khoanh vùng
+
+Khi mismatch xuất hiện, xử lý từ bằng chứng nhỏ nhất:
+
+1. **Tái hiện ở route cụ thể.** Reload cứng URL SSR, giữ Console và response HTML. Ghi locale, timezone, cookie, query params và feature flag; chúng thường là đầu vào gây khác biệt.
+2. **Đọc node Angular nêu ra.** Tìm component/template chứa node đó. So sánh HTML response từ server với DOM trong Elements trước và sau khi client khởi tạo.
+3. **Loại bỏ nguồn không xác định.** Tạm cố định dữ liệu giả, tắt widget browser-only hoặc render cùng một nhánh `@if`. Nếu lỗi mất, khôi phục từng đầu vào để xác định nguyên nhân chứ không chỉ vị trí.
+4. **Kiểm tra browser tự sửa HTML.** Xem View Source (response gốc) khác gì Elements (DOM đã parse). Đây là dấu hiệu mạnh của nesting HTML sai.
+5. **Sửa tại nguồn và kiểm tra lại cả hai lượt.** HTML SSR và render client đầu tiên phải cùng cấu trúc. Sau đó thử cache lạnh, điều hướng client-side và các biến thể locale/đăng nhập liên quan.
+
+<Callout type="warn" title="Đừng ẩn warning hydration">
+  Xóa log, tắt hydration toàn ứng dụng hoặc render lại toàn bộ DOM có thể làm symptom biến mất nhưng bỏ mất lợi ích SSR. Chỉ chấp nhận fallback khi đã biết vùng nào không thể hydrate và vì sao.
+</Callout>
+
+### Khi nào dùng ngSkipHydration
+
+`ngSkipHydration` cho Angular bỏ qua hydration của host component và render lại vùng đó ở client. Nó hữu ích tạm thời khi một widget bên thứ ba sửa DOM theo cách không thể thay đổi ngay, ví dụ editor kế thừa chưa SSR-safe.
+
+```html
+<legacy-rich-editor ngSkipHydration />
+```
+
+Đây không phải thuốc chữa mismatch tổng quát. Vùng bị bỏ qua mất lợi ích tái sử dụng DOM, có thể nháy khi client render lại và che lỗi trong component Angular tự kiểm soát. Chỉ đặt nó trên host component cần thiết, ghi lý do/issue để gỡ sau, và không đặt bừa lên phần tử thường hoặc toàn bộ `app-root`.
+
+## Vận hành và trade-off
+
+### Cache, CDN và nội dung động
+
+Prerender tạo file tĩnh nên phù hợp cache dài bằng URL/hash deployment. SSR tạo response theo request nên cache policy phải phản ánh dữ liệu trong HTML:
+
+| Loại response | Chiến lược thường hợp lý | Điều phải xác minh |
+| --- | --- | --- |
+| Prerender công khai | CDN cache dài, invalidation/rebuild khi nội dung đổi | Link sâu, asset hash, thời điểm snapshot cũ |
+| SSR công khai theo URL | CDN cache ngắn hoặc revalidate; cache key chứa URL/query cần thiết | TTL, purge khi dữ liệu đổi, không cache error response ngoài ý muốn |
+| SSR theo locale | `Vary`/cache key theo locale hoặc URL locale rõ ràng | Hai ngôn ngữ không chia cùng HTML cache |
+| SSR có cookie/authorization | `private` hoặc `no-store` trừ khi có thiết kế cache per-user chắc chắn | Không rò dữ liệu hoặc header người dùng qua shared cache |
+| CSR shell | Cache `index.html` ngắn; assets hash cache dài | Server fallback cho deep link và version client mới |
+
+SSR cũng tiêu thụ CPU, bộ nhớ và connection đến backend trên mỗi miss cache. Đặt timeout, error boundary/fallback, health check và giới hạn tài nguyên cho runtime server. Một API chậm có thể khiến HTML đầu chậm hơn CSR nếu server chờ tất cả dữ liệu mà không có cache hay chiến lược phân lớp.
+
+### Quan sát và kiểm thử
+
+Tối thiểu nên ghi riêng các tín hiệu server và client:
+
+- **Server:** request rate, TTFB, thời gian render, lỗi render, timeout API và tỷ lệ cache hit/miss.
+- **Client:** LCP/INP/CLS, lỗi hydration trong Console hoặc error tracker, số request API lặp sau bootstrap và lỗi event sớm.
+- **Crawler/SEO:** status code, canonical URL, title, description và nội dung chủ đạo có mặt trong HTML response.
+
+Kiểm thử không cần render cả ứng dụng trong Node cho mọi thay đổi nhỏ. Nhưng route SSR quan trọng cần có smoke test request trực tiếp, test E2E có JavaScript để xác nhận tương tác sau hydration, và regression test cho dữ liệu/HTML từng gây mismatch. Khi thay đổi cache, kiểm tra thêm hai user/locale khác nhau để phát hiện response bị chia sẻ sai.
+
+### Các lỗi lựa chọn thường gặp
+
+| Cách làm | Hệ quả | Quyết định tốt hơn |
+| --- | --- | --- |
+| Bật SSR cho tất cả route | Server tải cao, route riêng tư/cache phức tạp không cần thiết | Phân loại từng route theo SEO, dữ liệu và cache |
+| Đọc browser global trong constructor | SSR crash trước khi trả HTML | Guard bằng `isPlatformBrowser` tại điểm truy cập |
+| Để client gọi lại toàn bộ API sau SSR | Backend bị gọi hai lần, UI có thể nháy | Dùng HTTP transfer cache hoặc `TransferState` cho dữ liệu đầu |
+| Cache HTML authenticated ở CDN như HTML công khai | Rò dữ liệu giữa người dùng | `private`/`no-store`, cache key an toàn hoặc CSR cho route đó |
+| Dùng `ngSkipHydration` cho toàn app | Mất lợi ích hydration và che lỗi template | Sửa markup/dữ liệu; chỉ cô lập widget bắt buộc |
+| Chỉ kiểm tra route qua điều hướng nội bộ | Không phát hiện server route, deep link hoặc 404 sai | Reload trực tiếp URL và request server trong smoke test |
+
+## Checklist và tóm tắt
+
+Trước khi mở rộng SSR/hydration, xác minh:
+
+- [ ] Mỗi route quan trọng đã được chọn CSR, prerender hoặc SSR vì nhu cầu dữ liệu/SEO/cache cụ thể.
+- [ ] Response HTML SSR/prerender có nội dung chủ đạo, metadata và status code đúng trước khi JavaScript chạy.
+- [ ] `provideClientHydration(...)` ở bootstrap client và `provideServerRendering(...)` ở cấu hình server khớp với route strategy.
+- [ ] Không có `window`, `document`, storage, viewport API hoặc side effect browser-only chạy trên server.
+- [ ] HTML server và render client đầu tiên xác định, cùng locale/timezone/dữ liệu ban đầu khi cần.
+- [ ] Request ban đầu không bị lặp không cần thiết; dữ liệu transfer không chứa secret hay dữ liệu riêng tư bị cache chung.
+- [ ] Route SSR, deep link, 404, route riêng tư, cache lạnh và tương tác sau hydration đều đã được smoke test.
+- [ ] Có đo TTFB và Web Vitals trước/sau, cùng log lỗi server và lỗi hydration để điều tra production.
+
+Tóm lại, CSR, prerender và SSR là ba mô hình có lời hứa khác nhau về thời điểm tạo HTML. SSR tạo HTML theo request; hydration giúp client tiếp quản HTML đó mà không render lại từ đầu. Thành công phụ thuộc vào DOM xác định, guard đúng API browser, dữ liệu đầu được transfer an toàn và cache không chia sẻ sai. Hãy áp dụng theo route, đo tác động thực tế và xử lý mismatch tại nguồn thay vì che nó đi.
+
+<Cards>
+  <Card title="Đo và tối ưu hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="Thiết lập baseline TTFB, Web Vitals và thao tác quan trọng trước khi đổi chiến lược render." />
+  <Card title="Build và tối ưu bundle" href="/docs/testing-performance-deploy/build-optimization" description="Giảm JavaScript phải tải và chạy sau khi HTML đầu đã đến." />
+  <Card title="Docker và Cloudflare" href="/docs/testing-performance-deploy/deployment" description="Đóng gói runtime SSR, cấu hình cache và xác minh bản triển khai." />
+</Cards>

@@ -1,10 +1,236 @@
 ---
 title: Công cụ phát triển
-description: Angular DevTools, linting, formatting và quy trình làm việc đề xuất.
+description: Dùng trình soạn thảo, DevTools, kiểm tra chất lượng mã và Angular CLI để phát triển Angular hiệu quả.
 ---
 
-Trang này sẽ trình bày **Công cụ phát triển** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu">
+  Trang này giúp bạn chọn đúng công cụ cho từng việc: viết mã, quan sát ứng dụng trong trình duyệt, tìm lỗi và kiểm tra chất lượng trước khi chia sẻ thay đổi.
 </Callout>
+
+## Mục lục
+
+- [Bộ công cụ và vai trò](#bộ-công-cụ-và-vai-trò)
+  - [Không dùng một công cụ cho mọi câu hỏi](#không-dùng-một-công-cụ-cho-mọi-câu-hỏi)
+- [Thiết lập nơi viết mã](#thiết-lập-nơi-viết-mã)
+  - [Trình soạn thảo và Angular Language Service](#trình-soạn-thảo-và-angular-language-service)
+  - [Terminal tích hợp và Git](#terminal-tích-hợp-và-git)
+- [Quan sát ứng dụng trong trình duyệt](#quan-sát-ứng-dụng-trong-trình-duyệt)
+  - [Browser DevTools](#browser-devtools)
+  - [Angular DevTools](#angular-devtools)
+- [Quy trình tìm lỗi](#quy-trình-tìm-lỗi)
+  - [Thu hẹp lỗi trước khi sửa](#thu-hẹp-lỗi-trước-khi-sửa)
+  - [Kiểm tra request và dữ liệu](#kiểm-tra-request-và-dữ-liệu)
+  - [Đo hiệu năng đúng chỗ](#đo-hiệu-năng-đúng-chỗ)
+- [Giữ mã nguồn nhất quán](#giữ-mã-nguồn-nhất-quán)
+  - [Formatter và linter khác nhau](#formatter-và-linter-khác-nhau)
+  - [Kiểm tra trong workspace](#kiểm-tra-trong-workspace)
+- [Quy trình làm việc đề xuất](#quy-trình-làm-việc-đề-xuất)
+- [Sự cố thường gặp](#sự-cố-thường-gặp)
+- [Bước tiếp theo](#bước-tiếp-theo)
+
+## Bộ công cụ và vai trò
+
+Phát triển Angular không chỉ là sửa tệp TypeScript rồi tải lại trang. Một lỗi có thể nằm trong template, dữ liệu trả về từ API, CSS, cấu hình router hoặc cách component cập nhật giao diện. Mỗi công cụ cung cấp một loại bằng chứng khác nhau.
+
+| Công cụ | Câu hỏi cần trả lời | Thời điểm dùng |
+| --- | --- | --- |
+| Trình soạn thảo + Angular Language Service | Template này có đúng kiểu dữ liệu và tên thành phần không? | Trong khi viết hoặc đổi tên mã |
+| Angular CLI | Workspace có chạy, sinh mã và kiểm tra theo cấu hình dự án không? | Tạo mã, chạy server, test hoặc build |
+| Browser DevTools | Trình duyệt thực sự tải gì, render gì và báo lỗi gì? | Lỗi giao diện, Network, CSS, JavaScript |
+| Angular DevTools | Cây component và lần chạy change detection của Angular diễn ra thế nào? | Cần hiểu trạng thái hoặc phân tích cập nhật UI |
+| Formatter và linter | Mã có cùng định dạng và tuân thủ quy tắc nhóm không? | Trước khi tạo commit hoặc mở pull request |
+| Git | Thay đổi nào đang được thực hiện và có thể xem lại không? | Xuyên suốt quá trình làm việc |
+
+### Không dùng một công cụ cho mọi câu hỏi
+
+Ví dụ, khi danh sách sản phẩm trống, Console có thể cho biết có lỗi JavaScript hay không. Nhưng Console không chứng minh API đã trả dữ liệu. Hãy mở Network để xem request, status code và response trước.
+
+Tương tự, Angular DevTools cho biết component nào đang tồn tại và khi nào Angular chạy kiểm tra cập nhật. Công cụ này không thay thế Performance panel của trình duyệt khi bạn cần đo thời gian tải ảnh, layout hoặc JavaScript của thư viện ngoài Angular.
+
+Nói ngắn gọn: bắt đầu từ câu hỏi cụ thể, rồi chọn công cụ tạo ra bằng chứng trực tiếp nhất.
+
+## Thiết lập nơi viết mã
+
+### Trình soạn thảo và Angular Language Service
+
+Visual Studio Code là lựa chọn phổ biến, nhưng bất kỳ trình soạn thảo nào hỗ trợ TypeScript và Angular Language Service đều dùng được. **Angular Language Service** phân tích template Angular, vì vậy nó có thể gợi ý tên property, báo binding không tồn tại và hỗ trợ điều hướng từ template sang mã TypeScript.
+
+Cài extension Angular Language Service cho trình soạn thảo của bạn, sau đó mở **thư mục gốc của workspace** thay vì chỉ mở một tệp `.ts`. Khi đó extension mới đọc được `tsconfig`, dependency và cấu hình Angular của dự án.
+
+Ví dụ, với component có `user = { name: 'An' }`, template dưới đây sẽ được kiểm tra khi bạn gõ:
+
+```html
+<p>{{ user.name }}</p>
+```
+
+Nếu đổi thành `{{ user.fullName }}` khi `fullName` không tồn tại, Language Service thường sẽ báo ngay trong editor. Đây là phản hồi sớm hơn so với chờ mở trình duyệt mới phát hiện giao diện không đúng.
+
+<Callout type="idea" title="Ưu tiên sửa lỗi ở nơi xuất hiện đầu tiên">
+  Một lỗi kiểu hoặc template được editor chỉ ra thường rẻ hơn để sửa so với lỗi chỉ lộ ra lúc chạy ứng dụng. Đừng tắt cảnh báo chỉ để làm sạch danh sách Problems; hãy hiểu nguyên nhân của nó.
+</Callout>
+
+### Terminal tích hợp và Git
+
+Terminal trong editor giúp bạn chạy các script của chính workspace mà không phải rời ngữ cảnh. Sau khi clone hoặc mở một dự án, kiểm tra các script có sẵn trong `package.json` trước. Tên script là quy ước của repository, không phải mọi dự án đều có cùng một tập lệnh.
+
+Git giúp tách một thay đổi nhỏ thành lịch sử có thể xem lại. Hai lệnh cần dùng thường xuyên là:
+
+```bash
+git status
+git diff
+```
+
+`git status` cho biết tệp nào đã thay đổi hoặc chưa được theo dõi. `git diff` cho biết chính xác nội dung đã đổi. Hãy xem diff trước khi commit, đặc biệt sau khi chạy formatter hoặc công cụ tự động sinh mã.
+
+## Quan sát ứng dụng trong trình duyệt
+
+### Browser DevTools
+
+Chrome, Edge, Firefox và Safari đều có Developer Tools. Mở DevTools bằng menu của trình duyệt hoặc phím tắt của hệ điều hành, rồi bắt đầu với panel phù hợp:
+
+- **Console**: xem exception, warning và log tạm thời.
+- **Elements/Inspector**: kiểm tra DOM thực tế và các quy tắc CSS đang thắng.
+- **Network**: xem request, response, header, payload và thời gian tải.
+- **Sources/Debugger**: đặt breakpoint, bước qua mã và xem call stack.
+- **Performance**: ghi lại một tương tác để tìm đoạn JavaScript, style hoặc layout tốn thời gian.
+- **Application/Storage**: kiểm tra cookie, local storage, session storage hoặc cache của ứng dụng.
+
+DOM trong Elements là kết quả sau khi Angular và trình duyệt đã xử lý template. Vì vậy, nếu selector CSS nhìn có vẻ đúng trong tệp `.scss` nhưng không có hiệu lực, hãy kiểm tra element thật, class thật và quy tắc CSS bị ghi đè trong panel này.
+
+<Callout type="warn" title="Không ghi dữ liệu nhạy cảm vào Console">
+  Access token, mật khẩu, thông tin cá nhân và response nhạy cảm có thể bị lưu trong lịch sử DevTools hoặc xuất hiện trong ảnh chụp màn hình lỗi. Chỉ log dữ liệu tối thiểu cần để chẩn đoán và xóa log tạm trước khi gửi mã.
+</Callout>
+
+### Angular DevTools
+
+[Angular DevTools](https://angular.dev/tools/devtools) là extension trình duyệt dành cho ứng dụng Angular. Sau khi cài extension và mở ứng dụng trong môi trường phát triển, nó thêm các panel Angular vào DevTools của trình duyệt được hỗ trợ.
+
+Hai khu vực quan trọng là:
+
+- **Components**: duyệt cây component/directive, chọn một node và xem các giá trị Angular liên quan. Dùng nó để xác nhận component bạn nghĩ đang render có thực sự tồn tại không.
+- **Profiler**: ghi lại hoạt động của Angular khi bạn thao tác với trang. Dùng nó để tìm component hoặc nhánh component khiến một lần cập nhật kéo dài bất thường.
+
+Một cách dùng đơn giản là chọn một component trong panel Components, thực hiện thao tác gây lỗi trên giao diện, rồi quan sát liệu giá trị input hoặc state hiển thị có đổi như mong đợi không. Nếu giá trị không đổi, lỗi thường nằm trước bước render, chẳng hạn dữ liệu chưa được gán. Nếu giá trị đã đổi nhưng DOM không như mong đợi, quay lại kiểm tra template, điều kiện hiển thị và CSS.
+
+<Callout type="info" title="Profiler là dữ liệu khởi đầu, không phải kết luận">
+  Một profile chỉ phản ánh đúng máy, dữ liệu và thao tác tại thời điểm ghi. Hãy ghi lại cùng một thao tác vài lần, so sánh trước và sau thay đổi, rồi sửa điểm nóng đã được đo thay vì tối ưu theo cảm giác.
+</Callout>
+
+## Quy trình tìm lỗi
+
+### Thu hẹp lỗi trước khi sửa
+
+Đừng sửa nhiều giả thuyết cùng lúc. Hãy biến mô tả mơ hồ như “trang không cập nhật” thành một quan sát có thể kiểm tra: nút có nhận sự kiện không, hàm có chạy không, request có được gửi không, hay dữ liệu có thay đổi nhưng chưa render?
+
+Có thể đi theo luồng sau:
+
+```text
+Người dùng thao tác
+        │
+        ▼
+Sự kiện trong template có chạy?
+        │ có
+        ▼
+Dữ liệu/state có thay đổi?
+        │ có
+        ▼
+Component và DOM có nhận giá trị mới?
+        │ có
+        ▼
+Kiểm tra CSS, điều kiện hiển thị và dữ liệu đầu vào
+```
+
+Ở mỗi bước, dùng một bằng chứng nhỏ: breakpoint hoặc log tạm cho event, Network cho HTTP, Angular DevTools cho component, và Elements cho DOM/CSS. Khi một bước đã sai, dừng và sửa ở đó; chưa cần tối ưu hay thay đổi những tầng phía sau.
+
+### Kiểm tra request và dữ liệu
+
+Với lỗi liên quan API, mở Network rồi tái hiện đúng thao tác. Chọn request cần xem và kiểm tra theo thứ tự:
+
+1. **URL và method** có đúng endpoint và thao tác `GET`, `POST`, `PUT` hoặc `DELETE` mong muốn không?
+2. **Status code** có cho biết request thành công, bị từ chối hay server lỗi không?
+3. **Request payload và headers** có chứa dữ liệu, content type hoặc thông tin xác thực cần thiết không?
+4. **Response body** có đúng cấu trúc mà mã TypeScript đang giả định không?
+
+Ví dụ, API có thể trả về `{ "items": [] }`, trong khi component lại đọc `response.data`. TypeScript không thể tự biết cấu trúc JSON thực tế từ server. Network response là bằng chứng nhanh nhất để phát hiện sự lệch này.
+
+<Callout type="warn" title="HTTP 200 không luôn đồng nghĩa giao diện đúng">
+  Request thành công chỉ chứng minh server đã trả response. Bạn vẫn cần kiểm tra dữ liệu được chuyển vào component, điều kiện trong template và cách hiển thị danh sách hoặc trạng thái rỗng.
+</Callout>
+
+### Đo hiệu năng đúng chỗ
+
+Khi trang chậm, trước tiên xác định thao tác tái hiện được, ví dụ gõ vào ô tìm kiếm hoặc mở một bảng 1.000 dòng. Sau đó ghi profile trong Performance panel của trình duyệt hoặc Profiler của Angular, tùy câu hỏi cần trả lời.
+
+- Nếu thao tác chậm vì tải tài nguyên, request HTTP hoặc script của bên thứ ba, bắt đầu ở **Network** và **Performance** của trình duyệt.
+- Nếu một thay đổi dữ liệu làm quá nhiều component Angular cập nhật, bắt đầu với **Angular DevTools Profiler**.
+- Nếu vấn đề chỉ xuất hiện với dữ liệu lớn, tạo dữ liệu thử đại diện thay vì đo trên danh sách rỗng.
+
+Sau khi sửa, đo lại đúng thao tác cũ. Một thay đổi được gọi là cải thiện khi số đo tốt hơn mà hành vi vẫn đúng, không chỉ vì đoạn mã trông ngắn hơn.
+
+## Giữ mã nguồn nhất quán
+
+### Formatter và linter khác nhau
+
+**Formatter** tự chuẩn hóa cách trình bày mã: khoảng trắng, xuống dòng và dấu nháy. [Prettier](https://prettier.io/) là một lựa chọn phổ biến. Formatter không quyết định logic có đúng hay không.
+
+**Linter** phân tích mã theo các quy tắc chất lượng, chẳng hạn biến không dùng, import không hợp lệ hoặc các quy ước của nhóm. Trong Angular hiện đại, lint không còn được ngầm định là TSLint. Nhiều workspace dùng [angular-eslint](https://github.com/angular-eslint/angular-eslint) để lint TypeScript và template Angular; workspace khác có thể chưa cấu hình lint.
+
+Vì vậy, hãy xem `package.json`, `angular.json` và tài liệu của repository trước khi thêm công cụ. Không tự ý thêm cả Prettier, ESLint và nhiều extension chỉ để “chuẩn hóa” một dự án đang có quy ước khác.
+
+Ví dụ, nếu repository đã cấu hình Prettier, hai lệnh thường gặp là:
+
+```bash
+npx prettier . --check
+npx prettier . --write
+```
+
+Chạy `--check` trong kiểm tra tự động để chỉ báo tệp sai định dạng. Chỉ chạy `--write` khi bạn chủ động muốn cập nhật tệp; sau đó luôn xem lại `git diff` để tránh đưa thay đổi định dạng không liên quan vào cùng một commit.
+
+### Kiểm tra trong workspace
+
+Các lệnh kiểm tra phải chạy bằng dependency cục bộ của workspace. Cách chính xác nhất là dùng script mà dự án đã định nghĩa. Một quy trình điển hình có thể là:
+
+```bash
+npm run lint      # chỉ có khi workspace khai báo script hoặc lint target
+npx ng test
+npx ng build
+```
+
+`npx ng test` và `npx ng build` gọi Angular CLI cục bộ nếu nó đã được cài trong workspace. Lệnh test dùng test runner mà cấu hình Angular của dự án chọn; đừng giả định mọi dự án dùng cùng một runner hoặc cùng trình duyệt.
+
+<Callout type="info" title="Chạy kiểm tra theo mức độ thay đổi">
+  Sửa template nhỏ không thay thế được việc chạy test phù hợp. Ngược lại, một thử nghiệm nhanh ở trình duyệt cũng rất có giá trị trước khi chờ bộ kiểm tra dài. Kết hợp kiểm tra tĩnh, test tự động và thao tác thủ công theo rủi ro của thay đổi.
+</Callout>
+
+## Quy trình làm việc đề xuất
+
+Một vòng lặp nhỏ, lặp lại được giúp giảm thời gian truy tìm lỗi và giữ diff dễ review:
+
+1. **Đọc ngữ cảnh**: mở component, template, test liên quan và kiểm tra `git status`.
+2. **Tái hiện hoặc mô tả hành vi mong muốn**: xác định thao tác đầu vào và kết quả có thể quan sát.
+3. **Thay đổi nhỏ nhất có thể**: dùng editor và Angular Language Service để sửa đúng nơi.
+4. **Chạy ứng dụng**: ưu tiên script dự án, thường là `npm start` hoặc lệnh CLI tương đương đã được nhóm quy định.
+5. **Xác minh trong trình duyệt**: kiểm tra Console, Network, Angular DevTools hoặc Elements theo loại thay đổi.
+6. **Chạy kiểm tra phù hợp**: formatter check, lint, test hoặc build theo quy ước của workspace.
+7. **Xem diff trước khi chia sẻ**: dùng `git diff` để bảo đảm chỉ có thay đổi chủ đích.
+
+Quy trình này không bắt buộc mọi thay đổi phải dùng mọi công cụ. Sửa một câu chữ không cần profile hiệu năng. Nhưng một thay đổi ảnh hưởng dữ liệu, template hoặc dependency nên có bằng chứng tương ứng trước khi được chia sẻ.
+
+## Sự cố thường gặp
+
+| Hiện tượng | Kiểm tra trước | Hướng xử lý |
+| --- | --- | --- |
+| Angular DevTools không hiện dữ liệu | Ứng dụng có đang chạy phiên bản Angular được extension hỗ trợ và trong môi trường phát triển không? | Cập nhật extension, tải lại trang và xem [hướng dẫn chính thức](https://angular.dev/tools/devtools). |
+| Editor không gợi ý trong template | Có mở đúng thư mục workspace và đã cài Angular Language Service không? | Mở lại thư mục gốc, khởi động lại TypeScript/Angular language service và kiểm tra dependency đã cài. |
+| Sửa CSS nhưng giao diện không đổi | DOM thực tế có class/selector đó không? Quy tắc nào đang thắng? | Dùng Elements/Inspector để xem selector, độ ưu tiên và style bị ghi đè. |
+| API “không có dữ liệu” | Request có được gửi và response thực sự là gì? | Dùng Network để kiểm tra URL, status, payload và JSON trước khi sửa component. |
+| `ng lint` thất bại hoặc không tồn tại | Workspace có lint target hay script lint không? | Đọc cấu hình hiện có; chỉ thêm ESLint theo quy ước repository khi nhóm quyết định. |
+
+## Bước tiếp theo
+
+Công cụ chỉ hữu ích khi bạn biết chúng hỗ trợ bước nào trong quy trình. Tiếp theo, hãy nắm các lệnh Angular CLI để tạo mã, chạy development server và kiểm tra workspace một cách nhất quán.
+
+<Cards>
+  <Card title="Cài đặt môi trường" href="/docs/bat-dau/cai-dat-moi-truong" description="Chuẩn bị Node.js, editor, Git và trình duyệt cho Angular." />
+  <Card title="Angular CLI" href="/docs/bat-dau/angular-cli" description="Tạo, chạy và quản lý workspace bằng các lệnh CLI." />
+</Cards>

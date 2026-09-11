@@ -1,10 +1,409 @@
 ---
 title: E2E testing
-description: Kiểm thử luồng nghiệp vụ hoàn chỉnh trên trình duyệt.
+description: "Thiết kế kiểm thử đầu-cuối Angular trên trình duyệt: chọn luồng, selector, dữ liệu, mạng và CI đáng tin cậy."
 ---
 
-Trang này sẽ trình bày **E2E testing** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của bài">
+  Sau bài này, bạn có thể bảo vệ một vài hành trình Angular có rủi ro cao bằng Playwright hoặc Cypress mà không biến E2E thành một suite chậm, đắt tiền và hay lỗi ngẫu nhiên. Ví dụ xuyên suốt là luồng tạo sản phẩm: đăng nhập, mở form, nhập dữ liệu, lưu và thấy sản phẩm mới.
 </Callout>
+
+## Mục lục
+
+- [E2E nằm ở đâu trong chiến lược kiểm thử](#e2e-nằm-ở-đâu-trong-chiến-lược-kiểm-thử)
+  - [Test pyramid và phạm vi của E2E](#test-pyramid-và-phạm-vi-của-e2e)
+  - [Chọn hành trình trước khi viết test](#chọn-hành-trình-trước-khi-viết-test)
+- [Cơ chế của một E2E trên Angular](#cơ-chế-của-một-e2e-trên-angular)
+  - [Trình duyệt thật, ứng dụng và backend](#trình-duyệt-thật-ứng-dụng-và-backend)
+  - [Playwright và Cypress: chọn công cụ theo ngữ cảnh](#playwright-và-cypress-chọn-công-cụ-theo-ngữ-cảnh)
+  - [Điều gì cần chuẩn bị trong ứng dụng Angular](#điều-gì-cần-chuẩn-bị-trong-ứng-dụng-angular)
+- [Ví dụ Playwright: luồng tạo sản phẩm](#ví-dụ-playwright-luồng-tạo-sản-phẩm)
+  - [Cấu hình và tổ chức test](#cấu-hình-và-tổ-chức-test)
+  - [Viết test theo hành vi người dùng](#viết-test-theo-hành-vi-người-dùng)
+- [Selector bền vững là một UI contract](#selector-bền-vững-là-một-ui-contract)
+  - [Thứ tự ưu tiên selector](#thứ-tự-ưu-tiên-selector)
+  - [Các selector dễ làm test vỡ](#các-selector-dễ-làm-test-vỡ)
+- [Dữ liệu test và kiểm soát network](#dữ-liệu-test-và-kiểm-soát-network)
+  - [Độc lập, có thể lặp lại và dọn dẹp](#độc-lập-có-thể-lặp-lại-và-dọn-dẹp)
+  - [Khi nào dùng backend thật, seed hay mock](#khi-nào-dùng-backend-thật-seed-hay-mock)
+  - [Ví dụ chặn request có chủ đích](#ví-dụ-chặn-request-có-chủ-đích)
+- [Chạy song song và trong CI](#chạy-song-song-và-trong-ci)
+  - [Cô lập worker và shard](#cô-lập-worker-và-shard)
+  - [Thiết kế cổng chất lượng theo chi phí](#thiết-kế-cổng-chất-lượng-theo-chi-phí)
+- [Chẩn đoán flaky test](#chẩn-đoán-flaky-test)
+  - [Quy trình tìm nguyên nhân](#quy-trình-tìm-nguyên-nhân)
+  - [Các sửa chữa sai thường gặp](#các-sửa-chữa-sai-thường-gặp)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## E2E nằm ở đâu trong chiến lược kiểm thử
+
+E2E (end-to-end) là kiểm thử điều khiển ứng dụng qua giao diện trình duyệt như người dùng: mở URL, click, nhập liệu, điều hướng và quan sát kết quả. Nó xác minh các điểm nối mà unit test và component test thường không thấy cùng lúc: router Angular, template đã build, JavaScript trong trình duyệt, HTTP, xác thực và backend.
+
+### Test pyramid và phạm vi của E2E
+
+Test pyramid không yêu cầu một tỷ lệ số học cố định. Nó nhắc rằng test càng gần người dùng càng tốn thời gian chạy, khó cô lập và khó chỉ ra nguyên nhân lỗi. Vì vậy, số E2E nên ít hơn số unit test; mỗi test phải đại diện cho một cam kết nghiệp vụ quan trọng.
+
+```text
+                  ┌───────────────────────────┐
+                  │ E2E: hành trình quan trọng│
+                  │ chậm, chi phí cao, ít     │
+                  └─────────────▲─────────────┘
+                                │
+                    ┌───────────┴───────────┐
+                    │ Component: template,  │
+                    │ trạng thái, tương tác │
+                    └───────────▲───────────┘
+                                │
+              ┌─────────────────┴─────────────────┐
+              │ Unit: rule nghiệp vụ, hàm, service│
+              │ nhanh, rẻ, nhiều                  │
+              └───────────────────────────────────┘
+```
+
+Ví dụ, quy tắc “giá sản phẩm phải lớn hơn 0” nên có unit hoặc component test. Một E2E cho lỗi validation này chỉ có giá trị khi nó đồng thời bảo vệ việc hiển thị lỗi, khóa nút lưu và ngăn request thật. Nếu E2E chỉ lặp lại assertion của unit test, nó tăng chi phí nhưng không tăng nhiều niềm tin.
+
+<Callout type="idea" title="Quy tắc chọn lớp thấp nhất">
+  Khi phát hiện một lỗi production, hãy bổ sung test ở lớp thấp nhất vẫn tái hiện được lỗi. Chỉ giữ ở E2E khi lỗi cần sự phối hợp của trình duyệt, route, API hoặc nhiều màn hình.
+</Callout>
+
+### Chọn hành trình trước khi viết test
+
+Bắt đầu bằng một bảng rủi ro, không phải danh sách mọi nút trên màn hình. Một hành trình phù hợp thường có tác động tiền bạc, quyền truy cập, dữ liệu quan trọng hoặc là đường đi chính của đa số người dùng.
+
+| Hành trình | Rủi ro nếu hỏng | Phạm vi E2E nên giữ | Test ở lớp thấp hơn |
+| --- | --- | --- | --- |
+| Đăng nhập rồi quay về URL ban đầu | Không truy cập được hệ thống hoặc lộ phiên | Redirect, cookie/session và route được bảo vệ | Mapping lỗi, validator, service auth |
+| Tạo sản phẩm | Mất cơ hội vận hành dữ liệu | Form, request, thông báo và item mới xuất hiện | Quy tắc giá, payload và trạng thái form |
+| Tìm kiếm sản phẩm | Người dùng không tìm thấy dữ liệu | Debounce, URL query và kết quả hiển thị | Bộ lọc/mapping và component state |
+| Đổi màu một thẻ | Thấp; chủ yếu trình bày | Thường không cần E2E | Component hoặc visual test |
+
+Mỗi test cần một câu mô tả được giá trị: “người có quyền biên tập tạo được sản phẩm và nhìn thấy nó trong danh sách”. Câu này quyết định điểm bắt đầu, dữ liệu, kết quả và cả người chịu trách nhiệm khi test đỏ.
+
+## Cơ chế của một E2E trên Angular
+
+### Trình duyệt thật, ứng dụng và backend
+
+Một runner như Playwright mở một browser context riêng — phiên trình duyệt có cookie, local storage và cache tách biệt. Runner tải bản Angular đang phục vụ qua HTTP, tìm phần tử trong DOM, phát sự kiện như click/keyboard và chờ các điều kiện có thể quan sát. Ứng dụng Angular tiếp tục chạy router, change detection và `HttpClient` bình thường.
+
+```text
+Test runner
+    │ mở context, điều khiển thao tác
+    ▼
+Browser ─── tải HTML/JS/CSS ───► Angular dev hoặc preview server
+    │                                  │
+    │ DOM, router, render               │ HttpClient
+    │                                  ▼
+    └──────── assertion ◄──── API test environment / mock có chủ đích
+```
+
+Cơ chế này giải thích cả giá trị lẫn giới hạn của E2E. Nó bắt được lỗi sai `baseHref`, lazy route không tải, interceptor không gắn token hoặc CSS che nút. Đổi lại, nó phụ thuộc vào tài nguyên ngoài, thời gian khởi động browser và dữ liệu có state. E2E không thay thế kiểm thử contract API, tải chịu lực hay kiểm tra bảo mật ở server.
+
+### Playwright và Cypress: chọn công cụ theo ngữ cảnh
+
+Cả Playwright và Cypress đều có auto-wait: thay vì `sleep`, lệnh tìm và assertion sẽ thử lại trong một khoảng thời gian. Cả hai cũng hỗ trợ screenshot, video/trace hoặc thông tin network để điều tra lỗi CI. Khác biệt thực tế thường nằm ở hệ sinh thái đội ngũ, browser cần hỗ trợ và cách chạy CI hơn là Angular.
+
+| Tiêu chí | Playwright | Cypress |
+| --- | --- | --- |
+| Cách viết phổ biến | `async`/`await`, API gần browser automation | Chuỗi lệnh `cy.*`, queue lệnh riêng |
+| Browser/context | Nhiều context độc lập, Chromium/Firefox/WebKit | Chrome-family, Firefox và Electron; tùy cấu hình/version |
+| Song song | Worker tích hợp tốt trong một máy; có thể shard CI | Parallelization thường kết hợp dashboard hoặc CI orchestration |
+| Debug artifact | Trace viewer, screenshot, video | Runner tương tác, screenshot/video và dashboard tùy gói |
+| Phù hợp khi | Cần đa browser, nhiều worker hoặc chuẩn hóa test mới | Đội đã có Cypress, plugin và quy trình debug quen thuộc |
+
+Không cần cài cả hai cho cùng một mục đích. Ví dụ bên dưới dùng Playwright vì cú pháp `async`/`await` giúp thấy rõ thao tác và điểm chờ. Nếu dự án đã dùng Cypress ổn định, chi phí chuyển tool thường lớn hơn lợi ích của việc đổi cú pháp.
+
+### Điều gì cần chuẩn bị trong ứng dụng Angular
+
+Angular không còn tạo sẵn cấu hình Protractor cho project mới; Protractor đã bị deprecate. Chọn một runner ngoài Angular CLI và làm rõ các contract sau trước khi viết test:
+
+- **URL và route:** server phải fallback về `index.html` cho deep link như `/products/new`; route phải có dữ liệu test cần thiết.
+- **Khả năng truy cập:** button có tên nhìn thấy được, input có `label` gắn đúng và trạng thái lỗi dùng ngữ nghĩa phù hợp. Đây vừa là UX tốt vừa tạo selector tốt.
+- **Điểm móc E2E:** chỉ thêm `data-testid` khi role, label hoặc text không biểu đạt rõ ý nghĩa. Giá trị này là contract, không phải tên class CSS.
+- **Môi trường test:** `apiBaseUrl`, OAuth callback, feature flag và analytics phải hướng về môi trường test. Không chạy test tạo/xóa dữ liệu trên production.
+
+<Callout type="warn" title="Không đăng nhập qua UI trong mọi test">
+  Đăng nhập qua giao diện ở mọi case làm suite chậm và tạo thêm điểm hỏng. Test riêng một luồng đăng nhập hoàn chỉnh; các test cần người dùng đã xác thực nên tái sử dụng `storageState` hoặc tạo session qua API test được kiểm soát.
+</Callout>
+
+## Ví dụ Playwright: luồng tạo sản phẩm
+
+### Cấu hình và tổ chức test
+
+Cài runner trong workspace có ứng dụng Angular. Lệnh dưới đây chỉ minh họa dependency; hãy để `webServer.command` khớp script mà đội đang dùng để phục vụ ứng dụng và không tự ý thay đổi build production.
+
+```bash
+npm install --save-dev @playwright/test
+npx playwright install --with-deps
+```
+
+Một cấu hình tối thiểu chạy Angular ở `http://127.0.0.1:4200`. `reuseExistingServer` giúp máy phát triển dùng server đang chạy, còn CI luôn khởi động server sạch. `trace: 'on-first-retry'` chỉ lưu trace khi lần chạy đầu thất bại, cân bằng khả năng điều tra với dung lượng artifact.
+
+```ts
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  timeout: 30_000,
+  expect: { timeout: 5_000 },
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [['html'], ['junit', { outputFile: 'results/e2e.xml' }]] : 'html',
+  use: {
+    baseURL: 'http://127.0.0.1:4200',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+  },
+  webServer: {
+    command: 'npm run start -- --host 127.0.0.1',
+    url: 'http://127.0.0.1:4200',
+    reuseExistingServer: !process.env.CI,
+  },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+});
+```
+
+Tách helper tạo dữ liệu, fixture đăng nhập và test theo hành trình. Không biến helper thành một “test framework thứ hai”; helper chỉ nên che chi tiết lặp lại như gọi API seed hoặc lấy token, còn assertion nghiệp vụ vẫn đọc được ngay trong file test.
+
+```text
+e2e/
+├── fixtures/
+│   └── authenticated-page.ts
+├── support/
+│   ├── api.ts
+│   └── products.ts
+└── products-create.spec.ts
+```
+
+### Viết test theo hành vi người dùng
+
+Test này không gọi method Angular hay kiểm tra state nội bộ. Nó mô tả điều người dùng làm và thấy. `toHaveURL`, `toBeVisible` và `toHaveText` tự retry; vì vậy không cần thêm `waitForTimeout` để “đợi Angular render”.
+
+```ts
+// e2e/products-create.spec.ts
+import { expect, test } from '@playwright/test';
+import { createUser, deleteProduct, loginAs } from './support/api';
+
+test('người biên tập tạo sản phẩm và thấy nó trong danh sách', async ({ page, request }) => {
+  const editor = await createUser(request, { role: 'editor' });
+  const sku = `E2E-${Date.now()}`;
+
+  await loginAs(page, editor);
+  await page.goto('/products');
+  await page.getByRole('link', { name: 'Tạo sản phẩm' }).click();
+
+  await expect(page).toHaveURL(/\/products\/new$/);
+  await page.getByLabel('Tên sản phẩm').fill('Bàn phím cơ');
+  await page.getByLabel('Mã SKU').fill(sku);
+  await page.getByLabel('Giá').fill('1200000');
+  await page.getByRole('button', { name: 'Lưu sản phẩm' }).click();
+
+  await expect(page.getByRole('status')).toHaveText('Đã tạo sản phẩm');
+  await expect(page.getByRole('row', { name: new RegExp(sku) })).toBeVisible();
+
+  await deleteProduct(request, sku);
+});
+```
+
+Mỗi assertion đóng một khoảng trống cụ thể: route mới đã mở, form đã gửi được, phản hồi thành công hiển thị cho người dùng và dữ liệu thật xuất hiện trong danh sách. Nếu API có độ trễ thực tế, assertion cuối sẽ chờ DOM đạt trạng thái mong đợi thay vì chờ một số mili giây tùy ý.
+
+Một test Cypress cùng ý tưởng có thể đọc như sau. Điểm quan trọng không phải cú pháp mà là selector và assertion quan sát được.
+
+```ts
+// cypress/e2e/products-create.cy.ts
+cy.visit('/products');
+cy.contains('a', 'Tạo sản phẩm').click();
+cy.findByLabelText('Tên sản phẩm').type('Bàn phím cơ');
+cy.findByLabelText('Mã SKU').type('E2E-123');
+cy.findByLabelText('Giá').type('1200000');
+cy.contains('button', 'Lưu sản phẩm').click();
+cy.findByRole('status').should('contain.text', 'Đã tạo sản phẩm');
+```
+
+<Callout type="warn" title="Dọn dữ liệu dù assertion thất bại">
+  `deleteProduct` ở cuối ví dụ sẽ không chạy nếu assertion trước đó ném lỗi. Trong suite thật, hãy đăng ký cleanup trong fixture/hook `afterEach`, hoặc tốt hơn, dùng namespace dữ liệu theo lần chạy và job dọn định kỳ. Không để một test thất bại làm bẩn test tiếp theo.
+</Callout>
+
+## Selector bền vững là một UI contract
+
+### Thứ tự ưu tiên selector
+
+Selector tốt mô tả cùng ngôn ngữ với người dùng và trợ năng. Khi UI thay đổi cấu trúc DOM nhưng vẫn giữ được ý nghĩa, test không nên hỏng. Với Playwright, ưu tiên theo thứ tự sau:
+
+1. **Role và accessible name:** `getByRole('button', { name: 'Lưu sản phẩm' })`. Đây là lựa chọn mặc định cho button, link, checkbox, dialog và bảng.
+2. **Label:** `getByLabel('Tên sản phẩm')` cho control của form. Angular template cần nối `<label for>` với `id`, hoặc dùng nhãn bao quanh input.
+3. **Text hoặc placeholder:** `getByText('Không có sản phẩm')` phù hợp cho thông điệp ổn định. Text marketing hoặc có i18n dễ đổi thì không phải selector tốt.
+4. **Test id:** `getByTestId('product-price')` dành cho vùng không có ngữ nghĩa người dùng rõ ràng, như trigger của biểu đồ hoặc hàng dữ liệu lặp.
+
+```html
+<!-- product-form.component.html -->
+<label for="product-name">Tên sản phẩm</label>
+<input id="product-name" formControlName="name" />
+
+<button type="submit">Lưu sản phẩm</button>
+
+<!-- Một control không có nhãn văn bản trực tiếp. -->
+<button
+  type="button"
+  data-testid="remove-product-image"
+  aria-label="Xóa ảnh sản phẩm"
+>
+  <span aria-hidden="true">×</span>
+</button>
+```
+
+`data-testid` nên biểu đạt ý định nghiệp vụ, ví dụ `checkout-submit` hoặc `invoice-row`, thay vì chi tiết cài đặt như `mat-button-3`. Đổi tên test id là thay đổi public contract với test suite; review nó như khi đổi API nội bộ giữa frontend và test.
+
+### Các selector dễ làm test vỡ
+
+| Selector nên tránh | Vì sao dễ vỡ | Thay bằng |
+| --- | --- | --- |
+| `.mat-mdc-button-base:nth-child(2)` | CSS framework, thứ tự hoặc layout thay đổi | `getByRole('button', { name: 'Lưu sản phẩm' })` |
+| `#product-form > div > input` | Phụ thuộc toàn bộ cây DOM | `getByLabel('Tên sản phẩm')` |
+| `text=Bàn phím cơ` cho nút | Text có thể trùng hoặc đổi theo i18n | Role + name, hoặc test id khi cần |
+| `getByTestId('button-1')` | Không nói lên hành vi, khó review | `getByTestId('product-save')` |
+| XPath dài | Khó đọc và thường phụ thuộc cấu trúc | Locator theo role/label/test id |
+
+Đừng dùng test id để né việc sửa accessibility. Nếu không thể tìm một input bằng label hoặc một button bằng role, đó thường là tín hiệu UI chưa có semantic đúng. Sửa markup trước đem lại giá trị cho cả người dùng dùng screen reader và test.
+
+## Dữ liệu test và kiểm soát network
+
+### Độc lập, có thể lặp lại và dọn dẹp
+
+Một E2E đáng tin cậy có thể chạy đơn lẻ, chạy lại và chạy song song theo bất kỳ thứ tự nào. Ba thuộc tính này yêu cầu dữ liệu không dùng chung:
+
+- Tạo user, cart, product hoặc tenant riêng cho mỗi test/worker. Thêm tiền tố như `e2e-<run-id>-<worker-index>-...` để truy vết.
+- Không giả định `admin@example.com` hoặc sản phẩm “iPhone” đã tồn tại. Đây là state ẩn do người khác hoặc lần chạy trước tạo ra.
+- Seed dữ liệu bằng API test, database fixture được kiểm soát hoặc một endpoint quản trị chỉ tồn tại ở môi trường test. Chỉ click UI để tạo state khi chính thao tác tạo đó là đối tượng cần kiểm tra.
+- Xóa sau test nếu hạ tầng cho phép; đồng thời đặt TTL hoặc dọn theo namespace để xử lý job bị hủy giữa chừng.
+
+Ví dụ, test kiểm tra danh sách có thể gọi `POST /test-support/products` để tạo ba bản ghi trước khi mở trang. Nhờ vậy, test tập trung vào tìm kiếm và rendering danh sách thay vì phụ thuộc luồng tạo sản phẩm đã được kiểm tra ở case khác.
+
+### Khi nào dùng backend thật, seed hay mock
+
+Không có một chiến lược network phù hợp cho mọi test. Chọn mức thật cần thiết để chứng minh rủi ro, rồi ghi rõ điều gì đang bị cô lập.
+
+| Chiến lược | Cơ chế | Dùng khi | Trade-off |
+| --- | --- | --- | --- |
+| Backend test thật | Browser gọi API của môi trường test | Smoke, auth, contract frontend-backend, luồng tạo/sửa quan trọng | Chậm hơn; cần reset dữ liệu và môi trường ổn định |
+| Seed qua API/fixture | Gọi API hỗ trợ để tạo state, sau đó UI gọi backend thật | Chuẩn bị điều kiện trước test nhanh, rõ | Endpoint test phải được bảo vệ, không triển khai production |
+| Intercept/mocking | Runner chặn request rồi trả response định sẵn | Empty/error UI, timeout, cạnh hiếm khó tái tạo | Không chứng minh API thật hay CORS/auth thật |
+| Service virtualization | Chạy bản giả của dependency ngoài như payment/email | Dependency tốn phí, không ổn định hoặc có side effect | Phải duy trì contract của bản giả |
+
+Ví dụ, hãy mock `GET /api/products` để kiểm tra UI lỗi 500. Test này chứng minh thông báo lỗi và nút thử lại hoạt động, nhưng không được gọi là bằng chứng API sản phẩm chạy tốt. Một smoke test khác, ít hơn, phải dùng backend test thật để lấp khoảng trống đó.
+
+### Ví dụ chặn request có chủ đích
+
+Playwright cần đăng ký route **trước** thao tác có thể phát request. `fulfill` tạo response xác định nên case empty và error không cần phá backend dùng chung.
+
+```ts
+import { expect, test } from '@playwright/test';
+
+test('hiển thị trạng thái rỗng khi API không trả sản phẩm', async ({ page }) => {
+  await page.route('**/api/products?*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], total: 0 }),
+    });
+  });
+
+  await page.goto('/products?q=khong-co');
+
+  await expect(page.getByRole('heading', { name: 'Không tìm thấy sản phẩm' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Xóa bộ lọc' })).toBeVisible();
+});
+```
+
+Nếu URL thật có query khác hoặc app gọi `/api/products` không có query, pattern trên không khớp và test vô tình gọi backend thật. Khi test đỏ bất ngờ, hãy lưu trace và kiểm tra request URL; đừng mặc định framework intercept bị lỗi.
+
+## Chạy song song và trong CI
+
+### Cô lập worker và shard
+
+Chạy song song giảm thời gian phản hồi, nhưng chỉ an toàn khi test độc lập. Mỗi worker phải có user/data riêng và không cùng sửa một tài nguyên cố định, ví dụ cùng `productId = 1`. Với Playwright, `fullyParallel: true` cho phép test độc lập chạy ở các worker; CI nhiều máy có thể chia tiếp theo shard.
+
+```bash
+# Hai job CI chạy hai nửa suite.
+npx playwright test --shard=1/2
+npx playwright test --shard=2/2
+```
+
+Đừng tăng worker chỉ để làm pipeline xanh nhanh hơn. Trước tiên, đo CPU/RAM của runner, số connection đến API test và rate limit. Nếu hai worker làm dữ liệu va chạm, tăng song song chỉ làm flake xảy ra nhiều hơn.
+
+Một pipeline CI thường cần các artifact sau khi fail:
+
+- JUnit hoặc định dạng tương đương để CI đánh dấu test đỏ chính xác.
+- Screenshot, video hoặc Playwright trace gắn với retry thất bại.
+- Browser console log, request/response quan trọng đã được che secret.
+- `run-id`, commit SHA, URL môi trường test và phiên bản frontend/backend để tái hiện.
+
+<Callout type="idea" title="Tái thử để chẩn đoán, không để che lỗi">
+  Một retry CI có thể thu artifact của lần fail và giảm nhiễu mạng tạm thời. Nhưng test chỉ xanh sau retry phải được báo cáo là tín hiệu không ổn định, không phải bằng chứng suite hoàn toàn khỏe.
+</Callout>
+
+### Thiết kế cổng chất lượng theo chi phí
+
+Chi phí E2E gồm thời gian máy CI, bảo trì selector/dữ liệu, môi trường test và thời gian điều tra flake. Giảm chi phí bằng cách đặt đúng test vào đúng cổng:
+
+| Thời điểm | Bộ E2E | Mục đích |
+| --- | --- | --- |
+| Pull request | Smoke và luồng bị thay đổi, chạy Chromium | Phản hồi nhanh, chặn regression rõ ràng |
+| Merge vào nhánh chính | Suite hành trình quan trọng, có artifact | Tìm lỗi tích hợp trước khi deploy staging |
+| Nightly | Regression rộng, nhiều browser nếu có cam kết hỗ trợ | Bắt khác biệt browser và lỗi phụ thuộc theo thời gian |
+| Sau deploy | Smoke tối thiểu trên môi trường thật | Xác minh URL, config runtime, CDN và backend đã kết nối |
+
+Một test đi qua thanh toán thật, email thật và nhiều hệ thống ngoài có thể không phù hợp với PR gate. Tách nó thành smoke ở staging hoặc nightly với sandbox; vẫn giữ unit/component test cho rule tính tiền và trạng thái giao diện ở vòng phản hồi nhanh hơn.
+
+## Chẩn đoán flaky test
+
+Flaky test là test cho kết quả khác nhau khi code và điều kiện được cho là giống nhau. Nó nguy hiểm vì đội bắt đầu bỏ qua cảnh báo đỏ; khi đó regression thật có thể lọt qua cùng tiếng ồn.
+
+### Quy trình tìm nguyên nhân
+
+1. **Phân loại triệu chứng.** Test timeout vì locator không thấy, assertion sai text, navigation treo, request 401/500 hay browser crash? Đọc thông báo gốc trước.
+2. **Giữ bằng chứng lần fail.** Mở trace/video, screenshot, console log và network. So sánh với lần pass; kiểm tra URL, response, thời gian và state của DOM.
+3. **Chạy lại có kiểm soát.** Chạy đúng file, đúng browser, một worker và lặp nhiều lần. Sau đó mới tăng worker hoặc chạy trên CI để xác định lỗi do cạnh tranh tài nguyên hay môi trường.
+4. **Tìm dependency ẩn.** Kiểm tra thời gian hệ thống, timezone, cache, feature flag, test account dùng chung, queue không rỗng và request chưa được chờ bằng assertion.
+5. **Sửa nguyên nhân rồi chứng minh.** Thay selector, seed hoặc điểm chờ bằng điều kiện quan sát được. Chạy lặp và lưu link artifact; không chỉ tăng timeout rồi đóng ticket.
+
+| Dấu hiệu | Nguyên nhân thường gặp | Sửa đúng |
+| --- | --- | --- |
+| Không tìm thấy nút sau `click` | Selector theo CSS, animation hoặc route chưa hoàn tất | Locator role/label và `expect` URL/DOM đúng trạng thái |
+| Danh sách thiếu item khi chạy song song | Test dùng chung account/data hoặc eventual consistency | Namespace theo worker, seed riêng, chờ UI hiển thị dữ liệu đã tạo |
+| Chỉ fail trên CI | Thiếu browser dependency, base URL/config khác, máy chậm | In config ra artifact an toàn, dùng image runner cố định, xem trace |
+| 401 ngẫu nhiên | Token hết hạn hoặc session tái dùng sai | Tạo `storageState` có vòng đời rõ, refresh qua API test |
+| Test pass khi chạy một mình, fail cả suite | Thứ tự test hoặc cleanup không hoàn tất | Không phụ thuộc thứ tự; tạo/dọn dữ liệu trong fixture |
+
+### Các sửa chữa sai thường gặp
+
+`page.waitForTimeout(2000)` không sửa race condition. Nó chỉ biến một lỗi nhanh thành lỗi chậm hơn và có thể vẫn fail khi CI chậm hơn hai giây. Tương tự, `force: true` bỏ qua điều kiện người dùng có thể tương tác được; test có thể click một phần tử bị overlay che mà người dùng thật không click được.
+
+Tăng timeout có lý do khi hành vi hợp lệ vốn chậm, chẳng hạn import file lớn với SLA đã biết. Tuy vậy, assertion vẫn phải chờ tín hiệu nghiệp vụ như progress hoàn tất hoặc trạng thái “Đã nhập xong”, không chờ một khoảng thời gian mù.
+
+<Callout type="warn" title="Không xóa test đỏ chỉ vì nó flaky">
+  Tạm quarantine test có thể cần thiết để không chặn release, nhưng phải có owner, lý do, artifact và thời hạn xử lý. Xóa hoặc bỏ qua vĩnh viễn làm mất coverage của hành trình vốn đã được xác định là quan trọng.
+</Callout>
+
+## Checklist và tóm tắt
+
+Trước khi thêm hoặc sửa một E2E, hãy kiểm tra:
+
+- [ ] Test bảo vệ một hành trình/rủi ro mà unit hoặc component test không chứng minh đủ.
+- [ ] Tên test mô tả kết quả nghiệp vụ người dùng quan sát được.
+- [ ] Selector ưu tiên role, label và name; `data-testid` chỉ dùng như UI contract có tên rõ.
+- [ ] Dữ liệu, user và tài nguyên độc lập theo test/worker; có chiến lược cleanup hoặc TTL.
+- [ ] Mọi mock/intercept ghi rõ phạm vi chứng minh và vẫn có smoke dùng backend thật ở điểm cần thiết.
+- [ ] Assertion chờ URL, response hoặc DOM có ý nghĩa; không dùng `waitForTimeout` như đồng bộ hóa mặc định.
+- [ ] CI lưu artifact điều tra fail, và retry không che báo cáo flake.
+- [ ] Suite PR giữ ít luồng rủi ro cao; regression rộng và đa browser được dời sang cổng phù hợp.
+
+Tóm lại, E2E tốt không phải là test click mọi thành phần. Nó là bằng chứng có chủ đích rằng vài hành trình người dùng quan trọng vẫn đi được qua trình duyệt, Angular và hệ thống tích hợp. Độ tin cậy đến từ selector mang ngữ nghĩa, data độc lập, network có chủ đích và artifact đủ để sửa lỗi; tốc độ đến từ việc giữ phần lớn coverage ở unit/component test và chỉ chạy E2E nơi nó tạo thêm niềm tin.
+
+<Cards>
+  <Card title="Unit testing" href="/docs/testing-performance-deploy/unit-testing" description="Đặt các quy tắc nghiệp vụ ở lớp kiểm thử nhanh và rẻ hơn." />
+  <Card title="Component testing" href="/docs/testing-performance-deploy/component-testing" description="Kiểm tra template, trạng thái và tương tác trước khi nâng lên E2E." />
+  <Card title="Profiling hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="Đo trải nghiệm sau khi luồng quan trọng đã được bảo vệ." />
+  <Card title="Build và tối ưu bundle" href="/docs/testing-performance-deploy/build-optimization" description="Đưa bản Angular đã kiểm chứng qua production build." />
+</Cards>

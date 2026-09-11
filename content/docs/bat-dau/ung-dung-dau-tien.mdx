@@ -1,10 +1,259 @@
 ---
 title: Ứng dụng đầu tiên
-description: Tạo và chạy một ứng dụng Angular tối giản.
+description: Tạo, chạy và đọc luồng khởi động của một ứng dụng Angular standalone hiện đại.
 ---
 
-Trang này sẽ trình bày **Ứng dụng đầu tiên** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
 
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Trước khi bắt đầu">
+  Bạn cần cài một phiên bản Node.js đang được Angular hỗ trợ và có terminal. Nếu môi trường chưa sẵn sàng, hãy xem [Cài đặt môi trường](/docs/bat-dau/cai-dat-moi-truong) trước.
 </Callout>
+
+## Mục lục
+
+- [Bạn sẽ tạo gì?](#bạn-sẽ-tạo-gì)
+- [Tạo workspace và ứng dụng](#tạo-workspace-và-ứng-dụng)
+  - [Chọn tùy chọn của CLI](#chọn-tùy-chọn-của-cli)
+  - [Chạy development server](#chạy-development-server)
+- [Đọc luồng khởi động](#đọc-luồng-khởi-động)
+- [Khám phá cấu trúc vừa tạo](#khám-phá-cấu-trúc-vừa-tạo)
+  - [Các tệp nên đọc đầu tiên](#các-tệp-nên-đọc-đầu-tiên)
+- [Tự thay giao diện gốc](#tự-thay-giao-diện-gốc)
+  - [Vì sao giao diện tự cập nhật?](#vì-sao-giao-diện-tự-cập-nhật)
+- [Vòng lặp làm việc hằng ngày](#vòng-lặp-làm-việc-hằng-ngày)
+- [Các lệnh cần nhớ](#các-lệnh-cần-nhớ)
+- [Sự cố thường gặp](#sự-cố-thường-gặp)
+- [Bước tiếp theo](#bước-tiếp-theo)
+
+## Bạn sẽ tạo gì?
+
+Bạn sẽ tạo một **workspace** — thư mục gốc chứa mã nguồn, cấu hình và các lệnh của dự án — với Angular CLI. Bên trong workspace đó, Angular tạo một ứng dụng mặc định theo kiến trúc **standalone**. Standalone nghĩa là component có thể tự khai báo những thứ nó dùng trong `imports`; ứng dụng mới không cần bắt đầu bằng `NgModule`.
+
+Sau bài này, bạn có thể:
+
+- tạo một ứng dụng bằng Angular CLI;
+- chạy ứng dụng cục bộ và nhận diện development server;
+- lần theo đường đi từ `main.ts` đến component và template hiển thị trên trình duyệt;
+- thay giao diện gốc, thêm trạng thái bằng `signal` và quan sát Angular cập nhật màn hình.
+
+<Callout type="idea" title="Mục tiêu là hiểu, không chỉ chạy lệnh">
+  Đừng cố ghi nhớ toàn bộ cây thư mục ngay lần đầu. Hãy nhớ chuỗi đơn giản: `main.ts` khởi động ứng dụng, component gốc mô tả giao diện, template tạo DOM và state thay đổi sẽ làm giao diện cập nhật.
+</Callout>
+
+## Tạo workspace và ứng dụng
+
+Mở terminal tại thư mục bạn muốn lưu mã nguồn, rồi chạy lệnh sau:
+
+```bash
+npx @angular/cli@latest new chao-angular --routing --style=scss --ssr=false
+```
+
+`npx` tải và chạy Angular CLI mà không cần cài CLI toàn cục. Lệnh tạo thư mục `chao-angular`, cài các dependency và sinh mã khởi đầu. Ba tùy chọn trên có ý nghĩa:
+
+| Tùy chọn | Ý nghĩa |
+| --- | --- |
+| `--routing` | Tạo cấu hình router để ứng dụng có thể thêm nhiều trang sau này. |
+| `--style=scss` | Dùng SCSS cho stylesheet. Chọn `css` nếu bạn chưa muốn dùng SCSS. |
+| `--ssr=false` | Chỉ tạo ứng dụng chạy ở trình duyệt để ví dụ đầu tiên gọn hơn. Bạn vẫn có thể thêm SSR sau. |
+
+### Chọn tùy chọn của CLI
+
+Bạn cũng có thể chạy `npx @angular/cli@latest new chao-angular` không kèm cờ. CLI sẽ hỏi các lựa chọn tương đương trong terminal. Cách này hữu ích khi bạn muốn đọc mô tả của phiên bản CLI đang dùng, vì các câu hỏi mặc định có thể thay đổi giữa các phiên bản Angular.
+
+Trong lần đầu, hãy giữ ứng dụng ở chế độ standalone mặc định. Nếu CLI hỏi về các tính năng nâng cao như SSR/SSG hoặc ứng dụng zoneless, chọn theo mục tiêu học của bạn; các lựa chọn đó không thay đổi nguyên lý khởi động trong bài này.
+
+Sau khi lệnh hoàn tất, đi vào thư mục ứng dụng:
+
+```bash
+cd chao-angular
+```
+
+### Chạy development server
+
+Khởi động server phát triển và mở trình duyệt:
+
+```bash
+npm start -- --open
+```
+
+`npm start` chạy script `ng serve` do CLI tạo. Cờ `--open` được chuyển tiếp cho Angular CLI để mở URL cục bộ, thường là `http://localhost:4200/`. Terminal sẽ biên dịch mã nguồn, theo dõi thay đổi tệp và báo lỗi biên dịch ngay tại đó.
+
+<Callout type="warn" title="Development server không phải production server">
+  `ng serve` ưu tiên phản hồi nhanh khi phát triển. Trước khi triển khai, hãy tạo bản tối ưu bằng `npm run build`; đừng dùng `ng serve` để phục vụ ứng dụng production.
+</Callout>
+
+## Đọc luồng khởi động
+
+Khi mở trang, trình duyệt tải JavaScript đã được Angular đóng gói. Điểm vào của ứng dụng thường là `src/main.ts`. Tệp này gọi `bootstrapApplication(...)` để tạo Angular application từ component gốc.
+
+```text
+Trình duyệt
+    │ tải JavaScript
+    ▼
+src/main.ts
+    │ bootstrapApplication(App, appConfig)
+    ▼
+Component gốc
+    │ đọc metadata và template
+    ▼
+DOM bên trong <app-root>
+```
+
+Một ứng dụng standalone mới thường có đoạn khởi động tương tự sau. Tên class và đường dẫn import có thể khác theo phiên bản CLI hoặc kiểu tên tệp bạn đã chọn.
+
+```ts
+// src/main.ts
+import { bootstrapApplication } from '@angular/platform-browser';
+import { appConfig } from './app/app.config';
+import { App } from './app/app';
+
+bootstrapApplication(App, appConfig).catch((error) => console.error(error));
+```
+
+Ba phần trong đoạn mã này đảm nhiệm ba vai trò riêng:
+
+- `App` là **component gốc**. Selector của nó thường là `app-root`, là phần tử mà Angular sẽ quản lý trên trang.
+- `appConfig` chứa provider toàn ứng dụng. Provider là hướng dẫn để Angular tạo hoặc cung cấp một dependency, chẳng hạn router hoặc HTTP client.
+- `bootstrapApplication` nối hai phần trên và bắt đầu render. Nếu khởi động thất bại, `catch` in lỗi ra console để bạn điều tra.
+
+Nếu bạn đã chọn routing, `appConfig` thường đăng ký router qua `provideRouter(routes)`, còn `app.routes.ts` mô tả các URL. Bạn chưa cần sửa hai tệp đó để hoàn thành ứng dụng đầu tiên.
+
+## Khám phá cấu trúc vừa tạo
+
+CLI tạo nhiều tệp để phục vụ biên dịch, kiểm thử và chạy ứng dụng. Cây thư mục cụ thể thay đổi nhẹ giữa các phiên bản Angular, nhưng vai trò chính vẫn giống nhau:
+
+```text
+chao-angular/
+├── src/
+│   ├── main.ts                 # Điểm khởi động ở trình duyệt
+│   ├── styles.scss             # Style dùng cho toàn ứng dụng
+│   └── app/
+│       ├── app.ts              # Component gốc (có thể là app.component.ts)
+│       ├── app.html            # Template của component gốc
+│       ├── app.config.ts       # Provider cấp ứng dụng
+│       └── app.routes.ts       # Route, nếu đã bật routing
+├── public/                     # Tài nguyên tĩnh, ví dụ favicon
+├── angular.json                # Cấu hình build/serve/test của workspace
+├── package.json                # Dependency và npm scripts
+└── tsconfig.json               # Cấu hình TypeScript
+```
+
+### Các tệp nên đọc đầu tiên
+
+Đọc theo thứ tự sau để không bị ngợp:
+
+1. **`src/main.ts`** — xem Angular khởi động component nào.
+2. **Component gốc trong `src/app/`** — xem `@Component`, `selector`, `template` hoặc `templateUrl`.
+3. **Template tương ứng** — xem HTML mà component render. Với dự án mới, đây có thể là `app.html` hoặc `app.component.html`.
+4. **`package.json`** — xem các script như `start`, `build` và `test`.
+
+`angular.json` cũng quan trọng, nhưng bạn chưa cần sửa nó ở bước này. Bài [Cấu trúc workspace](/docs/bat-dau/cau-truc-workspace) sẽ giải thích kỹ hơn vì sao cấu hình đó tồn tại.
+
+## Tự thay giao diện gốc
+
+Mẫu giao diện Angular tạo sẵn thường khá dài. Để nhìn rõ quan hệ giữa component, state và template, hãy thay **toàn bộ nội dung** của tệp component gốc mà `main.ts` đang import — thường là `src/app/app.ts` — bằng ví dụ tối giản sau:
+
+```ts
+import { Component, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-root',
+  template: `
+    <main>
+      <h1>{{ title }}</h1>
+      <p>Đây là ứng dụng Angular đầu tiên của tôi.</p>
+      <button type="button" (click)="increment()">
+        Đã bấm {{ clicks() }} lần
+      </button>
+    </main>
+  `,
+})
+export class App {
+  readonly title = 'Xin chào Angular';
+  readonly clicks = signal(0);
+
+  increment(): void {
+    this.clicks.update((value) => value + 1);
+  }
+}
+```
+
+Nếu component của bạn có tên `AppComponent` thay vì `App`, hãy giữ tên class mà `main.ts` đang import, hoặc cập nhật import trong `main.ts` cho khớp. Quan trọng là chỉ có một tên class được truyền vào `bootstrapApplication`.
+
+Ví dụ dùng `template` nội tuyến để bạn nhìn cả logic và HTML ở một chỗ. Trong dự án thật, `templateUrl: './app.html'` thường dễ đọc hơn khi template dài. Không giữ đồng thời `template` và `templateUrl` trong cùng một `@Component`.
+
+### Vì sao giao diện tự cập nhật?
+
+`title` là chuỗi thông thường nên template nội suy nó qua `{{ title }}`. `clicks` là một **signal**, tức vùng chứa state mà Angular theo dõi. Khi nhấn nút, event binding `(click)` gọi `increment()`. Hàm này dùng `update` để tạo giá trị mới, và Angular render lại đúng phần template đang đọc `clicks()`.
+
+```text
+Người dùng bấm nút
+       │
+       ▼
+(click) gọi increment()
+       │
+       ▼
+clicks.update(...)
+       │
+       ▼
+{{ clicks() }} hiển thị giá trị mới
+```
+
+Hãy thử bấm nút vài lần. Nếu bộ đếm tăng mà bạn không hề gọi API DOM như `document.querySelector`, bạn đã thấy cơ chế khai báo của Angular: bạn mô tả giao diện dựa trên state, Angular đồng bộ DOM cho bạn.
+
+<Callout type="idea" title="Một thí nghiệm nhỏ">
+  Đổi giá trị `title`, lưu tệp rồi quay lại trình duyệt. Development server thường cập nhật giao diện mà không cần bạn khởi động lại lệnh. Nếu terminal báo lỗi TypeScript hoặc template, sửa lỗi đó trước; trình duyệt chỉ hiển thị bản biên dịch thành công gần nhất.
+</Callout>
+
+## Vòng lặp làm việc hằng ngày
+
+Khi phát triển, bạn thường lặp lại quy trình ngắn này:
+
+1. Chạy `npm start` một lần trong terminal.
+2. Mở URL mà CLI in ra.
+3. Sửa component, template hoặc stylesheet trong `src/`.
+4. Lưu tệp và quan sát trình duyệt cùng terminal.
+5. Đọc thông báo lỗi trước khi đoán nguyên nhân.
+
+Bạn không cần chạy lại `npm install` sau mỗi thay đổi mã nguồn. Chỉ chạy nó khi mới nhận workspace, khi dependency trong `package.json` thay đổi, hoặc khi bạn chuyển package manager.
+
+## Các lệnh cần nhớ
+
+Chạy các lệnh này từ thư mục `chao-angular`:
+
+| Lệnh | Khi dùng | Kết quả |
+| --- | --- | --- |
+| `npm start` | Phát triển cục bộ | Chạy Angular development server. |
+| `npm start -- --open` | Muốn mở trình duyệt ngay | Chạy server và chuyển `--open` cho CLI. |
+| `npm run build` | Kiểm tra trước triển khai | Tạo bản build tối ưu trong thư mục đầu ra do Angular cấu hình. |
+| `npm test` | Khi dự án có test | Chạy test được cấu hình trong workspace. |
+| `npx ng generate component ten-component` | Tạo component mới | Sinh component và các tệp liên quan theo cấu hình CLI. |
+
+Dùng `npx ng ...` giúp bạn chắc chắn gọi đúng Angular CLI của chính project. Điều này tránh lỗi do một CLI cài toàn cục có phiên bản khác dependency trong workspace.
+
+## Sự cố thường gặp
+
+<Accordions type="single">
+  <Accordion title="Cổng 4200 đã được dùng">
+    Development server sẽ đề nghị một cổng khác, hoặc bạn có thể dừng tiến trình cũ bằng `Ctrl + C`. Để chọn rõ cổng, chạy `npx ng serve --port 4300`.
+  </Accordion>
+  <Accordion title="Terminal báo không tìm thấy lệnh ng">
+    Đảm bảo bạn đang ở thư mục có `package.json` và đã chạy `npm install` thành công. Sau đó dùng `npx ng serve`; `npx` ưu tiên binary của Angular CLI trong dependency cục bộ.
+  </Accordion>
+  <Accordion title="Trang không đổi sau khi lưu">
+    Kiểm tra terminal trước. Lỗi biên dịch TypeScript hoặc template có thể ngăn bản mới được render. Nếu không có lỗi, thử tải lại trang; sau đó kiểm tra bạn đang sửa đúng component mà `main.ts` bootstrap.
+  </Accordion>
+  <Accordion title="Thay component rồi xuất hiện lỗi import RouterOutlet">
+    Mẫu tạo sẵn có thể import `RouterOutlet` để hiển thị route. Ví dụ tối giản ở trên không dùng nó, vì vậy hãy thay toàn bộ nội dung tệp component thay vì chỉ thay template. Khi bắt đầu dùng route, bạn sẽ thêm `RouterOutlet` lại trong `imports`.
+  </Accordion>
+</Accordions>
+
+## Bước tiếp theo
+
+Bạn đã có một ứng dụng chạy được và biết nơi Angular bắt đầu render. Tiếp tục với các phần sau để mở rộng nền tảng:
+
+<Cards>
+  <Card title="Angular CLI" href="/docs/bat-dau/angular-cli" description="Tìm hiểu các lệnh tạo, generate và quản lý dự án." />
+  <Card title="Cấu trúc workspace" href="/docs/bat-dau/cau-truc-workspace" description="Đọc vai trò của tệp cấu hình và thư mục trong dự án." />
+  <Card title="Standalone component" href="/docs/component-template/component-standalone" description="Đi sâu vào metadata, imports và template của component." />
+</Cards>

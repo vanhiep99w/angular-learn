@@ -1,10 +1,522 @@
 ---
-title: Provider và token
-description: Cấu hình provider, InjectionToken và phạm vi dependency.
+title: Provider và InjectionToken
+description: Hiểu token, các kiểu provider, multi provider, cấu hình và cách override dependency trong Angular.
 ---
 
-Trang này sẽ trình bày **Provider và token** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi trang">
+  Trang này tập trung vào cách Angular ánh xạ một **token** sang dependency cụ thể. Ví dụ dùng API standalone hiện đại, nhưng nguyên lý provider và injector cũng áp dụng cho ứng dụng dùng NgModule.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Token provider và injector](#token-provider-và-injector)
+- [Cơ chế Angular phân giải dependency](#cơ-chế-angular-phân-giải-dependency)
+  - [Đường đi của một lệnh inject](#đường-đi-của-một-lệnh-inject)
+  - [Phạm vi provider quyết định vòng đời](#phạm-vi-provider-quyết-định-vòng-đời)
+- [Chọn token phù hợp](#chọn-token-phù-hợp)
+  - [Dùng class làm token](#dùng-class-làm-token)
+  - [Dùng InjectionToken cho interface và giá trị](#dùng-injectiontoken-cho-interface-và-giá-trị)
+- [Các kiểu provider](#các-kiểu-provider)
+  - [useClass thay đổi cách khởi tạo](#useclass-thay-đổi-cách-khởi-tạo)
+  - [useValue cung cấp một giá trị có sẵn](#usevalue-cung-cấp-một-giá-trị-có-sẵn)
+  - [useFactory tạo dependency từ dependency khác](#usefactory-tạo-dependency-từ-dependency-khác)
+  - [useExisting tạo bí danh không tạo instance mới](#useexisting-tạo-bí-danh-không-tạo-instance-mới)
+- [Multi provider cho điểm mở rộng](#multi-provider-cho-điểm-mở-rộng)
+- [Cấu hình ứng dụng qua token](#cấu-hình-ứng-dụng-qua-token)
+  - [Định nghĩa cấu hình có kiểu](#định-nghĩa-cấu-hình-có-kiểu)
+  - [Đăng ký ở application config](#đăng-ký-ở-application-config)
+  - [Nguyên tắc an toàn cho config](#nguyên-tắc-an-toàn-cho-config)
+- [Override provider khi kiểm thử](#override-provider-khi-kiểm-thử)
+  - [Override dependency ở TestBed](#override-dependency-ở-testbed)
+  - [Provider cục bộ của component](#provider-cục-bộ-của-component)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Không tìm thấy provider](#không-tìm-thấy-provider)
+  - [InjectionToken trùng mô tả nhưng khác danh tính](#injectiontoken-trùng-mô-tả-nhưng-khác-danh-tính)
+  - [Nhầm useClass với useExisting](#nhầm-useclass-với-useexisting)
+  - [Multi provider và thứ tự xử lý](#multi-provider-và-thứ-tự-xử-lý)
+  - [Phạm vi quá rộng hoặc quá hẹp](#phạm-vi-quá-rộng-hoặc-quá-hẹp)
+- [Checklist chọn provider](#checklist-chọn-provider)
+- [Tóm tắt](#tóm-tắt)
+
+## Tổng quan
+
+Dependency Injection (DI) không chỉ là việc Angular tự tạo service. Khi mã gọi `inject(TOKEN)`, Angular cần biết **lấy cái gì** cho `TOKEN`. Provider là bản khai báo trả lời câu hỏi đó: token nào được ánh xạ sang class, giá trị, factory hay token khác.
+
+Ví dụ, `OrderService` chỉ cần phụ thuộc vào `PAYMENT_GATEWAY`. Nó không cần biết ứng dụng đang dùng `StripeGateway`, một gateway giả cho môi trường demo, hay fake trong bài kiểm thử. Việc thay thế nằm ở provider, không nằm trong business logic của `OrderService`.
+
+### Token provider và injector
+
+Ba khái niệm này đi cùng nhau:
+
+| Khái niệm | Vai trò | Ví dụ |
+| --- | --- | --- |
+| **Token** | Khóa định danh dependency tại runtime. | `HttpClient`, `APP_CONFIG`, `PAYMENT_GATEWAY` |
+| **Provider** | Công thức để tạo hoặc lấy giá trị cho token. | `{ provide: APP_CONFIG, useValue: config }` |
+| **Injector** | Bộ chứa provider, thực hiện tra cứu và giữ instance theo phạm vi của nó. | root injector, injector của route, injector của component |
+
+Hình dưới mô tả mô hình tối giản. Consumer hỏi token, injector tìm provider phù hợp rồi trả lại dependency theo công thức của provider.
+
+```text
+┌────────────────┐  inject(APP_CONFIG)   ┌─────────────────────────┐
+│ OrderService   │ ─────────────────────►│ Injector                │
+│ (consumer)     │                       │ token → provider recipe │
+└────────────────┘                       └───────────┬─────────────┘
+                                                     │ useValue
+                                                     ▼
+                                           ┌─────────────────────────┐
+                                           │ { apiUrl: '...' }       │
+                                           └─────────────────────────┘
+```
+
+## Cơ chế Angular phân giải dependency
+
+### Đường đi của một lệnh inject
+
+Một lệnh `inject(API_URL)` không tạo mới chuỗi ký tự `API_URL`. Angular thực hiện các bước sau:
+
+1. Lấy token `API_URL` tại vị trí đang có injection context, chẳng hạn constructor, field initializer hoặc factory provider.
+2. Hỏi injector gần nhất xem nó có provider cho token này không.
+3. Nếu chưa có, tiếp tục tra cứu injector cha theo cây injector.
+4. Khi tìm thấy provider, thực hiện recipe `useClass`, `useValue`, `useFactory` hoặc `useExisting`.
+5. Cache kết quả theo injector đó khi dependency có thể được cache. Những lần inject tiếp theo trong cùng phạm vi thường nhận lại cùng instance hoặc cùng giá trị.
+
+<Callout type="idea" title="Điểm cần nhớ">
+  Provider mô tả **cách lấy dependency**, còn token là **địa chỉ để yêu cầu dependency**. Consumer nên phụ thuộc vào token ổn định thay vì tự gọi `new` một implementation cụ thể.
+</Callout>
+
+`inject()` chỉ hợp lệ trong injection context. Gọi nó bên trong một hàm xử lý click thông thường hoặc sau một `await` mà không tạo context sẽ gây lỗi runtime. Khi cần dependency cho logic bất đồng bộ, inject dependency trước, giữ nó trong biến hoặc field, rồi dùng biến đó sau.
+
+### Phạm vi provider quyết định vòng đời
+
+Một token có thể được đăng ký ở nhiều tầng. Injector gần consumer hơn sẽ che (shadow) provider ở tầng cha.
+
+| Nơi đăng ký | Phạm vi thường dùng | Hệ quả |
+| --- | --- | --- |
+| `@Injectable({ providedIn: 'root' })` | Toàn ứng dụng | Một instance dùng chung trong root injector; phù hợp service không có trạng thái theo màn hình. |
+| `ApplicationConfig.providers` hoặc `bootstrapApplication(..., { providers })` | Toàn ứng dụng | Phù hợp cấu hình, API client, library provider hoặc nhóm environment provider. |
+| `providers` của route | Cây route đó | Tạo boundary theo feature hoặc lazy route; mỗi lần route scope được tạo có thể có instance riêng. |
+| `providers` của component | Component và các descendant của nó | Hữu ích cho state cục bộ; provider cha cùng token sẽ bị che trong subtree. |
+
+Ví dụ, đặt `CartState` trong `providers` của `CartPageComponent` giúp mỗi trang giỏ hàng có state độc lập. Đặt nó ở `root` lại biến state thành dùng chung cho toàn ứng dụng. Không có lựa chọn luôn đúng: phạm vi phải khớp vòng đời và mức chia sẻ mong muốn.
+
+## Chọn token phù hợp
+
+### Dùng class làm token
+
+Class tồn tại ở runtime, vì vậy Angular có thể dùng trực tiếp class đó làm token. Đây là cách ngắn gọn khi consumer thực sự phụ thuộc vào một service cụ thể.
+
+```ts
+import { Injectable, inject } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class Clock {
+  now(): Date {
+    return new Date();
+  }
+}
+
+@Injectable({ providedIn: 'root' })
+export class BookingService {
+  private readonly clock = inject(Clock);
+
+  isExpired(expiresAt: Date): boolean {
+    return this.clock.now() > expiresAt;
+  }
+}
+```
+
+Cách này rõ ràng và phù hợp với dependency ít có nhu cầu thay thế. Đổi lại, `BookingService` bị gắn với API của `Clock`. Nếu muốn thay implementation mà không để consumer biết class thật, dùng abstraction token ở phần kế tiếp.
+
+### Dùng InjectionToken cho interface và giá trị
+
+TypeScript `interface` bị xóa khi biên dịch sang JavaScript. Vì không còn đối tượng runtime, `interface PaymentGateway` không thể là DI token. `InjectionToken<T>` tạo một object runtime duy nhất, đồng thời giữ thông tin kiểu `T` cho TypeScript.
+
+```ts
+import { InjectionToken, inject } from '@angular/core';
+
+export interface PaymentGateway {
+  charge(total: number): Promise<void>;
+}
+
+export const PAYMENT_GATEWAY = new InjectionToken<PaymentGateway>(
+  'payment.gateway',
+);
+
+export class CheckoutService {
+  private readonly gateway = inject(PAYMENT_GATEWAY);
+
+  pay(total: number): Promise<void> {
+    return this.gateway.charge(total);
+  }
+}
+```
+
+Chuỗi `'payment.gateway'` chỉ là mô tả để đọc lỗi dễ hơn. Danh tính thật là object được trả về bởi `new InjectionToken(...)`. Vì vậy, export token từ một file duy nhất và import lại chính object đó ở mọi nơi.
+
+<Callout type="warn" title="Không dùng string làm token mới">
+  String token dễ va chạm, khó refactor và không có type safety. Với mã Angular hiện đại, ưu tiên class token hoặc `InjectionToken<T>`.
+</Callout>
+
+## Các kiểu provider
+
+Provider object có dạng chung `{ provide: TOKEN, ...recipe }`. Mỗi provider phải chọn một recipe chính. Các phần sau dùng cùng nhu cầu: `CheckoutService` cần một `PaymentGateway` nhưng implementation có thể thay đổi theo môi trường.
+
+### useClass thay đổi cách khởi tạo
+
+`useClass` yêu cầu injector tạo instance của một class để phục vụ token. Đây là lựa chọn phù hợp khi token biểu diễn một capability và implementation là service có thể inject dependency khác.
+
+```ts
+import { Injectable, InjectionToken } from '@angular/core';
+
+export interface PaymentGateway {
+  charge(total: number): Promise<void>;
+}
+
+export const PAYMENT_GATEWAY = new InjectionToken<PaymentGateway>(
+  'payment.gateway',
+);
+
+@Injectable()
+export class StripeGateway implements PaymentGateway {
+  async charge(total: number): Promise<void> {
+    // Gọi SDK hoặc HTTP API của Stripe với total.
+  }
+}
+
+export const paymentProviders = [
+  { provide: PAYMENT_GATEWAY, useClass: StripeGateway },
+];
+```
+
+Angular chỉ cần tạo `StripeGateway` khi token `PAYMENT_GATEWAY` được yêu cầu. Nếu `StripeGateway` có constructor dependency, Angular tiếp tục resolve các dependency đó theo injector hiện tại.
+
+Trade-off của `useClass` là mỗi token có recipe instance riêng. Nếu cùng một class đã được cung cấp dưới token class của nó, đăng ký thêm `{ provide: PAYMENT_GATEWAY, useClass: StripeGateway }` có thể tạo một instance khác. Khi cần hai token cùng trỏ tới **một** instance, dùng `useExisting`.
+
+### useValue cung cấp một giá trị có sẵn
+
+`useValue` trả lại đúng giá trị đã khai báo. Nó phù hợp cho chuỗi URL, feature flag, object config bất biến, mock đơn giản và implementation nhỏ đã tạo sẵn.
+
+```ts
+import { InjectionToken } from '@angular/core';
+
+export interface AppConfig {
+  readonly apiUrl: string;
+  readonly enableNewCheckout: boolean;
+}
+
+export const APP_CONFIG = new InjectionToken<AppConfig>('app.config');
+
+export const appConfigProviders = [
+  {
+    provide: APP_CONFIG,
+    useValue: {
+      apiUrl: 'https://api.example.com',
+      enableNewCheckout: false,
+    } satisfies AppConfig,
+  },
+];
+```
+
+`useValue` không clone object. Mọi consumer nhận cùng reference trong injector đó. Đừng để consumer sửa `APP_CONFIG`; hãy khai báo `readonly`, coi config là immutable, và tách state thay đổi ra một service riêng.
+
+### useFactory tạo dependency từ dependency khác
+
+`useFactory` gọi một hàm để tạo dependency. Factory hữu ích khi kết quả phụ thuộc vào config, platform hoặc nhiều dependency mà một class constructor không diễn đạt rõ bằng.
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { InjectionToken, inject } from '@angular/core';
+import { APP_CONFIG } from './app-config';
+
+export class CatalogApi {
+  constructor(
+    readonly http: HttpClient,
+    readonly baseUrl: string,
+  ) {}
+}
+
+export const CATALOG_API = new InjectionToken<CatalogApi>('catalog.api');
+
+export function createCatalogApi(): CatalogApi {
+  const http = inject(HttpClient);
+  const config = inject(APP_CONFIG);
+
+  return new CatalogApi(http, `${config.apiUrl}/catalog`);
+}
+
+export const catalogApiProvider = {
+  provide: CATALOG_API,
+  useFactory: createCatalogApi,
+};
+```
+
+Factory chạy trong injection context, nên có thể gọi `inject()` đồng bộ bên trong factory như ví dụ trên. Injector cache kết quả factory theo phạm vi provider; factory không phải là cách để tạo một instance mới cho mỗi lần `inject`.
+
+<Callout type="warn" title="Giữ factory thuần và đồng bộ">
+  Factory nên chỉ lắp ghép dependency. Không gọi API mạng, không tạo side effect khó đoán và không trả `Promise` với kỳ vọng injector sẽ await. Hãy tạo service rồi để service thực hiện tác vụ bất đồng bộ sau khi được inject.
+</Callout>
+
+### useExisting tạo bí danh không tạo instance mới
+
+`useExisting` ánh xạ token này sang token khác đã tồn tại. Nó phù hợp khi một service cần được truy cập qua interface token nhưng cả hai lệnh inject phải nhận cùng object.
+
+```ts
+import { Injectable, InjectionToken } from '@angular/core';
+
+export interface Logger {
+  info(message: string): void;
+}
+
+export const LOGGER = new InjectionToken<Logger>('logger');
+
+@Injectable({ providedIn: 'root' })
+export class AppLogger implements Logger {
+  info(message: string): void {
+    console.info(message);
+  }
+}
+
+export const loggerAliasProvider = {
+  provide: LOGGER,
+  useExisting: AppLogger,
+};
+```
+
+`inject(LOGGER)` và `inject(AppLogger)` cùng nhận `AppLogger` từ root injector. Nếu thay `useExisting` bằng `useClass: AppLogger`, hai token có thể tạo hai instance khác nhau, đặc biệt khi service giữ state hoặc mở kết nối.
+
+## Multi provider cho điểm mở rộng
+
+Provider bình thường có một giá trị cho một token. Multi provider cho phép nhiều thư viện hoặc feature cùng đóng góp giá trị vào một token; khi inject, Angular trả về một mảng các đóng góp đó.
+
+Ví dụ, feature export cho phép mỗi module đăng ký một formatter riêng mà không cần sửa `ExportService`.
+
+```ts
+import { Injectable, InjectionToken, inject } from '@angular/core';
+
+export interface ExportFormatter {
+  readonly name: string;
+  format(rows: readonly unknown[]): string;
+}
+
+export const EXPORT_FORMATTERS = new InjectionToken<readonly ExportFormatter[]>(
+  'export.formatters',
+);
+
+@Injectable()
+export class CsvFormatter implements ExportFormatter {
+  readonly name = 'csv';
+
+  format(rows: readonly unknown[]): string {
+    return JSON.stringify(rows);
+  }
+}
+
+@Injectable()
+export class JsonFormatter implements ExportFormatter {
+  readonly name = 'json';
+
+  format(rows: readonly unknown[]): string {
+    return JSON.stringify(rows, null, 2);
+  }
+}
+
+export const exportProviders = [
+  { provide: EXPORT_FORMATTERS, useClass: CsvFormatter, multi: true },
+  { provide: EXPORT_FORMATTERS, useClass: JsonFormatter, multi: true },
+];
+
+@Injectable({ providedIn: 'root' })
+export class ExportService {
+  private readonly formatters = inject(EXPORT_FORMATTERS, { optional: true }) ?? [];
+
+  byName(name: string): ExportFormatter | undefined {
+    return this.formatters.find((formatter) => formatter.name === name);
+  }
+}
+```
+
+Mọi provider cho cùng multi token phải có `multi: true`. Trộn provider thường và multi provider cho một token gây lỗi cấu hình. Multi provider phù hợp cho plugin, validator, interceptor hoặc chiến lược xử lý độc lập; nó không phù hợp khi ứng dụng cần chọn đúng một implementation theo environment.
+
+## Cấu hình ứng dụng qua token
+
+### Định nghĩa cấu hình có kiểu
+
+Tạo token riêng cho config giúp component và service không phải import trực tiếp file environment. Dependency trở nên rõ ràng, dễ thay ở test và có thể dùng factory để dẫn xuất config khác.
+
+```ts
+import { InjectionToken } from '@angular/core';
+
+export interface AppConfig {
+  readonly apiUrl: string;
+  readonly requestTimeoutMs: number;
+  readonly enableNewCheckout: boolean;
+}
+
+export const APP_CONFIG = new InjectionToken<AppConfig>('app.config');
+```
+
+Type generic `<AppConfig>` chỉ kiểm tra tại compile time. `InjectionToken` không tự validate object lấy từ JSON hay biến môi trường. Nếu config đến từ nguồn không đáng tin, validate nó tại điểm nạp bằng schema hoặc hàm kiểm tra rõ ràng trước khi đưa vào provider.
+
+### Đăng ký ở application config
+
+Trong ứng dụng standalone, đăng ký provider toàn ứng dụng trong `ApplicationConfig`. `provideHttpClient()` cũng là một provider factory của Angular; nó đăng ký tập hợp dependency cần cho `HttpClient`.
+
+```ts
+import { provideHttpClient } from '@angular/common/http';
+import { ApplicationConfig } from '@angular/core';
+import { APP_CONFIG } from './app-config';
+import { CATALOG_API, createCatalogApi } from './catalog-api';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(),
+    {
+      provide: APP_CONFIG,
+      useValue: {
+        apiUrl: 'https://api.example.com',
+        requestTimeoutMs: 8_000,
+        enableNewCheckout: false,
+      },
+    },
+    { provide: CATALOG_API, useFactory: createCatalogApi },
+  ],
+};
+```
+
+Nếu service chỉ cần một instance root và không cần cấu hình ngoài, `@Injectable({ providedIn: 'root' })` thường ít boilerplate hơn. Dùng `ApplicationConfig.providers` khi cần lắp ghép implementation, đưa giá trị runtime vào DI, hoặc đăng ký provider của thư viện.
+
+### Nguyên tắc an toàn cho config
+
+- **Không đưa secret thật vào bundle client.** Bất kỳ `useValue` nào trong Angular chạy ở trình duyệt đều có thể bị người dùng xem.
+- **Không dùng config như mutable store.** `useValue` chia sẻ một object reference; thay đổi nó làm hành vi của consumer khó đoán.
+- **Đặt token gần domain sở hữu nó.** Ví dụ `PAYMENT_GATEWAY` thuộc feature thanh toán, không phải một file token toàn cục vô danh.
+- **Ưu tiên một nguồn đăng ký.** Provider bị khai báo lặp ở nhiều scope làm khó xác định giá trị cuối cùng do luật injector gần nhất thắng.
+
+## Override provider khi kiểm thử
+
+Mục tiêu của override là kiểm thử consumer với dependency kiểm soát được. Không nên gọi dịch vụ thật chỉ để test logic chọn URL hoặc nhánh feature flag.
+
+### Override dependency ở TestBed
+
+Đăng ký một provider test cho cùng token để thay giá trị production. Ví dụ sau không cần tạo `HttpClient` hay đọc environment thật.
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { APP_CONFIG } from './app-config';
+
+const testConfig = {
+  apiUrl: 'http://localhost:4200/api',
+  requestTimeoutMs: 10,
+  enableNewCheckout: true,
+};
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: APP_CONFIG, useValue: testConfig },
+    ],
+  });
+});
+
+it('cung cấp config kiểm thử', () => {
+  expect(TestBed.inject(APP_CONFIG)).toEqual(testConfig);
+});
+```
+
+Với service class, fake có thể thay thế interface token qua `useValue`; spy cũng có thể được truyền qua token đó. Chỉ mock phần API mà test cần gọi. Fake quá lớn thường sao chép implementation thật và làm test dễ vỡ.
+
+```ts
+const fakeGateway: PaymentGateway = {
+  charge: jasmine.createSpy('charge').and.resolveTo(),
+};
+
+TestBed.configureTestingModule({
+  providers: [
+    { provide: PAYMENT_GATEWAY, useValue: fakeGateway },
+  ],
+});
+```
+
+### Provider cục bộ của component
+
+Provider của component gần hơn test injector, nên provider test ở `configureTestingModule` không nhất thiết thắng. Nếu component tự khai báo token trong `providers`, override provider của chính component trước khi tạo fixture.
+
+```ts
+TestBed.configureTestingModule({
+  imports: [CheckoutPanelComponent],
+});
+
+TestBed.overrideComponent(CheckoutPanelComponent, {
+  set: {
+    providers: [
+      { provide: PAYMENT_GATEWAY, useValue: fakeGateway },
+    ],
+  },
+});
+
+const fixture = TestBed.createComponent(CheckoutPanelComponent);
+fixture.detectChanges();
+```
+
+<Callout type="idea" title="Quy tắc test">
+  Cấu hình hoặc override provider trước lần đầu `TestBed.inject()` hay `TestBed.createComponent()`. Sau khi injector test đã được tạo, thay đổi provider có thể không có hiệu lực như mong đợi hoặc bị TestBed từ chối.
+</Callout>
+
+## Lỗi thường gặp và trade-off
+
+### Không tìm thấy provider
+
+Lỗi thường có dạng `NullInjectorError` hoặc thông báo không có provider cho token. Nguyên nhân hay gặp là token chưa được đăng ký, đăng ký ở scope không phải tổ tiên của consumer, hoặc import nhầm một token khác có cùng mô tả.
+
+Cách xử lý theo thứ tự:
+
+1. Xác nhận chính object token được import ở consumer và provider.
+2. Xác nhận provider nằm ở root, route hoặc component là tổ tiên của nơi inject.
+3. Nếu dependency là tùy chọn, dùng `inject(TOKEN, { optional: true })` và xử lý `null` có chủ đích.
+4. Không thêm `{ optional: true }` chỉ để che lỗi cấu hình. Dependency bắt buộc nên fail sớm.
+
+### InjectionToken trùng mô tả nhưng khác danh tính
+
+Đoạn sau tạo hai object token khác nhau, dù cả hai đều hiện `'app.config'` trong log hoặc error.
+
+```ts
+const first = new InjectionToken<string>('app.config');
+const second = new InjectionToken<string>('app.config');
+
+console.log(first === second); // false
+```
+
+Provider cho `first` không phục vụ được `inject(second)`. Hãy tạo token một lần, `export const`, rồi import lại. Đây là lý do package library nên export public token thay vì bảo consumer tự tạo token cùng tên.
+
+### Nhầm useClass với useExisting
+
+`useClass` là lệnh **tạo theo class này**. `useExisting` là lệnh **chuyển tiếp sang token đã có**. Nếu `SessionStore` giữ dữ liệu đang đăng nhập, dùng `useClass: SessionStore` cho hai token có thể tạo hai store và state bị phân tách. Khi cần identity chung, chọn `useExisting`.
+
+### Multi provider và thứ tự xử lý
+
+Mảng nhận từ multi provider là một contract. Nếu pipeline chạy formatter, validator hoặc plugin theo thứ tự, thứ tự khai báo provider có thể đổi kết quả. Hãy ghi rõ thứ tự mong muốn, giữ mỗi contribution độc lập và có test cho pipeline. Không dùng multi provider chỉ để thay thế một implementation production bằng implementation test; provider đơn là mô hình đúng hơn cho nhu cầu đó.
+
+### Phạm vi quá rộng hoặc quá hẹp
+
+Root provider tiện nhưng có thể vô tình giữ state giữa các màn hình. Ngược lại, component provider tạo instance mới theo từng component, gây mất cache hoặc tăng chi phí khởi tạo. Hãy bắt đầu từ vòng đời của state:
+
+- State hoặc kết nối dùng chung toàn ứng dụng: root.
+- State theo feature hoặc lazy route: route provider.
+- State chỉ phục vụ một vùng giao diện: component provider.
+- Giá trị cần thay theo environment hoặc test: `InjectionToken` với provider rõ ràng.
+
+## Checklist chọn provider
+
+Trước khi thêm provider, trả lời các câu hỏi sau:
+
+- Consumer cần class cụ thể hay chỉ cần một contract? Contract thì tạo `InjectionToken<T>`.
+- Dependency là object dựng sẵn, service class, hay được lắp ghép từ config? Chọn lần lượt `useValue`, `useClass`, hoặc `useFactory`.
+- Hai token có phải cùng một instance không? Nếu có, chọn `useExisting`.
+- Có nhiều feature cùng đóng góp không? Nếu có, dùng multi provider và quy định thứ tự.
+- Instance nên sống bao lâu? Chọn root, route hoặc component provider theo vòng đời đó.
+- Test có thể cung cấp fake qua token mà không cần khởi tạo hạ tầng thật không? Nếu không, abstraction đang có thể quá chặt.
+
+## Tóm tắt
+
+Token là khóa runtime; provider là recipe; injector là nơi Angular tra cứu và cache dependency. Dùng class token cho dependency cụ thể, dùng `InjectionToken<T>` cho interface và config. Chọn `useClass`, `useValue`, `useFactory` hoặc `useExisting` theo cách dependency được tạo và có cần giữ cùng identity hay không. Cuối cùng, hãy đặt provider ở scope khớp vòng đời, dùng multi provider cho extension point thực sự, và override token ở test để cô lập logic cần kiểm tra.

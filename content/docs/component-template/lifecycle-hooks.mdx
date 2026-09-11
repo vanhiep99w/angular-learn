@@ -1,10 +1,596 @@
 ---
-title: Lifecycle hooks
-description: Thời điểm và mục đích sử dụng các hook vòng đời component.
+title: Lifecycle hooks trong Angular
+description: Hiểu thứ tự lifecycle hook, render callbacks, cleanup với DestroyRef và cách chọn đúng thời điểm để chạy logic trong component Angular.
 ---
 
-Trang này sẽ trình bày **Lifecycle hooks** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang này">
+  Lifecycle hook cho biết Angular đang ở thời điểm nào khi tạo, kiểm tra, render và hủy một component. Dùng đúng hook giúp code dự đoán được; dùng sai hook thường dẫn đến DOM chưa tồn tại, dữ liệu bị tính lại quá nhiều hoặc rò rỉ subscription.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Lifecycle hook là gì](#lifecycle-hook-là-gì)
+  - [Hai loại thời điểm cần phân biệt](#hai-loại-thời-điểm-cần-phân-biệt)
+- [Cơ chế Angular đi qua vòng đời](#cơ-chế-angular-đi-qua-vòng-đời)
+  - [Một lượt kiểm tra không phải một lần render](#một-lượt-kiểm-tra-không-phải-một-lần-render)
+  - [Luồng khởi tạo và các lượt kiểm tra sau đó](#luồng-khởi-tạo-và-các-lượt-kiểm-tra-sau-đó)
+- [Các hook theo thứ tự](#các-hook-theo-thứ-tự)
+  - [Constructor: chưa phải lifecycle hook](#constructor-chưa-phải-lifecycle-hook)
+  - [`ngOnChanges`: phản ứng với input](#ngonchanges-phản-ứng-với-input)
+  - [`ngOnInit`: khởi tạo một lần](#ngoninit-khởi-tạo-một-lần)
+  - [`ngDoCheck`: kiểm tra tùy biến](#ngdocheck-kiểm-tra-tùy-biến)
+  - [`ngAfterContentInit` và `ngAfterContentChecked`](#ngaftercontentinit-và-ngaftercontentchecked)
+  - [`ngAfterViewInit` và `ngAfterViewChecked`](#ngafterviewinit-và-ngafterviewchecked)
+  - [`ngOnDestroy`: kết thúc instance](#ngondestroy-kết-thúc-instance)
+- [Render callbacks: chạy sau khi Angular render](#render-callbacks-chạy-sau-khi-angular-render)
+  - [`afterNextRender` và `afterEveryRender`](#afternextrender-và-aftereveryrender)
+  - [Pha đọc và ghi DOM](#pha-đọc-và-ghi-dom)
+- [Cleanup với `DestroyRef`](#cleanup-với-destroyref)
+  - [Đặt teardown cạnh lúc setup](#đặt-teardown-cạnh-lúc-setup)
+  - [Dừng RxJS subscription](#dừng-rxjs-subscription)
+- [Ví dụ hoàn chỉnh: component chi tiết đơn hàng](#ví-dụ-hoàn-chỉnh-component-chi-tiết-đơn-hàng)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Sửa state trong hook kiểm tra hoặc hook view](#sửa-state-trong-hook-kiểm-tra-hoặc-hook-view)
+  - [Dùng hook để thay thế state dẫn xuất](#dùng-hook-để-thay-thế-state-dẫn-xuất)
+  - [Đo hoặc ghi DOM không đúng thời điểm](#đo-hoặc-ghi-dom-không-đúng-thời-điểm)
+  - [Quên dọn tài nguyên](#quên-dọn-tài-nguyên)
+- [Cách chọn hook](#cách-chọn-hook)
+- [Tóm tắt](#tóm-tắt)
+
+## Tổng quan
+
+### Lifecycle hook là gì
+
+**Lifecycle hook** là một method có tên quy ước mà Angular gọi tại các mốc trong đời sống của directive hoặc component. Một instance bắt đầu khi Angular tạo nó, nhận giá trị input, được kiểm tra cùng template, rồi cuối cùng bị hủy khi không còn nằm trong cây ứng dụng.
+
+Hook không phải là cơ chế để chạy mọi loại logic “sau khi trang tải”. Nó trả lời một câu hỏi cụ thể: **ở mốc này, Angular đã có input, content được projection, view con, hay DOM đã render xong chưa?** Câu trả lời quyết định logic nào là hợp lệ.
+
+Ví dụ, component con chỉ nhận được `@Input()` sau constructor. Vì vậy, đọc input để tính giá trị ban đầu trong constructor là quá sớm. Ngược lại, `@ViewChild()` chỉ sẵn sàng sau khi view của component được khởi tạo, nên không thể dùng nó trong `ngOnInit`.
+
+### Hai loại thời điểm cần phân biệt
+
+Tài liệu Angular hiện đại có hai nhóm API dễ bị lẫn với nhau:
+
+| Nhóm | Ví dụ | Phạm vi | Dùng khi |
+| --- | --- | --- | --- |
+| Hook của instance | `ngOnInit`, `ngOnChanges`, `ngOnDestroy` | Một component/directive cụ thể | Cần phản ứng với input, content/view của instance hoặc hủy tài nguyên của nó |
+| Render callback | `afterNextRender`, `afterEveryRender` | Toàn ứng dụng sau khi Angular hoàn tất render DOM | Cần đọc/ghi DOM thật, ví dụ đo kích thước hoặc tích hợp thư viện DOM |
+
+`ngAfterViewInit` cho biết Angular đã tạo **view của instance**. Nó không phải lời hứa rằng toàn bộ lượt render của ứng dụng đã hoàn thành. Nếu cần thao tác layout của DOM sau render, render callback thường diễn đạt đúng ý hơn.
+
+<Callout type="idea" title="Nguyên tắc nền">
+  Template nên đọc state, còn event handler hoặc luồng dữ liệu rõ ràng nên thay đổi state. Hook chỉ bổ sung logic tại một mốc vòng đời thật sự cần thiết; không nên biến nó thành nơi chứa mọi side effect.
+</Callout>
+
+## Cơ chế Angular đi qua vòng đời
+
+### Một lượt kiểm tra không phải một lần render
+
+Khi Angular cần đồng bộ giao diện, nó duyệt cây component từ trên xuống. Trong lượt **change detection** (kiểm tra thay đổi) đó, Angular đọc binding và chạy các hook kiểm tra phù hợp. Angular chỉ cập nhật phần DOM mà binding thực sự đổi; vì thế một lượt kiểm tra không mặc định đồng nghĩa với toàn bộ DOM được vẽ lại.
+
+Nhiều việc có thể làm Angular cần kiểm tra, chẳng hạn người dùng `click`, một HTTP response hoàn tất, `signal` được ghi giá trị, hoặc component cha truyền input mới. Tần suất chính xác phụ thuộc chiến lược phát hiện thay đổi và cấu hình ứng dụng. Điều quan trọng là các hook như `ngDoCheck` và `ngAfterViewChecked` có thể chạy rất thường xuyên.
+
+Angular duyệt mỗi component đúng một lần trong một lượt traversal. Đừng thay đổi state đang được template khác đọc ngay giữa lúc traversal diễn ra. Việc đó làm trạng thái trước và sau trong cùng lượt không nhất quán, đồng thời có thể tạo lỗi khó tái hiện.
+
+### Luồng khởi tạo và các lượt kiểm tra sau đó
+
+Sơ đồ sau là mô hình tinh gọn cho một component có input, projected content và view con. Các hook `Checked` tiếp tục chạy trong những lượt kiểm tra sau; các hook `Init` chỉ chạy một lần.
+
+```text
+Tạo instance
+    │
+    ├── constructor
+    ├── Angular gán input ban đầu
+    ├── ngOnChanges (nếu có input thay đổi, gồm lần đầu)
+    ├── ngOnInit
+    ├── ngDoCheck
+    ├── ngAfterContentInit ──► ngAfterContentChecked
+    ├── ngAfterViewInit ────► ngAfterViewChecked
+    │
+    └── Angular hoàn tất render ──► afterNextRender / afterEveryRender
+
+Lượt kiểm tra tiếp theo
+    │
+    ├── ngOnChanges (chỉ khi input đổi)
+    ├── ngDoCheck
+    ├── ngAfterContentChecked
+    ├── ngAfterViewChecked
+    └── Angular hoàn tất render ──► afterEveryRender
+
+Hủy instance ──► ngOnDestroy và callback của DestroyRef
+```
+
+Thứ tự giữa content và view có ý nghĩa:
+
+- **Content** là DOM/component mà cha truyền vào qua `<ng-content>`. Nó thuộc nội dung projected của component hiện tại.
+- **View** là template riêng của component và các view child do template đó tạo. `@ViewChild()` truy vấn vùng này.
+
+Một component không dùng projection hoặc không có view child vẫn có thể implement các hook tương ứng, nhưng không nên làm vậy nếu không có công việc cụ thể.
+
+## Các hook theo thứ tự
+
+| Hook | Số lần gọi | Angular đã bảo đảm gì? | Công việc phù hợp |
+| --- | ---: | --- | --- |
+| `ngOnChanges` | Mỗi lần input đổi | Input mới đã được gán | Đồng bộ state phụ thuộc input, phản ứng theo `SimpleChanges` |
+| `ngOnInit` | Một | Input ban đầu đã được gán | Khởi tạo không cần view/content |
+| `ngDoCheck` | Mỗi lượt kiểm tra | Angular đang kiểm tra instance | Kiểm tra tùy biến thật sự cần thiết, thật nhẹ |
+| `ngAfterContentInit` | Một | Projected content đã khởi tạo | Đọc `@ContentChild()` lần đầu |
+| `ngAfterContentChecked` | Mỗi lượt kiểm tra content | Projected content đã được kiểm tra | Rất hiếm khi cần; không sửa state ở đây |
+| `ngAfterViewInit` | Một | View và view child đã khởi tạo | Đọc `@ViewChild()` lần đầu, setup phụ thuộc view |
+| `ngAfterViewChecked` | Mỗi lượt kiểm tra view | View đã được kiểm tra | Rất hiếm khi cần; không sửa state ở đây |
+| `ngOnDestroy` | Một trước khi hủy | Instance sắp bị loại bỏ | Teardown tài nguyên còn lại |
+
+### Constructor: chưa phải lifecycle hook
+
+TypeScript gọi constructor khi tạo object. Angular có thể inject dependency tại đây, nhưng input binding, projected content và view chưa sẵn sàng. Vì vậy constructor phù hợp để inject dependency hoặc đăng ký render callback trong injection context, không phù hợp để dựa vào input hay phần tử DOM.
+
+```ts
+import { Component, inject } from '@angular/core';
+import { OrdersService } from './orders.service';
+
+@Component({
+  selector: 'app-order-list',
+  template: '',
+})
+export class OrderListComponent {
+  private readonly ordersService = inject(OrdersService);
+
+  constructor() {
+    // Có thể dùng ordersService ở đây.
+    // Không đọc @Input(), @ViewChild() hay document.querySelector() ở đây.
+  }
+}
+```
+
+Nếu việc khởi tạo phụ thuộc input ban đầu, chọn `ngOnInit`. Nếu nó phải chạy lại mỗi khi input đổi, chọn `ngOnChanges` hoặc mô hình state phản ứng bằng signal.
+
+### `ngOnChanges`: phản ứng với input
+
+Angular gọi `ngOnChanges(changes)` sau khi gán một hoặc nhiều input và trước `ngOnInit`. Ở lần tạo đầu tiên, nó cũng chạy nếu component có input binding. Trong các lượt sau, hook chỉ chạy khi Angular nhận một **giá trị input mới**.
+
+`SimpleChanges` là object có key là tên property input. Mỗi `SimpleChange` chứa `previousValue`, `currentValue` và `firstChange`. Kiểm tra key trước khi dùng vì không phải mọi input đều thay đổi trong cùng một lượt.
+
+```ts
+import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
+
+@Component({
+  selector: 'app-price-summary',
+  template: `<p>Tổng: {{ total }} đ</p>`,
+})
+export class PriceSummaryComponent implements OnChanges {
+  @Input({ required: true }) items: Array<{ price: number; quantity: number }> = [];
+
+  total = 0;
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['items']) {
+      this.total = this.items.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0,
+      );
+    }
+  }
+}
+```
+
+`ngOnChanges` không theo dõi mutation sâu của object. Nếu cha giữ nguyên cùng reference rồi thực hiện `this.items.push(...)`, component con không nhất thiết nhận một thay đổi input theo nghĩa của hook. Hãy ưu tiên cập nhật bất biến, ví dụ `this.items = [...this.items, newItem]`, hoặc thiết kế state bằng signal tùy bối cảnh.
+
+<Callout type="warn" title="Không sao chép state nếu không cần">
+  Ví dụ `total` ở trên hợp lý khi cần một bước đồng bộ có chủ đích. Nhưng nếu giá trị chỉ là phép tính thuần từ input, `computed()` với input signal thường dễ giữ đúng hơn vì không tạo hai nguồn dữ liệu có thể lệch nhau.
+</Callout>
+
+### `ngOnInit`: khởi tạo một lần
+
+`ngOnInit` chạy đúng một lần, sau lần `ngOnChanges` đầu tiên. Lúc này Angular đã gán input ban đầu, nhưng content child và view child chưa được bảo đảm sẵn sàng.
+
+Đây là nơi tốt để khởi tạo state dựa trên input ban đầu, bắt đầu một luồng dữ liệu không cần DOM, hoặc kiểm tra điều kiện cấu hình một lần.
+
+```ts
+import { Component, Input, OnInit } from '@angular/core';
+
+@Component({
+  selector: 'app-user-greeting',
+  template: `<p>{{ greeting }}</p>`,
+})
+export class UserGreetingComponent implements OnInit {
+  @Input({ required: true }) userName = '';
+
+  greeting = '';
+
+  ngOnInit(): void {
+    this.greeting = `Chào mừng ${this.userName}`;
+  }
+}
+```
+
+Đừng dùng `ngOnInit` như một “constructor thứ hai” chỉ vì nó tồn tại. Nếu `greeting` phải thay đổi khi `userName` đổi sau này, đoạn code trên không đủ; hãy dùng `ngOnChanges`, một setter input, hoặc `computed` từ input signal.
+
+### `ngDoCheck`: kiểm tra tùy biến
+
+`ngDoCheck` chạy mỗi khi Angular kiểm tra component. Hook này dành cho trường hợp đặc biệt khi cơ chế phát hiện thay đổi mặc định không thể biểu đạt điều bạn cần. Vì nó nằm trên đường chạy nóng, code trong hook phải rất nhỏ và không có side effect.
+
+Một ví dụ hiếm gặp là tích hợp một cấu trúc dữ liệu cũ bị mutate tại chỗ mà bạn không thể đổi API. Ngay cả khi đó, hãy cân nhắc chuyển ranh giới tích hợp sang service hoặc phát event rõ ràng thay vì quét sâu object mỗi lượt kiểm tra.
+
+```ts
+ngDoCheck(): void {
+  // Không gọi HTTP, không lọc/sắp xếp mảng lớn, không cập nhật state vô điều kiện.
+  // Nếu bắt buộc so sánh thủ công, chỉ so sánh một dấu hiệu rẻ và thoát sớm.
+}
+```
+
+Trong ứng dụng mới, signal, input bất biến và `computed` thường loại bỏ nhu cầu dùng `ngDoCheck`. Kết luận thực dụng: nếu bạn định thêm logic đáng kể vào hook này, hãy dừng lại và xem lại mô hình state trước.
+
+### `ngAfterContentInit` và `ngAfterContentChecked`
+
+Content projection là nội dung cha đặt giữa cặp thẻ của component:
+
+```html
+<app-panel>
+  <button>Đóng</button>
+</app-panel>
+```
+
+Trong `app-panel`, nút đó đi qua `<ng-content>` và trở thành **content child**, không phải view child. `ngAfterContentInit` chạy một lần sau khi Angular khởi tạo content projected. Đây là mốc có thể đọc `@ContentChild()` lần đầu.
+
+```ts
+import { AfterContentInit, Component, ContentChild, ElementRef } from '@angular/core';
+
+@Component({
+  selector: 'app-panel',
+  template: `<section class="panel"><ng-content /></section>`,
+})
+export class PanelComponent implements AfterContentInit {
+  @ContentChild('panelTitle') title?: ElementRef<HTMLElement>;
+
+  ngAfterContentInit(): void {
+    // `title` đã có thể được đọc nếu cha truyền phần tử #panelTitle.
+    console.log(this.title?.nativeElement.textContent);
+  }
+}
+```
+
+`ngAfterContentChecked` chạy sau mỗi lần Angular kiểm tra content. Tránh đặt phép tính nặng hoặc gán state ở đây. Nếu mục tiêu là phản ứng với thay đổi của `QueryList`, hãy dùng API query phù hợp và quản lý cleanup, thay vì quét lại content trong mỗi hook.
+
+### `ngAfterViewInit` và `ngAfterViewChecked`
+
+`ngAfterViewInit` chạy một lần sau khi Angular khởi tạo template của chính component. Đây là mốc `@ViewChild()` và `@ViewChildren()` sẵn sàng cho lần đọc đầu tiên.
+
+```ts
+import { AfterViewInit, Component, ElementRef, ViewChild } from '@angular/core';
+
+@Component({
+  selector: 'app-search-box',
+  template: `<input #searchInput type="search" placeholder="Tìm kiếm" />`,
+})
+export class SearchBoxComponent implements AfterViewInit {
+  @ViewChild('searchInput') searchInput!: ElementRef<HTMLInputElement>;
+
+  ngAfterViewInit(): void {
+    // Có thể đọc ViewChild. Chỉ focus khi đây thật sự là hành vi UX mong muốn.
+    this.searchInput.nativeElement.focus();
+  }
+}
+```
+
+`ngAfterViewChecked` chạy sau mỗi lần view được kiểm tra. Không dùng nó để “đồng bộ lại mọi thứ”; hook có thể chạy nhiều lần và việc sửa state tại đây dễ gây `ExpressionChangedAfterItHasBeenCheckedError` ở chế độ phát triển. Nếu cần thao tác DOM sau render, hãy xem phần render callbacks.
+
+### `ngOnDestroy`: kết thúc instance
+
+Angular gọi `ngOnDestroy` đúng một lần ngay trước khi hủy directive hoặc component. Đây là điểm cuối để hủy timer, đóng kết nối do component sở hữu, gỡ listener thủ công, hoặc thông báo cho thư viện bên ngoài.
+
+```ts
+import { isPlatformBrowser } from '@angular/common';
+import { Component, OnDestroy, PLATFORM_ID, inject } from '@angular/core';
+
+@Component({
+  selector: 'app-polling-status',
+  template: `Đang theo dõi`,
+})
+export class PollingStatusComponent implements OnDestroy {
+  private readonly platformId = inject(PLATFORM_ID);
+  private timerId: ReturnType<typeof setInterval> | undefined;
+
+  constructor() {
+    // Không tạo timer khi instance được render ở server.
+    if (isPlatformBrowser(this.platformId)) {
+      this.timerId = setInterval(() => {
+        // Lấy trạng thái mới.
+      }, 10_000);
+    }
+  }
+
+  ngOnDestroy(): void {
+    if (this.timerId !== undefined) {
+      clearInterval(this.timerId);
+    }
+  }
+}
+```
+
+Trong ứng dụng có SSR, guard `isPlatformBrowser` giữ việc tạo timer ở client; server
+vẫn có thể tạo rồi hủy instance mà không chạm API browser. `ngOnDestroy` vẫn hữu ích,
+nhất là khi một class đã implement interface lifecycle rõ ràng. Tuy nhiên, với code
+mới, `DestroyRef` thường giúp đặt setup và cleanup gần nhau hơn.
+
+## Render callbacks: chạy sau khi Angular render
+
+### `afterNextRender` và `afterEveryRender`
+
+`afterNextRender` đăng ký callback chạy **một lần** sau khi Angular render xong toàn bộ ứng dụng ở lượt kế tiếp. `afterEveryRender` chạy sau mỗi lần Angular render xong. Chúng là function, không phải method interface; hãy gọi chúng trong **injection context**, thông dụng nhất là constructor của component hoặc directive.
+
+Render callback hữu ích khi cần thao tác với DOM thật: focus có điều kiện, đo kích thước, đặt vị trí overlay, hoặc gọi thư viện chỉ hoạt động trên browser. Chúng không chạy khi server-side rendering (SSR) hoặc build trước trang (prerender), nên không phải nơi để tải dữ liệu thiết yếu cho nội dung trang.
+
+```ts
+import { Component, ElementRef, afterNextRender, inject, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-notice',
+  template: `<article class="notice">Đã lưu thay đổi</article>`,
+})
+export class NoticeComponent {
+  private readonly host = inject(ElementRef<HTMLElement>);
+  readonly height = signal(0);
+
+  constructor() {
+    afterNextRender({
+      read: () => {
+        // DOM đã được Angular render ở browser; đây là lúc hợp lý để đo layout.
+        this.height.set(this.host.nativeElement.getBoundingClientRect().height);
+      },
+    });
+  }
+}
+```
+
+Chỉ chọn `afterEveryRender` khi kết quả thật sự phụ thuộc mọi lần render. Một callback đo layout hoặc gọi thư viện nặng ở đây có thể biến mỗi tương tác nhỏ thành chi phí không cần thiết. Thông thường `afterNextRender`, event cụ thể hoặc `ResizeObserver` là lựa chọn hẹp và rẻ hơn.
+
+### Pha đọc và ghi DOM
+
+Render callback nhận object các pha tùy chọn: `earlyRead`, `mixedReadWrite`, `write` và `read`. Angular chạy cùng pha của các callback đã đăng ký trước khi chuyển sang pha tiếp theo. Tách việc **ghi** style/class khỏi việc **đọc** layout giúp browser tránh phải tính lại layout xen kẽ nhiều lần, hiện tượng này thường được gọi là layout thrashing.
+
+Thứ tự ưu tiên là:
+
+1. `earlyRead`: chỉ dùng khi bắt buộc phải đọc layout trước khi ghi.
+2. `write`: thay đổi style, class hoặc property có thể làm layout đổi.
+3. `read`: đo layout sau các thay đổi ở pha `write`.
+4. `mixedReadWrite`: phương án cuối khi không thể tách đọc và ghi.
+
+```ts
+constructor() {
+  afterNextRender({
+    write: () => {
+      const element = this.host.nativeElement;
+      element.classList.add('notice--ready');
+      return true; // Giá trị này được chuyển cho pha read.
+    },
+    read: (wasUpdated) => {
+      if (wasUpdated) {
+        this.height.set(this.host.nativeElement.getBoundingClientRect().height);
+      }
+    },
+  });
+}
+```
+
+<Callout type="warn" title="Đừng dùng render callback như ngOnDestroy">
+  Callback render không thay thế cleanup. `afterNextRender` chưa chạy có thể không còn ý nghĩa nếu component đã bị hủy, còn listener hoặc subscription bạn tự tạo vẫn cần một cơ chế teardown rõ ràng.
+</Callout>
+
+## Cleanup với `DestroyRef`
+
+### Đặt teardown cạnh lúc setup
+
+`DestroyRef` là một dependency đại diện cho vòng đời hủy của injection context hiện tại. Gọi `destroyRef.onDestroy(callback)` để đăng ký cleanup. Cách này giữ phần tạo và phần hủy tài nguyên cạnh nhau, thay vì phải nhớ thêm một đoạn teardown ở cuối class.
+
+```ts
+import { Component, DestroyRef, inject } from '@angular/core';
+
+@Component({
+  selector: 'app-resize-aware-card',
+  template: `<ng-content />`,
+})
+export class ResizeAwareCardComponent {
+  private readonly destroyRef = inject(DestroyRef);
+
+  constructor() {
+    const observer = new ResizeObserver((entries) => {
+      console.log('Kích thước mới:', entries[0]?.contentRect.width);
+    });
+
+    observer.observe(document.body);
+
+    this.destroyRef.onDestroy(() => {
+      observer.disconnect();
+    });
+  }
+}
+```
+
+`DestroyRef` cũng có cờ `destroyed`. Cờ này hữu ích khi callback bất đồng bộ hoàn tất muộn và bạn cần tránh tiếp tục thao tác với instance đã bị hủy. Tuy nhiên, cách tốt hơn vẫn là hủy nguồn phát, ví dụ abort request hoặc unsubscribe, ngay từ đầu khi có thể.
+
+### Dừng RxJS subscription
+
+Subscription không tự biến mất chỉ vì component biến mất. Với Observable sống lâu như `interval`, WebSocket, router event hoặc stream từ service, hãy gắn vòng đời subscription vào `DestroyRef`.
+
+`takeUntilDestroyed` trong `@angular/core/rxjs-interop` là lựa chọn rõ ràng cho trường hợp phổ biến:
+
+```ts
+import { Component, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { interval } from 'rxjs';
+
+@Component({
+  selector: 'app-clock',
+  template: `Đồng hồ đang chạy`,
+})
+export class ClockComponent {
+  private readonly destroyRef = inject(DestroyRef);
+
+  constructor() {
+    interval(1_000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((tick) => console.log('tick', tick));
+  }
+}
+```
+
+Không phải mọi Observable đều cần unsubscribe thủ công. Ví dụ HTTP Observable thường hoàn tất sau một response. Dù vậy, đừng dựa vào điều đó cho stream dài hạn. Quy tắc an toàn là xác định rõ **ai sở hữu tài nguyên** và **lúc nào tài nguyên phải kết thúc**.
+
+## Ví dụ hoàn chỉnh: component chi tiết đơn hàng
+
+Ví dụ này kết hợp ba quyết định thường gặp:
+
+- `computed` tạo state dẫn xuất từ input signal, nên không cần `ngOnChanges` chỉ để tính tổng tiền.
+- `ngOnInit` tải dữ liệu chỉ cần một lần cho instance.
+- `afterNextRender` đo DOM sau render, còn `takeUntilDestroyed` dừng stream khi component bị hủy.
+
+```ts
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  afterNextRender,
+  computed,
+  inject,
+  input,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { OrderEventsService } from './order-events.service';
+import { OrderService } from './order.service';
+
+type Order = {
+  id: string;
+  customerName: string;
+  items: Array<{ name: string; price: number; quantity: number }>;
+};
+
+@Component({
+  selector: 'app-order-detail',
+  standalone: true,
+  template: `
+    <article #card class="order-card">
+      <h2>Đơn hàng của {{ order().customerName }}</h2>
+      <p>Tổng tiền: {{ total() }} đ</p>
+      <p>Số dòng hiển thị: {{ cardHeight() }} px</p>
+    </article>
+  `,
+})
+export class OrderDetailComponent {
+  readonly order = input.required<Order>();
+  readonly total = computed(() =>
+    this.order().items.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0,
+    ),
+  );
+  readonly cardHeight = signal(0);
+
+  private readonly host = inject(ElementRef<HTMLElement>);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly orderService = inject(OrderService);
+  private readonly orderEvents = inject(OrderEventsService);
+
+  constructor() {
+    afterNextRender({
+      read: () => {
+        const card = this.host.nativeElement.querySelector<HTMLElement>('.order-card');
+        this.cardHeight.set(card?.getBoundingClientRect().height ?? 0);
+      },
+    });
+
+    this.orderEvents.updated$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => {
+        if (event.orderId === this.order().id) {
+          this.orderService.refresh(event.orderId);
+        }
+      });
+  }
+
+  ngOnInit(): void {
+    this.orderService.loadExtraDetails(this.order().id);
+  }
+}
+```
+
+Ví dụ cố ý không implement `OnChanges`: `total` luôn được suy ra từ `order()` nên không có bản sao `total` phải tự đồng bộ. Nó cũng không dùng `ngAfterViewInit` chỉ để đo chiều cao, vì mục tiêu là chờ lượt render hoàn chỉnh rồi đọc layout.
+
+<Callout type="info" title="Lưu ý về ví dụ">
+  `input.required()` là input signal. Khi input này đổi, `computed` tự tính lại khi được đọc. Nếu cần biết giá trị cũ và mới để chạy side effect, bạn vẫn có thể dùng `ngOnChanges` với input phù hợp, hoặc thiết kế một effect có cleanup và ranh giới side effect rõ ràng.
+</Callout>
+
+## Lỗi thường gặp và trade-off
+
+### Sửa state trong hook kiểm tra hoặc hook view
+
+Một lỗi phổ biến là tính lại một binding rồi gán nó trong `ngAfterViewInit`, `ngAfterViewChecked` hoặc `ngAfterContentChecked`. Angular có thể đã kiểm tra binding đó trong lượt hiện tại. Ở chế độ phát triển, Angular có thể báo `ExpressionChangedAfterItHasBeenCheckedError` để chỉ ra rằng giá trị đổi sau khi nó đã được kiểm tra.
+
+```ts
+ngAfterViewInit(): void {
+  // Rủi ro: `isReady` có thể đã được template đọc trong lượt hiện tại.
+  this.isReady = true;
+}
+```
+
+Đừng chữa bằng `setTimeout()` chỉ để đẩy thay đổi sang lượt sau. Hãy xác định ý định: nếu `isReady` là state từ input, tạo nó trước khi render; nếu cần đọc DOM, dùng `afterNextRender`; nếu do thao tác người dùng, cập nhật trong event handler. Lời giải đúng là chọn đúng mốc, không phải trì hoãn ngẫu nhiên.
+
+### Dùng hook để thay thế state dẫn xuất
+
+Mẫu `ngOnChanges` để chép input vào local state rất dễ tạo hai nguồn sự thật:
+
+```ts
+ngOnChanges(): void {
+  this.displayName = `${this.user.firstName} ${this.user.lastName}`;
+}
+```
+
+Nếu `displayName` chỉ dùng để hiển thị, hãy dùng getter nhỏ hoặc `computed` từ input signal. Chỉ giữ state riêng khi nó có vòng đời độc lập, ví dụ người dùng đang chỉnh bản nháp trong form và bản nháp không nên đổi theo từng thay đổi từ server.
+
+Trade-off là `computed` thích hợp cho phép tính thuần. Một yêu cầu có HTTP, logging hoặc thao tác DOM là side effect; hãy đặt nó vào event, service, hook phản ứng input hoặc effect được kiểm soát thay vì nhét vào phép tính dẫn xuất.
+
+### Đo hoặc ghi DOM không đúng thời điểm
+
+Đọc `offsetHeight` trước khi view tồn tại cho kết quả không có ý nghĩa. Việc ghi style rồi đọc layout lặp lại trong nhiều callback có thể buộc browser tính layout liên tục. Đây là nguyên nhân của giao diện giật khi danh sách hoặc dashboard phức tạp.
+
+- Có `@ViewChild()` lần đầu: dùng `ngAfterViewInit`.
+- Cần DOM sau lượt render toàn ứng dụng: dùng `afterNextRender`.
+- Cần đặt style rồi đo lại: tách `write` và `read` trong render callback.
+- Cần phản ứng khi kích thước về sau thay đổi: cân nhắc `ResizeObserver`, đồng thời disconnect nó khi hủy.
+
+### Quên dọn tài nguyên
+
+`addEventListener`, `setInterval`, `ResizeObserver`, chart library và Observable dài hạn đều có thể giữ callback sống sau khi người dùng rời component. Hậu quả là memory leak, request trùng lặp và callback cố ghi vào state đã không còn hiển thị.
+
+Ưu tiên API có cleanup rõ: `DestroyRef.onDestroy`, `takeUntilDestroyed`, `AbortController.abort()`, `clearInterval()` hoặc method `destroy()` của thư viện. Đừng chỉ hy vọng garbage collector tự giải quyết một resource còn đăng ký listener.
+
+## Cách chọn hook
+
+Bắt đầu từ nhu cầu thay vì ghi nhớ tên hook. Bảng sau cho một lựa chọn thực tế:
+
+| Nhu cầu | Lựa chọn đầu tiên | Vì sao | Tránh dùng |
+| --- | --- | --- | --- |
+| Inject service hoặc đăng ký render callback | Constructor / field `inject()` | Đang ở injection context, chưa phụ thuộc view | Đọc input hoặc query DOM |
+| Tính giá trị thuần từ input signal | `computed` | Không tạo bản sao state, tự theo dependency | `ngOnChanges` chỉ để gán lại giá trị |
+| So sánh input cũ/mới hoặc side effect khi input đổi | `ngOnChanges` | Có `previousValue`, `currentValue`, `firstChange` | `ngOnInit` nếu input còn có thể đổi |
+| Khởi tạo một lần sau input đầu tiên | `ngOnInit` | Input đầu đã sẵn sàng | Constructor nếu cần input |
+| Đọc projected content/query content | `ngAfterContentInit` | Content đã được tạo | `ngOnInit` |
+| Đọc `@ViewChild()` lần đầu | `ngAfterViewInit` | View của instance đã được tạo | Constructor hoặc `ngOnInit` |
+| Đo/ghi DOM sau render | `afterNextRender` với pha phù hợp | Đồng bộ với render và layout browser | `setTimeout()` như workaround |
+| Theo dõi mỗi render | `afterEveryRender`, chỉ khi cần | API diễn đạt đúng yêu cầu | Hook `Checked` để chạy việc nặng |
+| Dọn listener, timer, subscription | `DestroyRef` / `ngOnDestroy` | Teardown gắn với đời sống instance | Bỏ qua cleanup |
+| Phát hiện mutation tùy biến | Thiết kế lại state trước; `ngDoCheck` là phương án cuối | Hook chạy rất thường xuyên | Quét sâu dữ liệu mọi lượt |
+
+<Callout type="idea" title="Checklist trước khi thêm hook">
+  Hãy hỏi: logic này có thực sự phụ thuộc mốc lifecycle không? Nó cần chạy một lần, mỗi lần input đổi, hay sau render? Nó có tạo resource cần cleanup không? Trả lời ba câu này thường đủ để chọn API mà không cần thử ngẫu nhiên nhiều hook.
+</Callout>
+
+## Tóm tắt
+
+- Constructor dùng để inject dependency; input, projected content và view chưa được bảo đảm ở đó.
+- `ngOnChanges` phản ứng input mới; `ngOnInit` chạy một lần sau input đầu; các hook `Checked` phải cực nhẹ.
+- `ngAfterContentInit` dành cho content projected, còn `ngAfterViewInit` dành cho view và `@ViewChild()`.
+- `afterNextRender` và `afterEveryRender` là render callback sau render toàn ứng dụng. Tách pha `write` và `read` khi thao tác layout.
+- Dùng `DestroyRef` hoặc `ngOnDestroy` để kết thúc mọi tài nguyên component sở hữu. Với RxJS dài hạn, `takeUntilDestroyed` giúp gắn subscription vào vòng đời.
+- Trước khi thêm hook, ưu tiên state bất biến, signal và `computed` cho dữ liệu thuần. Hook là công cụ định thời điểm, không phải kho chứa logic chung.

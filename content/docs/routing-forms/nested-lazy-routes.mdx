@@ -1,10 +1,494 @@
 ---
 title: Nested và lazy routes
-description: Tổ chức route lồng nhau và tải feature theo nhu cầu.
+description: Tổ chức route lồng nhau, tách feature thành lazy bundle và kiểm soát cách tham số đi qua cây route.
 ---
 
-Trang này sẽ trình bày **Nested và lazy routes** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi bài học">
+  Bài này dùng API Router hiện đại với standalone component. Bạn cần đã biết route cơ bản, `routerLink` và `router-outlet`; mục tiêu ở đây là tổ chức một feature lớn mà URL, layout và các bundle vẫn dễ đọc.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+- [Mô hình route tree và router-outlet](#mô-hình-route-tree-và-router-outlet)
+  - [Route tree là trạng thái giao diện](#route-tree-là-trạng-thái-giao-diện)
+  - [Router-outlet là điểm cắm của route con](#router-outlet-là-điểm-cắm-của-route-con)
+- [Route lồng nhau trong một feature](#route-lồng-nhau-trong-một-feature)
+  - [Cấu hình một workspace có layout dùng chung](#cấu-hình-một-workspace-có-layout-dùng-chung)
+  - [Redirect mặc định và thứ tự khớp route](#redirect-mặc-định-và-thứ-tự-khớp-route)
+  - [Đọc tham số khi URL thay đổi](#đọc-tham-số-khi-url-thay-đổi)
+- [Lazy loading với loadComponent và loadChildren](#lazy-loading-với-loadcomponent-và-loadchildren)
+  - [Chọn đúng mức tách bundle](#chọn-đúng-mức-tách-bundle)
+  - [Giữ ranh giới lazy thực sự](#giữ-ranh-giới-lazy-thực-sự)
+- [Kế thừa parameters và dữ liệu route](#kế-thừa-parameters-và-dữ-liệu-route)
+  - [Mặc định emptyOnly](#mặc-định-emptyonly)
+  - [Khi nào dùng always](#khi-nào-dùng-always)
+  - [Binding route vào input của component](#binding-route-vào-input-của-component)
+- [Preloading sau lần điều hướng đầu](#preloading-sau-lần-điều-hướng-đầu)
+  - [Chiến lược có sẵn](#chiến-lược-có-sẵn)
+  - [Preloading chọn lọc](#preloading-chọn-lọc)
+- [Lỗi route config thường gặp](#lỗi-route-config-thường-gặp)
+  - [Thiếu outlet ở layout cha](#thiếu-outlet-ở-layout-cha)
+  - [Redirect rỗng khớp quá rộng](#redirect-rỗng-khớp-quá-rộng)
+  - [Thứ tự route làm trang tĩnh không tới được](#thứ-tự-route-làm-trang-tĩnh-không-tới-được)
+  - [Đường dẫn con và wildcard đặt sai chỗ](#đường-dẫn-con-và-wildcard-đặt-sai-chỗ)
+  - [Tưởng rằng lazy loading là ranh giới bảo mật](#tưởng-rằng-lazy-loading-là-ranh-giới-bảo-mật)
+- [Checklist thiết kế feature route](#checklist-thiết-kế-feature-route)
+- [Tóm tắt](#tóm-tắt)
+
+## Tổng quan
+
+Route lồng nhau (**nested routes**) biểu diễn phần giao diện có quan hệ cha–con. Ví dụ, mọi URL dưới `/workspaces/:workspaceId` đều có thanh điều hướng của workspace; chỉ vùng nội dung bên trong thay đổi giữa dashboard, danh sách dự án và trang cài đặt.
+
+Lazy loading là việc trì hoãn tải mã JavaScript của route cho đến khi người dùng cần route đó. Một feature quản lý workspace không cần làm nặng bundle khởi động của trang đăng nhập. Router tải route config hoặc component của feature qua `import()` khi URL bắt đầu khớp feature đó.
+
+Hai kỹ thuật giải quyết hai vấn đề khác nhau:
+
+| Kỹ thuật | Câu hỏi nó trả lời | Kết quả chính |
+| --- | --- | --- |
+| Route lồng nhau | Phần UI nào dùng chung và phần nào thay đổi theo URL? | Cây layout rõ ràng, mỗi cấp có trách nhiệm riêng. |
+| Lazy loading | Mã của feature nào chưa cần tải ngay? | Bundle ban đầu nhỏ hơn, chi phí tải được dời đến lúc cần. |
+| Preloading | Sau khi ứng dụng đã sẵn sàng, lazy bundle nào nên tải trước? | Lần mở feature tiếp theo nhanh hơn, đổi lại dùng thêm băng thông. |
+
+<Callout type="idea" title="Quy tắc bắt đầu">
+  Hãy chia route theo ranh giới trải nghiệm người dùng và quyền sở hữu feature trước. Chỉ sau đó mới quyết định feature nào lazy. Tách mọi component thành một lazy chunk nhỏ thường tạo nhiều request và làm cấu hình khó theo dõi hơn là có lợi.
+</Callout>
+
+## Mô hình route tree và router-outlet
+
+### Route tree là trạng thái giao diện
+
+Router không chỉ chọn một component duy nhất. Với URL `/workspaces/acme/projects/42/settings`, nó khớp một **cây route đã kích hoạt**. Mỗi node trong cây có thể đóng góp một layout, một tham số hoặc một component.
+
+```text
+/workspaces/acme/projects/42/settings
+│
+├── AppComponent
+│   └── <router-outlet>
+│       └── WorkspaceShellComponent       (workspaceId = "acme")
+│           └── <router-outlet>
+│               └── ProjectShellComponent (projectId = "42")
+│                   └── <router-outlet>
+│                       └── ProjectSettingsPageComponent
+```
+
+`WorkspaceShellComponent` giữ phần khung chung của workspace. `ProjectShellComponent` giữ điều hướng nội bộ của một dự án. Trang cài đặt chỉ là lá của cây. Khi chuyển từ `/projects/42/overview` sang `/projects/42/settings`, hai shell có thể vẫn tồn tại; Router chỉ thay component trong outlet sâu nhất.
+
+Điều này cũng giải thích vì sao mỗi cấp route nên có một trách nhiệm rõ ràng. Nếu một component vừa là layout toàn feature, vừa tự đọc toàn bộ URL và tự đổi nhiều màn hình bằng `if`, cấu trúc URL không còn phản ánh cấu trúc UI.
+
+### Router-outlet là điểm cắm của route con
+
+Một route cha có `children` chỉ có nơi để hiển thị route con nếu component của nó đặt `<router-outlet>`. Outlet là placeholder; Router thay placeholder bằng component khớp ở cấp kế tiếp, không tự tìm một vị trí bất kỳ trong template.
+
+```ts title="workspace-shell.component.ts"
+import { Component } from '@angular/core';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+
+@Component({
+  standalone: true,
+  imports: [RouterLink, RouterLinkActive, RouterOutlet],
+  template: `
+    <header>
+      <a routerLink="dashboard" routerLinkActive="active">Tổng quan</a>
+      <a routerLink="projects" routerLinkActive="active">Dự án</a>
+    </header>
+
+    <main>
+      <router-outlet />
+    </main>
+  `,
+})
+export class WorkspaceShellComponent {}
+```
+
+Các `routerLink` không bắt đầu bằng `/` ở ví dụ này là link tương đối với route đang kích hoạt. Khi shell đang ở `/workspaces/acme`, `routerLink="projects"` dẫn đến `/workspaces/acme/projects`. Dùng link tương đối cho điều hướng nội bộ giúp feature có thể được gắn dưới một URL cha khác mà không phải sửa mọi liên kết.
+
+## Route lồng nhau trong một feature
+
+### Cấu hình một workspace có layout dùng chung
+
+Tách route gốc và route của feature thành hai file. File gốc chỉ biết nơi gắn feature; file feature sở hữu các URL bên trong feature. `loadChildren` tạo ranh giới lazy ở `workspaces/:workspaceId`.
+
+```ts title="app.routes.ts"
+import { Routes } from '@angular/router';
+
+export const APP_ROUTES: Routes = [
+  {
+    path: 'workspaces/:workspaceId',
+    loadChildren: () =>
+      import('./features/workspace/workspace.routes').then(
+        (m) => m.WORKSPACE_ROUTES,
+      ),
+  },
+  {
+    path: '',
+    pathMatch: 'full',
+    redirectTo: 'workspaces/acme',
+  },
+  {
+    path: '**',
+    redirectTo: 'workspaces/acme',
+  },
+];
+```
+
+```ts title="features/workspace/workspace.routes.ts"
+import { Routes } from '@angular/router';
+import { WorkspaceShellComponent } from './workspace-shell.component';
+import { ProjectShellComponent } from './project-shell.component';
+
+export const WORKSPACE_ROUTES: Routes = [
+  {
+    path: '',
+    component: WorkspaceShellComponent,
+    children: [
+      {
+        path: 'dashboard',
+        loadComponent: () =>
+          import('./pages/dashboard-page.component').then(
+            (m) => m.DashboardPageComponent,
+          ),
+      },
+      {
+        path: 'projects/:projectId',
+        component: ProjectShellComponent,
+        children: [
+          {
+            path: 'overview',
+            loadComponent: () =>
+              import('./pages/project-overview-page.component').then(
+                (m) => m.ProjectOverviewPageComponent,
+              ),
+          },
+          {
+            path: 'settings',
+            loadComponent: () =>
+              import('./pages/project-settings-page.component').then(
+                (m) => m.ProjectSettingsPageComponent,
+              ),
+          },
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'overview',
+          },
+        ],
+      },
+      {
+        path: '',
+        pathMatch: 'full',
+        redirectTo: 'dashboard',
+      },
+    ],
+  },
+];
+```
+
+`path: ''` ở đầu `WORKSPACE_ROUTES` không thêm segment nào vào URL. Nó chỉ gắn `WorkspaceShellComponent` vào route đã lazy load. Vì vậy URL cuối cùng vẫn là `/workspaces/acme/dashboard`, không phải `/workspaces/acme/workspace/dashboard`.
+
+`ProjectShellComponent` cũng phải import và render `RouterOutlet`. Nếu nó có tab Overview và Settings, các tab nên là `routerLink` tương đối như `overview` và `settings` để giữ `workspaceId` cùng `projectId` trong URL hiện tại.
+
+### Redirect mặc định và thứ tự khớp route
+
+Một route redirect rỗng cần `pathMatch: 'full'` khi ý định là chỉ redirect tại đúng URL của cha. Không có thuộc tính này, `path: ''` dùng cách khớp theo tiền tố: nó khớp mọi URL trong cấp đó và có thể redirect cả `/dashboard` lẫn `/projects/42`.
+
+Trong mảng `children`, thứ tự cũng là một phần của cấu hình. Router xét các route theo thứ tự khai báo. Hãy đặt route cụ thể trước route động và đặt wildcard cuối cùng.
+
+```ts title="Ví dụ thứ tự route"
+const projectRoutes: Routes = [
+  { path: 'new', loadComponent: () => import('./new-project.page').then((m) => m.NewProjectPage) },
+  { path: ':projectId', loadComponent: () => import('./project.page').then((m) => m.ProjectPage) },
+  { path: '**', loadComponent: () => import('./not-found.page').then((m) => m.NotFoundPage) },
+];
+```
+
+Ở đây `new` phải đứng trước `:projectId`. Nếu đảo thứ tự, URL `/projects/new` bị hiểu là một dự án có `projectId = 'new'`. Wildcard `**` luôn là phương án cuối cùng, vì nó nuốt mọi URL chưa được route trước đó xử lý.
+
+### Đọc tham số khi URL thay đổi
+
+Tham số path là dữ liệu thuộc URL. Với `/workspaces/acme/projects/42`, `workspaceId` và `projectId` cần được Router đọc từ route, thay vì tự chép vào state của component.
+
+`ActivatedRoute.snapshot` phù hợp khi component chắc chắn được tạo mới cho mỗi giá trị tham số. Tuy nhiên, Router có thể tái sử dụng cùng component khi chỉ `:projectId` thay đổi, chẳng hạn điều hướng từ `/projects/42` sang `/projects/43`. Khi dữ liệu phải cập nhật theo URL, hãy theo dõi `paramMap`.
+
+```ts title="project-page.component.ts"
+import { Component, DestroyRef, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { filter, map, switchMap } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+@Component({
+  standalone: true,
+  template: `<!-- project detail -->`,
+})
+export class ProjectPageComponent {
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly projects = inject(ProjectService);
+
+  constructor() {
+    this.route.paramMap
+      .pipe(
+        map((params) => params.get('projectId')),
+        filter((projectId): projectId is string => projectId !== null),
+        switchMap((projectId) => this.projects.getById(projectId)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((project) => {
+        // cập nhật state hiển thị từ project mới
+      });
+  }
+}
+```
+
+Ví dụ tập trung vào cơ chế Router nên không trình bày `ProjectService`. `filter` loại trường hợp `projectId` là `null` trước khi gọi service. Nếu dữ liệu bắt buộc phải có trước lúc trang hiện ra, resolver là lựa chọn phù hợp hơn; xem bài [Guard và resolver](/docs/routing-forms/guards-resolvers).
+
+## Lazy loading với loadComponent và loadChildren
+
+`loadComponent` lazy load **một standalone component**. `loadChildren` lazy load **một tập child routes** — thường là cả feature. Cả hai đều nhận một hàm dùng dynamic `import()`, vì vậy bundler có thể tách mã thành chunk riêng.
+
+| API | Dùng khi | Giá trị trả về từ callback | Ví dụ phù hợp |
+| --- | --- | --- | --- |
+| `loadComponent` | Route lá có một standalone page rõ ràng. | `Promise<Type<unknown>>` của component. | `/dashboard`, `/settings`, trang not-found. |
+| `loadChildren` | Feature có nhiều URL con hoặc có layout/guard/resolver chung. | `Promise<Routes>` hoặc module chứa routes. | `/workspaces/:workspaceId`, `/admin`, `/billing`. |
+
+### Chọn đúng mức tách bundle
+
+Trong ví dụ trước, ứng dụng tải `workspace.routes.ts` khi người dùng mở một workspace. Mỗi page lớn bên trong feature vẫn dùng `loadComponent`, nên Dashboard hoặc Settings chỉ được tải khi URL thực sự cần. Đây là lazy loading theo hai tầng:
+
+```text
+Bundle khởi động
+└── app.routes.ts
+    └── khi vào /workspaces/:workspaceId
+        └── workspace.routes.ts + WorkspaceShellComponent
+            ├── khi vào /dashboard  → DashboardPageComponent
+            └── khi vào /projects/* → Project page tương ứng
+```
+
+Không nhất thiết phải áp dụng hai tầng. Nếu feature rất nhỏ, một `loadComponent` ở route gốc thường đơn giản và đủ tốt. Nếu nhiều page chia sẻ layout, provider theo feature, route con, guard hoặc resolver, `loadChildren` cho một file routes riêng thường dễ bảo trì hơn.
+
+<Callout type="warn" title="Component trong route lazy không tự biến thành standalone">
+  `loadComponent` chỉ dùng được với component standalone. Với component thuộc NgModule cũ, hãy lazy load NgModule qua `loadChildren`, hoặc chuyển component sang standalone trước khi dùng `loadComponent`.
+</Callout>
+
+### Giữ ranh giới lazy thực sự
+
+Dynamic import chỉ giúp tạo lazy chunk nếu mã lazy không bị bundle khởi động kéo vào theo một đường khác. Tránh static import page lazy trong `AppComponent`, route gốc, một barrel export được import ở root, hoặc một provider khởi tạo toàn bộ feature lúc startup.
+
+```ts title="Không làm mất lazy loading"
+// Không import tĩnh page lazy ở app.routes.ts.
+import { DashboardPageComponent } from './features/workspace/pages/dashboard-page.component';
+
+// Khi import này tồn tại, component có thể đã nằm trong bundle ban đầu.
+const routes: Routes = [
+  { path: 'dashboard', component: DashboardPageComponent },
+];
+```
+
+Thay vào đó, chỉ giữ đường `import()` trong route. Sau khi cấu hình, mở DevTools Network hoặc phân tích build output để xác nhận chunk feature chỉ được tải ở thời điểm mong muốn. Lazy loading là đặc tính của bundle tạo ra, không chỉ là việc route có chữ `load`.
+
+## Kế thừa parameters và dữ liệu route
+
+Mỗi component nhận `ActivatedRoute` ở node route của chính nó. Vì vậy, câu hỏi quan trọng không phải chỉ là “URL có tham số nào?” mà là “tham số nào đã được kế thừa vào node hiện tại?”. Quy tắc này áp dụng tương tự cho `params`, `data` và dữ liệu từ resolver.
+
+### Mặc định emptyOnly
+
+Mặc định, Router dùng `paramsInheritanceStrategy: 'emptyOnly'`. Một route con kế thừa params/data/resolved data của cha khi route con có `path: ''`, **hoặc** khi route cha không có component. Đây là hành vi hữu ích cho route gom nhóm không có UI riêng, nhưng dễ gây ngạc nhiên khi mỗi cấp có một shell component.
+
+Trong cây ví dụ, route `workspaces/:workspaceId` là route không có component và chỉ lazy load các children. `WorkspaceShellComponent` có thể nhận ngữ cảnh `workspaceId` qua quan hệ đó. Nhưng `ProjectSettingsPageComponent` nằm dưới `ProjectShellComponent`, là một route có component. Với mặc định này, đừng giả định `projectId` hay `workspaceId` tự xuất hiện trong `this.route.paramMap` của mọi trang sâu.
+
+Khi không muốn đổi chiến lược toàn ứng dụng, đọc tham số tại route sở hữu nó hoặc đi lên `route.parent`. Cách này làm phụ thuộc cấu trúc route hiện rõ:
+
+```ts
+const projectId = inject(ActivatedRoute).parent?.snapshot.paramMap.get('projectId');
+```
+
+Đoạn trên chỉ phù hợp khi component là child trực tiếp của route `projects/:projectId`. Nếu cấu trúc có thể thay đổi nhiều cấp, đừng rải `parent?.parent` trong các page. Hãy đặt dữ liệu dùng chung ở shell/service theo feature, hoặc cân nhắc chiến lược `always` bên dưới.
+
+### Khi nào dùng always
+
+Cấu hình `paramsInheritanceStrategy: 'always'` khiến mọi route con kế thừa params, data và resolved data từ tất cả route cha. Nó phù hợp khi toàn bộ subtree thực sự nằm trong cùng một ngữ cảnh, chẳng hạn mọi tab trong workspace đều cần `workspaceId`.
+
+```ts title="app.config.ts"
+import { ApplicationConfig } from '@angular/core';
+import {
+  provideRouter,
+  Routes,
+  withRouterConfig,
+} from '@angular/router';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideRouter(
+      APP_ROUTES,
+      withRouterConfig({ paramsInheritanceStrategy: 'always' }),
+    ),
+  ],
+};
+```
+
+Đây là một lựa chọn toàn cục, không phải cờ cho từng route. Nó giảm việc đi ngược qua `parent`, nhưng cũng khiến một page sâu nhận nhiều dữ liệu ngầm hơn. Nếu route con và route cha dùng cùng tên parameter hoặc data key, cách dữ liệu được ghép có thể làm nguồn giá trị kém rõ ràng.
+
+**Quy tắc thực tế:** giữ mặc định nếu chỉ một vài component cần ngữ cảnh cha. Chọn `always` khi ngữ cảnh cha là hợp đồng nhất quán của cả nhiều subtree, rồi đặt tên params đủ cụ thể như `workspaceId` và `projectId` để tránh nhập nhằng.
+
+### Binding route vào input của component
+
+`withComponentInputBinding()` cho phép Router gán route params, query params, static data và resolved data vào input cùng tên của component. Điều này giảm mã `ActivatedRoute` lặp lại ở page đơn giản.
+
+```ts title="app.config.ts"
+import { provideRouter, withComponentInputBinding } from '@angular/router';
+
+export const appConfig = {
+  providers: [
+    provideRouter(APP_ROUTES, withComponentInputBinding()),
+  ],
+};
+```
+
+```ts title="project-settings-page.component.ts"
+import { Component, input } from '@angular/core';
+
+@Component({
+  standalone: true,
+  template: `Đang cấu hình dự án {{ projectId() }}`,
+})
+export class ProjectSettingsPageComponent {
+  readonly projectId = input.required<string>();
+}
+```
+
+Input phải trùng tên key, ở đây là `projectId`. Với tham số của route cha, khả năng binding tới component sâu cũng tuân theo quy tắc kế thừa ở phần trước. Đây là tiện ích truyền dữ liệu của Router, không thay thế việc thiết kế route tree rõ ràng.
+
+## Preloading sau lần điều hướng đầu
+
+Lazy loading giảm tải ban đầu, nhưng lần mở một feature chưa tải vẫn phải chờ tải chunk. Preloading là bước dung hòa: Router để bundle đầu tiên khởi động trước, sau đó chủ động tải một số route lazy ở nền sau khi điều hướng đầu tiên hoàn thành.
+
+### Chiến lược có sẵn
+
+Không truyền cấu hình preloading nghĩa là dùng `NoPreloading`: chỉ tải lazy route khi người dùng điều hướng đến nó. `PreloadAllModules` yêu cầu Router preload toàn bộ route lazy mà nó có thể preload.
+
+```ts title="app.config.ts"
+import { provideRouter, PreloadAllModules, withPreloading } from '@angular/router';
+
+export const appConfig = {
+  providers: [
+    provideRouter(APP_ROUTES, withPreloading(PreloadAllModules)),
+  ],
+};
+```
+
+`PreloadAllModules` cải thiện lần điều hướng thứ hai vào feature, nhưng không làm giảm tổng số byte phải tải. Nó có thể không phù hợp với ứng dụng có nhiều feature nặng, mạng di động chậm hoặc người dùng hiếm khi đi vào các khu vực đó. Hãy đo bundle và dữ liệu sử dụng thay vì mặc định bật nó cho mọi ứng dụng.
+
+### Preloading chọn lọc
+
+Một chiến lược tùy chỉnh có thể chỉ preload route được đánh dấu bằng `data.preload`. Đặt tín hiệu chính sách cạnh route giúp người đọc thấy feature nào được ưu tiên.
+
+```ts title="selective-preloading.strategy.ts"
+import { Injectable } from '@angular/core';
+import { PreloadingStrategy, Route } from '@angular/router';
+import { Observable, of } from 'rxjs';
+
+@Injectable({ providedIn: 'root' })
+export class SelectivePreloadingStrategy implements PreloadingStrategy {
+  preload(route: Route, load: () => Observable<unknown>): Observable<unknown> {
+    return route.data?.['preload'] === true ? load() : of(null);
+  }
+}
+```
+
+```ts title="app.routes.ts"
+export const APP_ROUTES: Routes = [
+  {
+    path: 'workspaces/:workspaceId',
+    data: { preload: true },
+    loadChildren: () =>
+      import('./features/workspace/workspace.routes').then(
+        (m) => m.WORKSPACE_ROUTES,
+      ),
+  },
+];
+```
+
+```ts title="app.config.ts"
+import { provideRouter, withPreloading } from '@angular/router';
+import { SelectivePreloadingStrategy } from './selective-preloading.strategy';
+
+provideRouter(
+  APP_ROUTES,
+  withPreloading(SelectivePreloadingStrategy),
+);
+```
+
+Một chiến lược thực tế có thể kết hợp cờ này với loại kết nối, trạng thái đăng nhập hoặc dự đoán từ thao tác người dùng. Dù dùng chiến lược nào, preloading chỉ là tối ưu hiệu năng. Nó không phải thao tác điều hướng, không đảm bảo dữ liệu API đã sẵn sàng và không được dùng để thực thi quyền truy cập.
+
+## Lỗi route config thường gặp
+
+### Thiếu outlet ở layout cha
+
+**Triệu chứng:** URL đổi đúng, `WorkspaceShellComponent` hiện ra, nhưng dashboard hoặc trang con không hiển thị.
+
+**Nguyên nhân:** component được gắn với route cha có `children` nhưng template thiếu `<router-outlet>` hoặc quên import `RouterOutlet` với standalone component.
+
+**Cách sửa:** mỗi component layout có `children` cần một `RouterOutlet` tại vùng mà UI con phải xuất hiện. Nếu không cần layout UI, dùng route cha không có `component` để chỉ gom route thay vì tạo shell rỗng.
+
+### Redirect rỗng khớp quá rộng
+
+**Triệu chứng:** luôn bị đưa về trang overview/dashboard dù mở URL con hợp lệ.
+
+**Nguyên nhân:** redirect `path: ''` thiếu `pathMatch: 'full'`.
+
+```ts title="Sai và đúng"
+// Sai: khớp theo tiền tố, nên có thể bắt mọi URL trong cấp này.
+{ path: '', redirectTo: 'overview' }
+
+// Đúng: chỉ redirect khi không còn segment nào ở cấp này.
+{ path: '', pathMatch: 'full', redirectTo: 'overview' }
+```
+
+### Thứ tự route làm trang tĩnh không tới được
+
+**Triệu chứng:** mở `/projects/new` nhưng component chi tiết chạy với id là `new`.
+
+**Nguyên nhân:** `:projectId` đứng trước `new`. Route động thường rất rộng; một segment bất kỳ đều có thể khớp nó.
+
+**Cách sửa:** xếp URL tĩnh (`new`, `settings`, `archive`) trước route parameter, rồi mới đến wildcard.
+
+### Đường dẫn con và wildcard đặt sai chỗ
+
+`path` trong `children` là segment **tương đối**, không bắt đầu bằng `/`. Viết `path: '/settings'` là cấu hình sai; dùng `path: 'settings'`. Ngược lại, `routerLink="/workspaces/acme"` là URL tuyệt đối từ root, còn `routerLink="settings"` là liên kết tương đối với route hiện tại.
+
+Wildcard `**` nên đặt ở cuối đúng cấp cần bắt lỗi. Wildcard tại root bắt mọi URL chưa khớp toàn ứng dụng. Wildcard trong `children` chỉ là trang không tìm thấy của feature đó. Đừng đặt wildcard của feature trước một route con hợp lệ.
+
+### Tưởng rằng lazy loading là ranh giới bảo mật
+
+Lazy loading chỉ chia code và trì hoãn tải JavaScript. Người dùng vẫn có thể gõ trực tiếp URL lazy, và bundle đã tải có thể bị xem trong trình duyệt. Guard giúp kiểm soát luồng điều hướng, nhưng API/server mới phải xác thực và phân quyền dữ liệu thật.
+
+<Callout type="warn" title="Đừng preload mã nhạy cảm chỉ vì nó lazy">
+  PreloadAllModules có thể tải trước mọi lazy bundle đủ điều kiện. Không đặt bí mật, khóa API hay logic tin cậy chỉ ở client; những dữ liệu đó không nên có trong bất kỳ bundle trình duyệt nào.
+</Callout>
+
+## Checklist thiết kế feature route
+
+Trước khi hoàn thành một feature nhiều màn hình, kiểm tra các câu hỏi sau:
+
+- [ ] URL phản ánh ngữ cảnh cha–con: workspace → project → tab, thay vì nhét nhiều trạng thái mơ hồ vào query string.
+- [ ] Mỗi route có `children` và component layout đều có một `<router-outlet>` ở vị trí hiển thị phù hợp.
+- [ ] Route rỗng redirect có `pathMatch: 'full'`; route tĩnh đứng trước route parameter; wildcard đứng cuối cấp của nó.
+- [ ] Feature lớn có file `*.routes.ts` riêng và được gắn bằng `loadChildren`; page lớn chỉ dùng trong feature có thể dùng `loadComponent`.
+- [ ] Không có static import vô tình kéo page lazy vào bundle gốc.
+- [ ] Component đọc params theo chiến lược kế thừa đã chọn; không giả định tham số cha có mặt ở route sâu.
+- [ ] Preloading dựa trên đo lường tốc độ, kích thước bundle và hành vi người dùng, không chỉ vì API có sẵn.
+- [ ] Guard và server/API cùng có trách nhiệm đúng: guard cho UX điều hướng, server/API cho bảo mật.
+
+## Tóm tắt
+
+Route tree mô tả UI đang hoạt động, còn `router-outlet` nối từng cấp của cây đó vào template. Dùng nested routes để đặt layout và ngữ cảnh chung ở cha, sau đó giữ các page cụ thể ở child routes.
+
+Dùng `loadComponent` cho một standalone page và `loadChildren` cho một feature có nhiều route. Lazy loading chỉ có giá trị khi page lazy không bị import tĩnh ở bundle gốc. Khi cần rút ngắn lần điều hướng sau, chọn preloading có chủ đích và kiểm tra tác động băng thông.
+
+Cuối cùng, hãy quyết định rõ policy kế thừa params. Mặc định `emptyOnly` làm ranh giới component trong cây route trở nên quan trọng; `always` tiện hơn cho subtree cùng ngữ cảnh, nhưng tạo phụ thuộc ngầm rộng hơn. Một route config tốt là route config mà người đọc có thể lần theo URL, bundle và dữ liệu mà không phải đoán.
+
+<Cards>
+  <Card title="Angular Router" href="/docs/routing-forms/angular-router" description="Ôn route cơ bản, outlet, link và parameters." />
+  <Card title="Guard và resolver" href="/docs/routing-forms/guards-resolvers" description="Kiểm soát điều hướng và chuẩn bị dữ liệu cho page." />
+  <Card title="Reactive Forms" href="/docs/routing-forms/reactive-forms" description="Dùng route parameter để mở màn hình tạo và chỉnh sửa form." />
+</Cards>

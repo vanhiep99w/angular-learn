@@ -1,10 +1,901 @@
 ---
 title: Realtime
-description: Tích hợp WebSocket hoặc Server-Sent Events với Angular.
+description: Nhận dữ liệu gần thời gian thực trong Angular bằng polling, Server-Sent Events và WebSocket, với lifecycle, bảo mật và tính đúng đắn rõ ràng.
 ---
 
-Trang này sẽ trình bày **Realtime** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi">
+  Realtime không làm Angular tự đồng bộ dữ liệu một cách kỳ diệu. Client vẫn cần một
+  hợp đồng API: snapshot ban đầu, event tăng dần, quyền truy cập, quy tắc thứ tự và
+  chiến lược khôi phục khi kết nối gián đoạn. Trang này tập trung vào ranh giới đó ở
+  Angular; backend vẫn là nơi xác thực, phân quyền và quyết định event nào được gửi.
 </Callout>
+
+## Mục lục
+
+- [Realtime là gì và khi nào cần](#realtime-là-gì-và-khi-nào-cần)
+  - [Snapshot khác event thế nào](#snapshot-khác-event-thế-nào)
+  - [Khi không nên dùng realtime](#khi-không-nên-dùng-realtime)
+- [Chọn transport](#chọn-transport)
+  - [So sánh polling, SSE và WebSocket](#so-sánh-polling-sse-và-websocket)
+  - [Cây quyết định nhanh](#cây-quyết-định-nhanh)
+- [Polling: đơn giản và có kiểm soát](#polling-đơn-giản-và-có-kiểm-soát)
+  - [Cơ chế](#cơ-chế)
+  - [Ví dụ Angular với timer và switchMap](#ví-dụ-angular-với-timer-và-switchmap)
+  - [Giới hạn và tối ưu polling](#giới-hạn-và-tối-ưu-polling)
+- [Server-Sent Events: server đẩy một chiều](#server-sent-events-server-đẩy-một-chiều)
+  - [Cơ chế và hợp đồng event](#cơ-chế-và-hợp-đồng-event)
+  - [Bọc EventSource thành Observable](#bọc-eventsource-thành-observable)
+  - [Xác thực và reconnect của SSE](#xác-thực-và-reconnect-của-sse)
+- [WebSocket: kênh hai chiều](#websocket-kênh-hai-chiều)
+  - [Cơ chế và vòng đời](#cơ-chế-và-vòng-đời)
+  - [Service WebSocket có reconnect và backoff](#service-websocket-có-reconnect-và-backoff)
+  - [Gửi command và nhận event](#gửi-command-và-nhận-event)
+- [Đưa stream vào RxJS và Signals](#đưa-stream-vào-rxjs-và-signals)
+  - [Giữ event trong RxJS, render snapshot bằng signal](#giữ-event-trong-rxjs-render-snapshot-bằng-signal)
+  - [Tích lũy event thành state bất biến](#tích-lũy-event-thành-state-bất-biến)
+  - [Dọn dẹp theo vòng đời Angular](#dọn-dẹp-theo-vòng-đời-angular)
+- [Connection lifecycle, retry và backoff](#connection-lifecycle-retry-và-backoff)
+  - [Các trạng thái kết nối](#các-trạng-thái-kết-nối)
+  - [Backoff mũ có jitter](#backoff-mũ-có-jitter)
+  - [Khi nào phải dừng reconnect](#khi-nào-phải-dừng-reconnect)
+- [Auth, ordering và deduplication](#auth-ordering-và-deduplication)
+  - [Credential và quyền của kênh realtime](#credential-và-quyền-của-kênh-realtime)
+  - [Thứ tự không phải là điều mặc định](#thứ-tự-không-phải-là-điều-mặc-định)
+  - [Khử trùng lặp và bắt kịp dữ liệu](#khử-trùng-lặp-và-bắt-kịp-dữ-liệu)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+- [Đọc tiếp](#đọc-tiếp)
+
+## Realtime là gì và khi nào cần
+
+Dữ liệu **realtime** nghĩa là server chủ động đưa thay đổi mới đến client với độ trễ
+thấp, thay vì UI chỉ biết thay đổi ở lần HTTP request tiếp theo. “Độ trễ thấp” không
+đồng nghĩa “tức thời”: mạng, hàng đợi, tải server và việc tab bị browser làm chậm đều
+có thể làm event đến muộn.
+
+Ví dụ, màn hình theo dõi đơn hàng cần hiện trạng thái `shipping` ngay khi kho xác nhận
+xuất hàng. Khi đó client có một snapshot đơn hàng hiện tại và nhận event
+`order.status-changed` để cập nhật nó. Ngược lại, trang báo cáo chỉ được làm mới mỗi
+15 phút không cần giữ một kết nối lâu dài.
+
+### Snapshot khác event thế nào
+
+**Snapshot** là ảnh chụp đầy đủ tại một mốc, như `GET /api/orders/A-100`. **Event** là
+một sự kiện thay đổi, như “đơn A-100 đã chuyển sang `shipping`”. Event thường nhỏ hơn
+snapshot, nhưng một event đơn lẻ không giúp client mới mở trang biết toàn bộ state.
+
+Vì vậy, mô hình đáng tin cậy thường bắt đầu bằng snapshot rồi mới áp dụng event:
+
+```text
+Angular                         API / realtime gateway
+   │ GET /api/orders/A-100                 │
+   ├──────────────────────────────────────►│
+   │◄──── snapshot { version: 41, ... } ───┤
+   │                                       │
+   │ mở SSE / WebSocket, fromVersion=41    │
+   ├──────────────────────────────────────►│
+   │◄── event { id: "e-42", version: 42 }  ┤
+   │ cập nhật state                        │
+   │◄── event { id: "e-43", version: 43 }  ┤
+```
+
+`version` là số thứ tự tăng dần theo aggregate hoặc channel, do server định nghĩa.
+Nó giúp client phát hiện gap: nếu đang có version `43` mà nhận `45`, client biết mình
+thiếu thay đổi `44` và cần bắt kịp lại. Đừng suy luận thứ tự từ thời gian trên máy
+client, vì đồng hồ giữa các máy không phải nguồn chân lý chung.
+
+### Khi không nên dùng realtime
+
+Realtime có giá vận hành: socket lâu sống, connection limit, quan sát lỗi, retry,
+quyền subscription và reconciliation sau reconnect. Chọn nó khi người dùng hoặc
+nghiệp vụ thực sự cần phản hồi nhanh.
+
+Không nên mặc định dùng realtime cho:
+
+- Dữ liệu chỉ đổi vài lần mỗi ngày, như danh mục quốc gia hoặc cấu hình tĩnh. Cache
+  HTTP và invalidation sau mutation thường đủ.
+- Trang chỉ cần dữ liệu mới khi người dùng quay lại. Tải lại khi navigation hoặc
+  window focus thường đơn giản hơn.
+- Job nền có độ trễ chấp nhận được. Polling thưa, ví dụ 30–60 giây, rẻ hơn một
+  hạ tầng socket.
+- Luồng mà mỗi thay đổi cần giao dịch, xác nhận và audit chặt. Realtime chỉ là kênh
+  thông báo; command vẫn nên đi qua HTTP API hoặc giao thức có contract rõ.
+
+<Callout type="idea" title="Bắt đầu từ mức đơn giản nhất">
+  Nếu yêu cầu là “dữ liệu không cũ quá 10 giây”, polling 10 giây là một đáp án hợp
+  lệ. Chỉ nâng lên SSE hoặc WebSocket khi độ trễ, số lượt cập nhật hoặc nhu cầu hai
+  chiều chứng minh chi phí phức tạp là đáng giá.
+</Callout>
+
+## Chọn transport
+
+Angular không cung cấp một client realtime duy nhất tương đương `HttpClient`.
+`HttpClient` phục vụ request/response; polling dùng trực tiếp nó, SSE dùng browser
+`EventSource`, còn WebSocket dùng browser `WebSocket` hoặc một giao thức/thư viện do
+backend chọn. Cùng một UI vẫn có thể ẩn transport sau một service trả `Observable`.
+
+### So sánh polling, SSE và WebSocket
+
+| Cơ chế | Hướng dữ liệu | Kết nối | Phù hợp với | Đánh đổi chính |
+| --- | --- | --- | --- | --- |
+| Polling | Client hỏi server | HTTP request ngắn, lặp lại | Độ trễ chấp nhận được, triển khai đơn giản | Request rỗng, độ trễ tối đa bằng chu kỳ poll |
+| SSE | Server → client | HTTP stream dài | Thông báo, tiến trình, feed chỉ đọc | Client không gửi message trên cùng kênh; `EventSource` chuẩn không đặt custom header |
+| WebSocket | Hai chiều | Kết nối TCP/WebSocket lâu sống | Chat, cộng tác, presence, command/response nhanh | Lifecycle, scale, auth và protocol phức tạp hơn |
+
+SSE và WebSocket **không thay HTTP**. Dùng HTTP cho tải snapshot, mutation idempotent,
+file upload và các command có semantics request/response rõ. Dùng kênh realtime để
+nhận thay đổi hoặc gửi message cần độ trễ thấp.
+
+### Cây quyết định nhanh
+
+```text
+Có cần client gửi message liên tục trên kênh đang mở?
+│
+├── Có ──► WebSocket (hoặc giao thức hai chiều do backend quy định)
+│
+└── Không
+    │
+    ├── Có cần cập nhật nhanh, server đẩy ngay? ──► SSE
+    │
+    └── Không / cập nhật thưa ──► Polling
+```
+
+Cây này chỉ là điểm bắt đầu. Ví dụ, hạ tầng proxy chỉ hỗ trợ HTTP chuẩn tốt có thể làm
+SSE thực tế phù hợp hơn WebSocket. Ngược lại, nếu cần binary frame, acknowledgement
+hay room subscription linh hoạt, WebSocket có thể cần thiết dù phần lớn message đi từ
+server xuống.
+
+## Polling: đơn giản và có kiểm soát
+
+### Cơ chế
+
+Với polling, client đặt lịch gửi HTTP request. Server trả snapshot hiện tại, dù có
+thay đổi hay không. Đây là mô hình dễ quan sát nhất: mỗi lần tải có status code,
+timeout và interceptor giống các request Angular khác.
+
+`timer(0, 10_000)` phát ngay một lần rồi mỗi 10 giây. `switchMap` bảo đảm lần poll mới
+không để một request cũ còn treo ghi đè snapshot mới. Với một endpoint chậm, hành vi
+này ưu tiên độ mới hơn việc nhận đủ mọi response trung gian.
+
+### Ví dụ Angular với timer và switchMap
+
+Ví dụ service dưới đây lấy trạng thái job mỗi 10 giây. `shareReplay` chia sẻ kết quả
+cho nhiều consumer đang đồng thời theo dõi cùng instance service; `refCount: true`
+dừng timer khi consumer cuối unsubscribe.
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { Observable, catchError, map, of, shareReplay, startWith, switchMap, timer } from 'rxjs';
+
+export interface ExportJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  progress: number;
+}
+
+export type JobViewState =
+  | { kind: 'loading' }
+  | { kind: 'success'; job: ExportJob }
+  | { kind: 'error'; message: string };
+
+@Injectable({ providedIn: 'root' })
+export class ExportJobApi {
+  private readonly http = inject(HttpClient);
+
+  watch(jobId: string): Observable<JobViewState> {
+    return timer(0, 10_000).pipe(
+      switchMap(() =>
+        this.http.get<ExportJob>(`/api/exports/${encodeURIComponent(jobId)}`).pipe(
+          map((job): JobViewState => ({ kind: 'success', job })),
+          startWith<JobViewState>({ kind: 'loading' }),
+          catchError(() =>
+            of<JobViewState>({
+              kind: 'error',
+              message: 'Không thể tải trạng thái export. Hệ thống sẽ thử lại.',
+            }),
+          ),
+        ),
+      ),
+      shareReplay({ bufferSize: 1, refCount: true }),
+    );
+  }
+}
+```
+
+Ở ví dụ này, `loading` sẽ xuất hiện lại trước mỗi request. Nếu UI chỉ cần spinner ở
+lần đầu, hãy để service phát `ExportJob`/lỗi riêng và xây view state ở facade. Điểm
+quan trọng là không dùng `setInterval` rồi `subscribe()` lồng nhau: cách đó khó hủy,
+có thể tạo request chồng chéo và khó kiểm thử hơn pipeline RxJS.
+
+<Callout type="warn" title="Polling không có nghĩa là retry vô hạn thật nhanh">
+  Khi server trả `429`, `503` hoặc mạng đang lỗi, giữ chu kỳ 1 giây sẽ tăng tải đúng
+  lúc hệ thống đang yếu. Tăng khoảng chờ sau lỗi, tôn trọng `Retry-After` nếu API có,
+  và dừng khi người dùng rời màn hình.
+</Callout>
+
+### Giới hạn và tối ưu polling
+
+Polling tạo request ngay cả khi dữ liệu không đổi. Với 5.000 client poll mỗi 5 giây,
+backend nhận khoảng 1.000 request/giây chỉ cho một màn hình. Tính toán này cần được
+làm trước khi giảm chu kỳ chỉ vì UI “cảm thấy chậm”.
+
+Các cách giảm chi phí mà vẫn giữ mô hình HTTP:
+
+- Poll chậm hơn khi tab không visible bằng Page Visibility API, hoặc dừng hẳn và
+  refresh lại khi người dùng quay lại.
+- Dừng polling khi job đã ở terminal state như `completed` hoặc `failed`.
+- Dùng `ETag`/`If-None-Match` để server trả `304 Not Modified` khi snapshot không đổi.
+  Xem [HttpClient](/docs/http-api-auth/http-client) để biết cách đọc response/header.
+- Poll theo nhu cầu của view bằng `AsyncPipe` hoặc `toSignal`, thay vì giữ timer root
+  service chạy mãi từ lúc bootstrap.
+- Với nhiều widget cùng cần một dữ liệu, chia sẻ **một** stream/cache có policy rõ;
+  không để mỗi component tạo một timer riêng.
+
+## Server-Sent Events: server đẩy một chiều
+
+### Cơ chế và hợp đồng event
+
+SSE (_Server-Sent Events_) là HTTP response có `Content-Type: text/event-stream` mà
+server giữ mở và ghi event theo dòng. Browser `EventSource` tự parse framing, tự thử
+kết nối lại trong nhiều trường hợp, và gửi `Last-Event-ID` khi server đã gán `id` cho
+event trước đó.
+
+Một event SSE có thể trông như sau ở phía wire protocol:
+
+```text
+id: e-9842
+event: task.updated
+data: {"id":"t-7","version":18,"title":"Viết tài liệu","done":true}
+
+```
+
+Dòng trống kết thúc một event. `event` cho phép client nghe theo loại; `data` nên là
+JSON có schema ổn định. ID SSE dùng cho resume transport, còn `version` dùng để kiểm
+tra đúng đắn dữ liệu. Đừng dùng một giá trị cho cả hai mục đích nếu contract backend
+không bảo đảm điều đó.
+
+### Bọc EventSource thành Observable
+
+`EventSource` là API callback của browser. Bọc nó trong `Observable` để component có
+cùng cách compose, unsubscribe và chuyển sang signal như với một nguồn RxJS khác.
+Đoạn code cố ý chỉ nghe `task.updated`; backend phải phát đúng tên event này.
+
+```ts
+import { isPlatformBrowser } from '@angular/common';
+import { Injectable, PLATFORM_ID, inject } from '@angular/core';
+import { EMPTY, Observable } from 'rxjs';
+
+export interface TaskUpdatedEvent {
+  eventId: string;
+  id: string;
+  version: number;
+  title: string;
+  done: boolean;
+}
+
+@Injectable({ providedIn: 'root' })
+export class TaskEventsApi {
+  private readonly platformId = inject(PLATFORM_ID);
+
+  watchProject(projectId: string): Observable<TaskUpdatedEvent> {
+    // EventSource chỉ có ở browser; SSR không được mở kết nối realtime.
+    if (!isPlatformBrowser(this.platformId)) {
+      return EMPTY;
+    }
+
+    return new Observable<TaskUpdatedEvent>((subscriber) => {
+      const params = new URLSearchParams({ projectId });
+      const source = new EventSource(`/api/realtime/tasks?${params}`, {
+        withCredentials: true,
+      });
+
+      const onTaskUpdated = (message: MessageEvent<string>) => {
+        try {
+          subscriber.next(JSON.parse(message.data) as TaskUpdatedEvent);
+        } catch {
+          subscriber.error(new Error('Event task.updated không phải JSON hợp lệ.'));
+        }
+      };
+
+      const onError = () => {
+        // EventSource chuẩn sẽ tự reconnect. Giữ stream sống để nhận event sau đó.
+        // Chỉ phát error nếu chính sách ứng dụng quyết định đóng nguồn này.
+        console.warn('Kết nối SSE tạm thời gặp lỗi.');
+      };
+
+      source.addEventListener('task.updated', onTaskUpdated);
+      source.addEventListener('error', onError);
+
+      return () => {
+        source.removeEventListener('task.updated', onTaskUpdated);
+        source.removeEventListener('error', onError);
+        source.close();
+      };
+    });
+  }
+}
+```
+
+Teardown trả về từ `Observable` gọi `source.close()`. Nhờ đó, `AsyncPipe`, `toSignal`
+và `takeUntilDestroyed` đều đóng stream khi consumer không còn tồn tại. `EventSource`
+là API chỉ có ở browser, nên service trả `EMPTY` khi SSR và chỉ mở stream sau khi
+client tiếp quản. URL tương đối cũng được browser tự resolve theo origin hiện tại mà
+không cần đọc `window`. Nếu nhiều màn hình cùng phải nghe một channel, đưa việc chia
+sẻ stream vào service/facade với `share`, đồng thời định nghĩa rõ channel được mở và
+đóng lúc nào.
+
+Ví dụ trên không validate JSON ở runtime. Với event điều khiển quyền, tiền hoặc state
+nghiệp vụ quan trọng, kiểm tra trường bắt buộc trước khi gọi `subscriber.next()`. Ép
+kiểu `as TaskUpdatedEvent` chỉ nói với TypeScript, không biến payload không tin cậy
+thành dữ liệu đúng.
+
+### Xác thực và reconnect của SSE
+
+`EventSource` chuẩn chỉ nhận URL và `withCredentials`; nó **không cho đặt header
+`Authorization` tùy ý**. Vì vậy, một API SSE dùng Bearer token trong interceptor
+`HttpClient` sẽ không tự hoạt động với `EventSource`.
+
+Các lựa chọn an toàn, theo thứ tự cần được backend chủ đích hỗ trợ:
+
+1. Cookie session `HttpOnly` cùng origin, hoặc cross-origin đã cấu hình CORS và
+   `withCredentials` chính xác.
+2. Endpoint khởi tạo HTTP đã xác thực cấp một vé ngắn hạn, dùng một lần và giới hạn
+   audience, rồi client đưa vé đó vào URL SSE. Không đưa access token dài hạn vào
+   query string: URL dễ lọt vào history, log proxy hoặc telemetry.
+3. Một client SSE không chuẩn có hỗ trợ headers, sau khi đánh giá khả năng tương thích
+   và chính sách reconnect của thư viện đó.
+
+Server có thể gửi `retry: 5000` để gợi ý thời gian reconnect. Browser sẽ tự thử lại,
+nhưng ứng dụng vẫn cần biết session đã hết hạn, user đã logout, hoặc server từ chối
+quyền subscription. Khi đó đóng source và đưa UI về trạng thái có thể hành động, thay
+vì để browser thử lại vô hạn một kết nối chắc chắn nhận `401`/`403`.
+
+## WebSocket: kênh hai chiều
+
+### Cơ chế và vòng đời
+
+WebSocket bắt đầu bằng HTTP Upgrade rồi trở thành kênh full-duplex. Sau handshake,
+client và server có thể gửi frame bất cứ lúc nào mà không tạo HTTP request mới. Native
+`WebSocket` chỉ cung cấp transport; nội dung `send()` và `message` là protocol của
+ứng dụng bạn.
+
+Một protocol tối thiểu nên phân biệt command từ client với event từ server:
+
+```ts
+type ClientMessage =
+  | { type: 'subscribe'; topic: string; afterVersion?: number }
+  | { type: 'unsubscribe'; topic: string }
+  | { type: 'typing'; conversationId: string; active: boolean };
+
+type ServerMessage =
+  | { type: 'subscribed'; topic: string; version: number }
+  | { type: 'task.updated'; eventId: string; version: number; task: Task }
+  | { type: 'error'; code: 'forbidden' | 'invalid-message'; message: string };
+```
+
+Đặt `type`, `eventId`, `version` và payload có schema rõ ngay từ đầu. Đừng gửi một
+chuỗi JSON “tự hiểu” rồi để từng component đoán ý nghĩa. Khi protocol phát triển,
+thêm version hoặc field tương thích thay vì âm thầm đổi nghĩa event cũ.
+
+Vòng đời thường có các mốc sau:
+
+```text
+idle ── connect() ──► connecting ── open ──► connected
+  ▲                       │                    │
+  │                       │ error/close         │ close, mạng lỗi, server restart
+  └──── stopped ◄─────────┴──── reconnecting ◄──┘
+                         │
+                         └── backoff + jitter ──► connecting
+```
+
+`close` không luôn là lỗi. User logout, component bị destroy, server chủ động deploy
+hoặc tab bị đóng đều có thể đóng socket. Service cần phân biệt close **có chủ đích**
+với close cần reconnect.
+
+### Service WebSocket có reconnect và backoff
+
+Ví dụ dưới đây là adapter native WebSocket. Nó phát message vào `messages$`, phát
+trạng thái kết nối riêng và chỉ retry khi `connect()` vẫn còn được yêu cầu. Ứng dụng
+thật cần mở rộng parser/runtime validation theo protocol của mình.
+
+```ts
+import { Injectable } from '@angular/core';
+import { BehaviorSubject, Subject } from 'rxjs';
+
+export type ConnectionState =
+  | { kind: 'idle' }
+  | { kind: 'connecting' }
+  | { kind: 'connected' }
+  | { kind: 'reconnecting'; attempt: number; delayMs: number }
+  | { kind: 'stopped'; reason: string };
+
+export type ServerMessage =
+  | { type: 'subscribed'; topic: string; version: number }
+  | {
+      type: 'task.updated';
+      eventId: string;
+      version: number;
+      task: { id: string; title: string; done: boolean };
+    }
+  | { type: 'error'; code: string; message: string };
+
+@Injectable({ providedIn: 'root' })
+export class RealtimeSocket {
+  private readonly stateSubject = new BehaviorSubject<ConnectionState>({ kind: 'idle' });
+  private readonly messageSubject = new Subject<ServerMessage>();
+
+  readonly state$ = this.stateSubject.asObservable();
+  readonly messages$ = this.messageSubject.asObservable();
+
+  private socket: WebSocket | undefined;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private wanted = false;
+  private attempts = 0;
+
+  connect(): void {
+    this.wanted = true;
+
+    if (
+      this.socket?.readyState === WebSocket.OPEN ||
+      this.socket?.readyState === WebSocket.CONNECTING
+    ) {
+      return;
+    }
+
+    this.open();
+  }
+
+  disconnect(reason = 'Đóng theo yêu cầu của ứng dụng.'): void {
+    this.wanted = false;
+    this.attempts = 0;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    this.socket?.close(1000, reason);
+    this.socket = undefined;
+    this.stateSubject.next({ kind: 'stopped', reason });
+  }
+
+  send(message: unknown): boolean {
+    if (this.socket?.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    this.socket.send(JSON.stringify(message));
+    return true;
+  }
+
+  private open(): void {
+    this.stateSubject.next({ kind: 'connecting' });
+    const socket = new WebSocket('wss://api.example.com/realtime');
+    this.socket = socket;
+
+    socket.onopen = () => {
+      if (socket !== this.socket) return;
+      this.attempts = 0;
+      this.stateSubject.next({ kind: 'connected' });
+      // Gửi lại các message subscribe từ state ứng dụng ở đây.
+    };
+
+    socket.onmessage = (event: MessageEvent<string>) => {
+      try {
+        this.messageSubject.next(JSON.parse(event.data) as ServerMessage);
+      } catch {
+        console.warn('Bỏ qua WebSocket message không phải JSON hợp lệ.');
+      }
+    };
+
+    socket.onclose = (event: CloseEvent) => {
+      if (socket !== this.socket) return;
+      this.socket = undefined;
+
+      if (!this.wanted) return;
+      this.scheduleReconnect(`Socket đóng: ${event.code}`);
+    };
+
+    socket.onerror = () => {
+      // Browser thường phát close sau error; để onclose lập lịch retry một lần.
+      console.warn('WebSocket transport gặp lỗi.');
+    };
+  }
+
+  private scheduleReconnect(reason: string): void {
+    this.attempts += 1;
+    const delayMs = this.retryDelay(this.attempts);
+    this.stateSubject.next({ kind: 'reconnecting', attempt: this.attempts, delayMs });
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (this.wanted) this.open();
+    }, delayMs);
+
+    console.info(`${reason}; thử kết nối lại sau ${delayMs}ms.`);
+  }
+
+  private retryDelay(attempt: number): number {
+    const cappedExponential = Math.min(1_000 * 2 ** (attempt - 1), 30_000);
+    const jitter = 0.5 + Math.random(); // 50%–150% của base delay.
+    return Math.round(cappedExponential * jitter);
+  }
+}
+```
+
+Ở `onclose`, kiểm tra `socket !== this.socket` ngăn một socket cũ vừa đóng ghi đè trạng
+thái của socket mới. Retry được đặt **chỉ** ở `onclose`; nếu cả `onerror` lẫn `onclose`
+đều lên lịch, một lỗi có thể mở nhiều socket song song.
+
+Ví dụ cố ý không tự reconnect sau một close code biểu thị lỗi quyền. Trong production,
+backend nên định nghĩa code/message có thể phân loại, ví dụ `4401` cho session hết hạn
+và `4403` cho bị cấm. Khi nhận các code này, client cần dừng retry, làm mới phiên theo
+chính sách auth hoặc hiển thị lỗi quyền.
+
+### Gửi command và nhận event
+
+Khi socket đã open, application layer quyết định topic nào phải subscribe. Không nên
+đặt state subscription rải rác trong callback `onopen`, vì reconnect phải gửi lại đúng
+tập topic đang được UI cần.
+
+```ts
+import { Injectable, inject } from '@angular/core';
+import { filter } from 'rxjs';
+
+@Injectable({ providedIn: 'root' })
+export class TaskRealtimeFacade {
+  private readonly socket = inject(RealtimeSocket);
+
+  readonly taskUpdates$ = this.socket.messages$.pipe(
+    filter((message): message is Extract<ServerMessage, { type: 'task.updated' }> =>
+      message.type === 'task.updated',
+    ),
+  );
+
+  watchProject(projectId: string, afterVersion?: number): void {
+    this.socket.connect();
+    this.socket.send({ type: 'subscribe', topic: `project:${projectId}`, afterVersion });
+  }
+
+  stopWatching(projectId: string): void {
+    this.socket.send({ type: 'unsubscribe', topic: `project:${projectId}` });
+  }
+}
+```
+
+Có một race trong ví dụ tối giản: `send()` trả `false` nếu socket còn `connecting`.
+Thiết kế hoàn chỉnh phải giữ topic mong muốn trong state, rồi flush `subscribe` khi
+nhận `onopen`. Đừng giải quyết bằng cách xếp hàng vô hạn mọi command: chỉ message
+idempotent như `subscribe` mới nên được replay tự động. Một command nghiệp vụ như
+“gửi thanh toán” cần acknowledgement, timeout và idempotency key rõ ràng.
+
+## Đưa stream vào RxJS và Signals
+
+### Giữ event trong RxJS, render snapshot bằng signal
+
+WebSocket và SSE là stream có thể phát vô hạn. RxJS phù hợp ở phần cần xử lý từng
+event: filter theo type, kiểm tra thứ tự, retry, buffer hoặc kết hợp snapshot. Signal
+phù hợp ở biên render, nơi template chỉ cần giá trị hiện tại.
+
+```text
+SSE / WebSocket event
+        │
+        ▼
+ Observable pipeline: parse → validate → dedup → order → reduce
+        │
+        ▼
+ Signal<TaskState> ─────────────────────────────────────► template
+```
+
+`toSignal` giữ lần phát gần nhất của Observable. Vì vậy đừng gọi nó ngay trên raw
+message stream nếu mỗi message đều phải được xử lý. Hãy xử lý semantics event trong
+pipeline trước, rồi chuyển **state đã tổng hợp** sang signal.
+
+### Tích lũy event thành state bất biến
+
+Ví dụ reducer dưới đây áp dụng event mới hơn vào danh sách task. Nó trả object mới thay
+vì mutate mảng cũ, nên state dễ kiểm tra và tương thích tốt với change detection.
+
+```ts
+import { toSignal } from '@angular/core/rxjs-interop';
+import { scan } from 'rxjs';
+
+interface Task {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
+interface TaskState {
+  lastVersion: number;
+  seenEventIds: ReadonlySet<string>;
+  tasks: Readonly<Record<string, Task>>;
+}
+
+const initialState: TaskState = {
+  lastVersion: 0,
+  seenEventIds: new Set(),
+  tasks: {},
+};
+
+function reduceTaskEvent(
+  state: TaskState,
+  event: Extract<ServerMessage, { type: 'task.updated' }>,
+): TaskState {
+  if (event.eventId && state.seenEventIds.has(event.eventId)) {
+    return state;
+  }
+
+  // Gap phải được xử lý bằng fetch/replay ở service; không giả vờ state vẫn đầy đủ.
+  if (event.version !== state.lastVersion + 1) {
+    throw new Error(`Thiếu hoặc sai thứ tự event: ${state.lastVersion} → ${event.version}`);
+  }
+
+  const seenEventIds = new Set(state.seenEventIds);
+  seenEventIds.add(event.eventId);
+
+  return {
+    lastVersion: event.version,
+    seenEventIds,
+    tasks: { ...state.tasks, [event.task.id]: event.task },
+  };
+}
+
+readonly taskState = toSignal(
+  this.taskRealtime.taskUpdates$.pipe(scan(reduceTaskEvent, initialState)),
+  { initialValue: initialState },
+);
+```
+
+`ReadonlySet` không tự giới hạn kích thước. Với stream dài, thay set bằng cache ID có
+kích thước/TTL hữu hạn, hoặc để server bảo đảm replay window. Mục tiêu của ví dụ là
+làm rõ điểm dedup, không phải giữ vĩnh viễn mọi event từng nhận.
+
+Nếu reducer gặp gap, không nên `throw` thẳng vào một signal mà không có chiến lược UI.
+Một facade production thường chuyển state sang `{ kind: 'resyncing' }`, tải snapshot
+mới với version hiện tại, rồi subscribe/replay từ mốc đó. Phần [Khử trùng lặp và bắt
+kịp dữ liệu](#khử-trùng-lặp-và-bắt-kịp-dữ-liệu) giải thích lý do.
+
+### Dọn dẹp theo vòng đời Angular
+
+Khi template chỉ render stream, `AsyncPipe` tự unsubscribe theo vòng đời view. Khi
+cần signal, `toSignal` tự dọn subscription theo injection context. Với side effect
+imperative, dùng `takeUntilDestroyed`.
+
+```ts
+import { Component, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+@Component({
+  selector: 'app-task-page',
+  template: `<p>Đang theo dõi thay đổi công việc.</p>`,
+})
+export class TaskPageComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly realtime = inject(TaskRealtimeFacade);
+
+  ngOnInit(): void {
+    this.realtime.watchProject('project-42');
+
+    this.realtime.taskUpdates$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => {
+        // Side effect có chủ đích, ví dụ phát âm thanh hoặc telemetry đã redact.
+        console.log('Task thay đổi:', event.task.id);
+      });
+  }
+}
+```
+
+Một root service không bị destroy trong suốt đời ứng dụng. Nếu nó mở socket trong
+constructor, socket có thể sống mãi kể cả khi không màn hình nào dùng. Quyết định
+ownership rõ: socket toàn ứng dụng cho presence có thể hợp lý; socket theo feature
+nên được mở/đóng theo subscriber hoặc router lifecycle.
+
+## Connection lifecycle, retry và backoff
+
+### Các trạng thái kết nối
+
+UI không nên chỉ có boolean `connected`. Ít nhất cần phân biệt đang mở lần đầu, đang
+kết nối lại, đã kết nối và đã dừng vì một lý do không tự phục hồi. Điều này vừa tránh
+nói dối người dùng, vừa giúp analytics phân biệt lỗi ban đầu với một reconnect ngắn.
+
+| State | Ý nghĩa UI gợi ý | Hành động kỹ thuật |
+| --- | --- | --- |
+| `idle` | Chưa cần dữ liệu realtime | Không mở kết nối |
+| `connecting` | Đang kết nối lần đầu | Có thể hiện skeleton/spinner |
+| `connected` | Kênh đang mở | Subscribe topics, áp dụng event |
+| `reconnecting` | Đã từng kết nối nhưng đang thử lại | Giữ snapshot cũ, hiện “Đang đồng bộ lại…” |
+| `stopped` | User logout, quyền lỗi hoặc vượt retry policy | Không tự mở lại cho tới khi có hành động mới |
+
+Kết nối thành công không đồng nghĩa dữ liệu đã đúng. Sau reconnect, state có thể thiếu
+event trong thời gian mất mạng. Chỉ đánh dấu UI “đồng bộ” sau khi replay hoặc fetch
+snapshot xác nhận version.
+
+### Backoff mũ có jitter
+
+Retry ngay lập tức từ hàng nghìn tab sau một deploy tạo **thundering herd**: tất cả
+client cùng dồn vào server vừa phục hồi. Exponential backoff tăng khoảng chờ dần,
+ví dụ 1s, 2s, 4s, 8s và cap 30s. Jitter thêm ngẫu nhiên để client không cùng thức dậy
+một lúc.
+
+Công thức đơn giản trong ví dụ socket là:
+
+```text
+delay = min(base × 2^(attempt - 1), maxDelay) × random(0.5, 1.5)
+```
+
+Không có một dãy số thần kỳ. Chọn `base`, `maxDelay` và số lần retry theo SLO, loại
+màn hình và khả năng backend. Một dashboard có thể tiếp tục thử với cap 30 giây; thao
+tác cần phản hồi ngay có thể dừng sau vài lần và yêu cầu người dùng bấm thử lại.
+
+Ngoài network error, browser có thể suspend tab nền. Khi trang trở lại foreground,
+kiểm tra connection state và dữ liệu version; đừng giả định timer/backoff đã chạy chính
+xác trong lúc tab không hoạt động.
+
+### Khi nào phải dừng reconnect
+
+Dừng retry tự động khi retry sẽ không làm điều kiện thay đổi:
+
+- User đã logout hoặc route/feature không còn cần channel.
+- Server nói session hết hạn (`401` hoặc close code theo protocol). Làm mới phiên một
+  lần theo hợp đồng auth, hoặc về đăng nhập; đừng mở socket lại với credential cũ.
+- Server từ chối quyền subscription (`403`). Refresh token không cấp thêm quyền.
+- Payload/protocol không tương thích. Ghi nhận version lỗi và yêu cầu reload/upgrade
+  có kiểm soát, thay vì spam server bằng client không hiểu protocol mới.
+- Đã vượt retry budget của use case. Hiện nút “Kết nối lại” để người dùng chủ động.
+
+<Callout type="warn" title="Không xem reconnect là đồng bộ dữ liệu">
+  Reconnect chỉ khôi phục đường truyền. Nếu server không hỗ trợ replay có cursor hoặc
+  snapshot theo version, client phải tải lại dữ liệu trước khi tin rằng state hiện tại
+  không thiếu thay đổi.
+</Callout>
+
+## Auth, ordering và deduplication
+
+### Credential và quyền của kênh realtime
+
+Handshake WebSocket không đi qua interceptor `HttpClient`. Giống SSE, native browser
+WebSocket không có API chuẩn để thêm header `Authorization` tùy ý. Đừng tin rằng auth
+interceptor hiện có sẽ tự bảo vệ socket.
+
+Các quy tắc bảo mật cần được thiết kế ở server và client:
+
+- Dùng `wss://` trong production. `ws://` để lộ frame và credential trên đường truyền.
+- Nếu dùng cookie session, server xác thực cookie trong handshake. Kiểm tra `Origin`
+  allowlist; WebSocket không loại bỏ nguy cơ cross-site request chỉ vì không phải fetch.
+- Nếu dùng Bearer token, ưu tiên endpoint HTTP đã xác thực cấp ticket ngắn hạn, một lần
+  dùng và có audience channel cụ thể. Tránh access token dài hạn trên URL WebSocket.
+- Xác thực **từng subscription/topic** ở server. Một socket đã authenticated không có
+  nghĩa user được đọc mọi `project:...` mà nó gửi trong message `subscribe`.
+- Khi logout hoặc credential bị revoke, đóng socket và xóa topics/state nhạy cảm ở client.
+- Không log URL đầy token, raw frame chứa dữ liệu nhạy cảm, cookie hoặc header auth.
+
+Authentication xác định socket thuộc về ai. Authorization quyết định socket ấy được
+subscribe topic nào và được gửi command gì. Giống HTTP, server mới là nơi thực thi
+quyết định cuối cùng. Xem [Authentication](/docs/http-api-auth/authentication) để
+thiết kế cookie, token, refresh và các ranh giới này.
+
+### Thứ tự không phải là điều mặc định
+
+TCP giữ thứ tự frame **trong một kết nối**, nhưng điều đó chưa bảo đảm thứ tự nghiệp
+vụ trong toàn hệ thống. Event có thể được tạo ở nhiều service/partition, delayed bởi
+broker, replay sau reconnect hoặc đến qua hai kênh song song (HTTP response và socket).
+
+Trước khi code reducer, cần hỏi backend các câu hỏi cụ thể:
+
+| Câu hỏi | Vì sao cần câu trả lời |
+| --- | --- |
+| `version` tăng theo entity, project hay toàn hệ thống? | Client chỉ so được những event cùng phạm vi thứ tự. |
+| Server có thể phát event trùng không? | Consumer cần dedup bằng `eventId` hoặc operation ID. |
+| Có bảo đảm event `n` đến trước `n + 1` trong một topic không? | Quyết định có thể áp dụng trực tiếp hay phải buffer/resync. |
+| Replay retention là bao lâu? | Client offline lâu có thể replay hay bắt buộc tải snapshot? |
+| HTTP mutation response và event cùng nói về một thay đổi ra sao? | Tránh optimistic state bị event cũ ghi ngược. |
+
+Một chiến lược thường dùng là **last known version** theo aggregate/topic. Client chỉ
+áp dụng event có `version === lastVersion + 1`; event thấp hơn bị xem là duplicate/cũ;
+event nhảy cóc kích hoạt resync. Nếu backend chỉ bảo đảm eventual consistency mà không
+có version có nghĩa, client không thể tự tạo strong ordering đáng tin cậy ở browser.
+
+### Khử trùng lặp và bắt kịp dữ liệu
+
+At-least-once delivery — có thể nhận lại event đã nhận — là lựa chọn thực tế vì mất
+event thường tệ hơn nhận trùng. Dedup là trách nhiệm consumer, thường dùng `eventId`
+bất biến do server cấp. Không dedup theo `JSON.stringify(payload)`: hai event hợp lệ
+có thể có payload giống nhau, còn serialization không phải identity nghiệp vụ.
+
+Khi connection mất, một quy trình phục hồi rõ ràng có thể là:
+
+1. Ghi `lastVersion` chỉ sau khi đã áp dụng event thành công vào state.
+2. Khi reconnect, gửi `afterVersion=lastVersion` trong subscribe hoặc header/query
+   của endpoint replay theo contract server.
+3. Server replay event còn retention. Client vẫn dedup, vì retry/replay có thể trùng.
+4. Nếu server báo cursor quá cũ hoặc client phát hiện gap, tải snapshot mới nhất.
+5. Đặt state theo snapshot version, sau đó tiếp tục event có version kế tiếp.
+
+```text
+Client có version 41 ── mất mạng ──► server tiến đến 46
+       │                                      │
+       └──── reconnect + afterVersion=41 ────►│
+                                              │
+                         replay 42..46 ───────┘
+
+Nếu 42..46 đã hết retention: GET snapshot version 46, rồi nghe từ 46.
+```
+
+Với optimistic update, gắn một `operationId` do client tạo vào HTTP command. Server
+đưa `operationId` ấy vào event kết quả. Client nhận event có operation ID đang chờ có
+thể xác nhận optimistic state thay vì áp dụng hai lần. Đây là contract backend-client,
+không thể sửa bằng một operator RxJS đơn lẻ.
+
+## Lỗi thường gặp và trade-off
+
+| Sai lầm hoặc lựa chọn | Hậu quả | Cách xử lý |
+| --- | --- | --- |
+| Chọn WebSocket cho mọi dữ liệu “cho hiện đại” | Tăng hạ tầng, lifecycle và rủi ro vận hành mà không giảm giá trị UI. | Đo yêu cầu độ trễ; bắt đầu bằng polling hoặc SSE nếu phù hợp. |
+| Mở socket root service mãi mãi | Kết nối, pin/băng thông và subscription sống dù không có view dùng. | Xác định ownership; đóng theo feature hoặc chia sẻ có `refCount`/router lifecycle. |
+| Dùng `setInterval` + subscribe lồng nhau | Request/socket handler chồng chéo, khó cleanup, race condition. | Dùng `timer` + RxJS operator hoặc service có teardown rõ. |
+| Retry ở cả `error` và `close` | Một lỗi tạo nhiều timer và nhiều socket song song. | Chọn một điểm lập lịch retry, thường là close/finalize. |
+| Reconnect ngay không backoff | Thundering herd khi server hay mạng vừa phục hồi. | Backoff mũ có cap và jitter; đặt retry budget. |
+| Cho token dài hạn vào query string | Token có thể rò qua log, history hoặc proxy. | Dùng cookie session hoặc ticket ngắn hạn do endpoint xác thực cấp. |
+| Tin interceptor HTTP tự auth SSE/WebSocket | Native `EventSource`/`WebSocket` không tự dùng header interceptor. | Thiết kế handshake credential riêng và kiểm thử bằng browser thật. |
+| Chỉ giữ state cuối bằng signal ngay từ raw events | Làm mất semantics của các event, không có điểm dedup/order. | Xử lý event trong RxJS rồi đưa state đã reduce sang signal. |
+| Xem arrival order là business order | Event trễ/trùng/gap làm UI ghi đè dữ liệu đúng bằng dữ liệu cũ. | Dùng `eventId`, version/cursor và resync contract. |
+| Reconnect xong là tin state đúng | Mất event trong khoảng offline mà UI không biết. | Replay từ cursor hoặc tải snapshot mới theo version. |
+| Coi channel realtime là ranh giới authorization | User có thể tự gửi `subscribe` tới topic không thuộc quyền. | Server xác thực và authorize từng subscription/command. |
+
+Polling ưu tiên đơn giản và quan sát tốt, đổi lại độ trễ và request dư. SSE giữ được
+mô hình HTTP và hợp với server push một chiều, đổi lại authentication/header có giới
+hạn trên API chuẩn. WebSocket cho độ trễ thấp hai chiều, đổi lại cần protocol, retry,
+backpressure, scale và observability nghiêm túc hơn.
+
+Nói ngắn gọn: chọn transport không chỉ theo API browser. Nó là quyết định về contract
+server, độ mới chấp nhận được, quyền truy cập và chi phí vận hành toàn hệ thống.
+
+## Checklist và tóm tắt
+
+Trước khi đưa realtime vào production, kiểm tra:
+
+- [ ] Có lý do về độ trễ/tần suất cập nhật; polling đã được cân nhắc trước SSE/WebSocket.
+- [ ] HTTP snapshot ban đầu, event schema, `eventId`, `version`/cursor và retention
+  replay đã được thống nhất với backend.
+- [ ] Mỗi event được parse/validate theo mức rủi ro; TypeScript generic hoặc `as` không
+  được xem là validation runtime.
+- [ ] Stream event được xử lý trong RxJS; signal chỉ nhận snapshot/view state đã tổng hợp.
+- [ ] Socket/SSE có owner, teardown và policy khi component/route không còn cần dữ liệu.
+- [ ] Connection state phân biệt connecting, reconnecting, stopped; UI không khẳng định
+  “đã đồng bộ” chỉ vì transport vừa open.
+- [ ] Reconnect dùng backoff có cap/jitter và dừng cho logout, lỗi quyền hoặc retry budget.
+- [ ] SSE/WebSocket có auth handshake riêng; không đặt access token dài hạn trên URL và
+  server authorize mọi topic/command.
+- [ ] Client dedup event, phát hiện gap và resync bằng replay/cursor hoặc snapshot mới.
+- [ ] Logging/telemetry redact credential và payload nhạy cảm; dashboard có metric kết
+  nối, reconnect, dropped/gap event và latency phù hợp.
+
+Realtime trong Angular là sự kết hợp của transport browser, RxJS để giữ semantics theo
+thời gian và signals để render state hiện tại. Polling phù hợp khi đơn giản là ưu tiên;
+SSE phù hợp khi server chỉ cần đẩy; WebSocket phù hợp khi thật sự cần hai chiều. Dù
+chọn cách nào, tính đúng đắn đến từ snapshot, event identity, version, reconnect có
+kiểm soát và authorization ở server — không phải từ việc giữ một socket mở.
+
+## Đọc tiếp
+
+<Cards>
+  <Card
+    title="HttpClient"
+    href="/docs/http-api-auth/http-client"
+    description="Tổ chức request/response, cancellation và resource layer cho dữ liệu HTTP."
+  />
+  <Card
+    title="Authentication"
+    href="/docs/http-api-auth/authentication"
+    description="Thiết kế session, token, interceptor và ranh giới bảo mật ở Angular client."
+  />
+  <Card
+    title="Signals và RxJS"
+    href="/docs/reactivity-state/signals-rxjs"
+    description="Chọn ranh giới giữa stream theo thời gian và state hiện tại của UI."
+  />
+  <Card
+    title="Xử lý lỗi API"
+    href="/docs/http-api-auth/xu-ly-loi-api"
+    description="Phân loại lỗi, retry có kiểm soát và thông báo phù hợp cho UI."
+  />
+</Cards>

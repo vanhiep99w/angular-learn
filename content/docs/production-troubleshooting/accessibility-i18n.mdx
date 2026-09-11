@@ -1,10 +1,723 @@
 ---
 title: Accessibility và i18n
-description: Xây dựng trải nghiệm truy cập được và hỗ trợ nhiều ngôn ngữ.
+description: Thiết kế ứng dụng Angular có thể truy cập, đa ngôn ngữ và sẵn sàng cho locale RTL từ template đến kiểm thử.
 ---
 
-Trang này sẽ trình bày **Accessibility và i18n** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi">
+  Trang này tập trung vào accessibility (a11y) và internationalization (i18n) ở Angular hiện đại. a11y không phải một lớp ARIA thêm vào cuối dự án; i18n cũng không phải thay vài chuỗi chữ. Cả hai là yêu cầu của cấu trúc HTML, luồng tương tác, dữ liệu và quy trình phát hành.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan: hai yêu cầu, một trải nghiệm](#tổng-quan-hai-yêu-cầu-một-trải-nghiệm)
+  - [Khái niệm và mục tiêu](#khái-niệm-và-mục-tiêu)
+  - [Luồng thiết kế và kiểm chứng](#luồng-thiết-kế-và-kiểm-chứng)
+- [Nền tảng accessibility: semantic HTML trước ARIA](#nền-tảng-accessibility-semantic-html-trước-aria)
+  - [Chọn đúng phần tử HTML](#chọn-đúng-phần-tử-html)
+  - [Cấu trúc trang, tiêu đề và landmark](#cấu-trúc-trang-tiêu-đề-và-landmark)
+  - [Khi nào dùng ARIA](#khi-nào-dùng-aria)
+- [Bàn phím, focus và component động](#bàn-phím-focus-và-component-động)
+  - [Hợp đồng bàn phím](#hợp-đồng-bàn-phím)
+  - [Quản lý focus khi mở và đóng dialog](#quản-lý-focus-khi-mở-và-đóng-dialog)
+  - [Thông báo thay đổi không làm gián đoạn](#thông-báo-thay-đổi-không-làm-gián-đoạn)
+- [Form, validation và lỗi có thể hành động](#form-validation-và-lỗi-có-thể-hành-động)
+  - [Liên kết label, hướng dẫn và lỗi](#liên-kết-label-hướng-dẫn-và-lỗi)
+  - [Ví dụ Reactive Form truy cập được](#ví-dụ-reactive-form-truy-cập-được)
+  - [Lỗi từ server và tóm tắt lỗi](#lỗi-từ-server-và-tóm-tắt-lỗi)
+- [Kiểm thử accessibility](#kiểm-thử-accessibility)
+  - [Tự động hóa: lint, unit và quét rule](#tự-động-hóa-lint-unit-và-quét-rule)
+  - [Kịch bản kiểm thử thủ công](#kịch-bản-kiểm-thử-thủ-công)
+  - [Diễn giải kết quả đúng cách](#diễn-giải-kết-quả-đúng-cách)
+- [i18n tích hợp sẵn của Angular](#i18n-tích-hợp-sẵn-của-angular)
+  - [Mô hình biên dịch và giới hạn của nó](#mô-hình-biên-dịch-và-giới-hạn-của-nó)
+  - [Đánh dấu nội dung trong template và TypeScript](#đánh-dấu-nội-dung-trong-template-và-typescript)
+  - [Trích xuất, dịch và build locale](#trích-xuất-dịch-và-build-locale)
+- [Định dạng locale, ICU và dữ liệu động](#định-dạng-locale-icu-và-dữ-liệu-động)
+  - [Ngày, số, tiền tệ và timezone](#ngày-số-tiền-tệ-và-timezone)
+  - [Số nhiều, giới tính và thứ tự câu](#số-nhiều-giới-tính-và-thứ-tự-câu)
+  - [Nội dung do API trả về](#nội-dung-do-api-trả-về)
+- [RTL và thiết kế không phụ thuộc hướng viết](#rtl-và-thiết-kế-không-phụ-thuộc-hướng-viết)
+  - [Khai báo ngôn ngữ và hướng](#khai-báo-ngôn-ngữ-và-hướng)
+  - [CSS logical properties và icon](#css-logical-properties-và-icon)
+  - [Kiểm thử locale RTL](#kiểm-thử-locale-rtl)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist phát hành](#checklist-phát-hành)
+- [Tóm tắt](#tóm-tắt)
+
+## Tổng quan: hai yêu cầu, một trải nghiệm
+
+Accessibility giúp người dùng nhận biết, vận hành và hiểu giao diện dù họ dùng bàn phím, screen reader, zoom lớn, tương phản cao hoặc công nghệ hỗ trợ khác. Internationalization là chuẩn bị ứng dụng để nội dung, định dạng dữ liệu và hướng trình bày thay đổi theo ngôn ngữ/vùng. Một trang chỉ “dịch được” nhưng focus bị mất khi đổi route vẫn khó dùng. Ngược lại, một form có label tốt nhưng thông báo lỗi chỉ có tiếng Anh cũng chưa phục vụ được mọi người dùng.
+
+### Khái niệm và mục tiêu
+
+Mục tiêu thực tế là đảm bảo mọi chức năng có **tên**, **vai trò**, **giá trị** và **cách vận hành** rõ ràng. Ví dụ, người dùng phải biết ô nào nhận email, ô đó đang lỗi gì, có thể gửi form bằng bàn phím hay không, và ngày giao hàng được hiển thị theo quy ước của locale nào.
+
+| Lớp | Câu hỏi cần trả lời | Ví dụ đúng |
+| --- | --- | --- |
+| Cấu trúc | Nội dung là heading, navigation, form hay button? | Dùng `<button>` để lưu thay vì `<div (click)>`. |
+| Tương tác | Có thể thao tác không cần chuột? Focus đi đâu? | `Enter` submit form; đóng dialog trả focus về nút đã mở. |
+| Phản hồi | Thay đổi và lỗi có được nhận biết? | Lỗi field liên kết bằng `aria-describedby`; kết quả lưu được announce. |
+| Ngôn ngữ | Chuỗi, ngày, số và plural có theo locale không? | `DatePipe` và ICU message thay vì nối chuỗi. |
+| Hướng viết | Layout có hoạt động với `dir="rtl"` không? | Dùng `margin-inline-start`, không dùng `margin-left`. |
+
+### Luồng thiết kế và kiểm chứng
+
+Đưa hai yêu cầu vào cùng vòng đời feature, thay vì đợi audit trước release. Flow dưới đây cho một form tạo đơn hàng; cùng nguyên tắc áp dụng cho route, bảng dữ liệu và modal.
+
+```text
+Yêu cầu nghiệp vụ và ngôn ngữ nguồn
+               │
+               ▼
+Semantic HTML + hợp đồng keyboard + chuỗi có ngữ cảnh
+               │
+               ▼
+Template Angular: i18n / label / trạng thái lỗi
+               │
+               ├──► extract translation ──► bản dịch theo locale
+               │
+               ▼
+Unit/component test + quét tự động
+               │
+               ▼
+Kiểm thử thủ công: keyboard, screen reader, zoom, RTL
+               │
+               ▼
+Build từng locale, smoke test và phát hành
+```
+
+<Callout type="idea" title="Nguyên tắc thiết kế">
+  Hãy dùng HTML native trước. Nếu browser đã biết cách focus, click, submit và truyền semantics của một phần tử, Angular không cần mô phỏng lại những hành vi đó bằng directive, event và ARIA.
+</Callout>
+
+## Nền tảng accessibility: semantic HTML trước ARIA
+
+ARIA chỉ mô tả semantics cho accessibility tree; nó không tự tạo hành vi bàn phím, focus, validation hay submit. Một phần tử `<div role="button">` có thể được screen reader gọi là button, nhưng vẫn cần tự xử lý `Enter`, `Space`, disabled state và focus. `<button>` đã có toàn bộ hợp đồng đó.
+
+### Chọn đúng phần tử HTML
+
+Chọn phần tử theo hành vi, không theo CSS mong muốn. CSS có thể làm button trông như link hoặc link trông như button, nhưng ý nghĩa cho người dùng phải giữ nguyên.
+
+| Ý định | Dùng | Không nên dùng | Lý do |
+| --- | --- | --- | --- |
+| Thay đổi state tại chỗ | `<button type="button">` | `<a href="#">`, `<div (click)>` | Button hỗ trợ focus, `Space`/`Enter` và disabled. |
+| Điều hướng | `<a [routerLink]="...">` | Button tự gọi `router.navigate()` | Link có semantics URL, mở tab mới và copy link. |
+| Gửi form | `<button type="submit">` trong `<form>` | Click handler độc lập | `Enter` trong input có thể submit theo chuẩn browser. |
+| Nhập dữ liệu | `<label>` + `<input>` | Placeholder thay label | Placeholder biến mất khi nhập và thường không đủ ngữ cảnh. |
+| Danh sách lựa chọn | `<ul>`/`<ol>` + `<li>` | Các `<div>` xếp cạnh nhau | Screen reader biết số lượng và cấu trúc item. |
+
+Ví dụ sau không cần ARIA bổ sung. Text nhìn thấy đã là accessible name của button; `disabled` vừa chặn thao tác vừa truyền trạng thái cho công nghệ hỗ trợ.
+
+```html
+<button type="button" [disabled]="saving()" (click)="saveDraft()">
+  {{ saving() ? 'Đang lưu…' : 'Lưu nháp' }}
+</button>
+```
+
+Nếu chuỗi trên sẽ được dịch, đánh dấu cả nội dung hoặc tách thành hai nhánh i18n rõ ràng. Không đặt `aria-label="Lưu nháp"` cố định lên button đã có text, vì người dùng screen reader có thể nghe một ngôn ngữ khác với chữ đang thấy.
+
+### Cấu trúc trang, tiêu đề và landmark
+
+Landmark là vùng lớn để người dùng screen reader nhảy nhanh, như `<header>`, `<nav>`, `<main>`, `<aside>` và `<footer>`. Mỗi trang nên có một `<main>` cho nội dung chính. Nếu có nhiều `<nav>`, đặt tên phân biệt bằng `aria-label`, chẳng hạn “Điều hướng chính” và “Điều hướng chân trang”.
+
+Heading phải biểu diễn outline nội dung. Không chọn `h3` chỉ vì cỡ chữ đẹp. Bắt đầu mỗi trang bằng một `h1`, sau đó tăng giảm theo cấu trúc. CSS chịu trách nhiệm về kích thước chữ.
+
+```html
+<a class="skip-link" href="#main-content">Bỏ qua đến nội dung chính</a>
+
+<header>
+  <a routerLink="/" aria-label="Trang chủ Angular Learn">Angular Learn</a>
+  <nav aria-label="Điều hướng chính">
+    <a routerLink="/docs">Tài liệu</a>
+  </nav>
+</header>
+
+<main id="main-content" tabindex="-1">
+  <h1>Đơn hàng</h1>
+  <h2>Đơn chờ xử lý</h2>
+</main>
+```
+
+Liên kết bỏ qua là phần tử focus được đầu tiên. `tabindex="-1"` cho phép code focus vào `<main>` sau khi Angular điều hướng mà không đưa vùng này vào thứ tự Tab thường ngày. Hãy chỉ focus programmatically khi có thay đổi ngữ cảnh đáng kể, ví dụ chuyển route; đừng cướp focus khi một vùng nhỏ cập nhật.
+
+### Khi nào dùng ARIA
+
+Quy tắc ngắn gọn: **không có ARIA tốt hơn ARIA sai**. Chỉ thêm ARIA khi native HTML không diễn đạt được trạng thái hoặc quan hệ cần thiết, hoặc khi xây dựng widget phức tạp chưa có phần tử native tương đương.
+
+Các trường hợp phù hợp gồm:
+
+- `aria-current="page"` trên link route hiện tại.
+- `aria-expanded` và `aria-controls` cho nút mở/đóng vùng có thể thu gọn.
+- `aria-describedby` để nối input với hướng dẫn và lỗi.
+- `aria-live` hoặc `LiveAnnouncer` cho thay đổi động không nhận focus.
+- `role="dialog"`, `aria-modal="true"` và tên dialog cho modal, **kèm** focus trap và lối đóng thực sự.
+
+```html
+<button
+  type="button"
+  [attr.aria-expanded]="filtersOpen()"
+  aria-controls="order-filters"
+  (click)="toggleFilters()"
+>
+  Bộ lọc
+</button>
+
+<section id="order-filters" [hidden]="!filtersOpen()">
+  <!-- Nội dung bộ lọc thật sự có thể dùng được bằng bàn phím. -->
+</section>
+```
+
+Không dùng `role="button"` lên button native, không thêm `aria-hidden="true"` vào phần tử có thể focus, và không dùng `aria-label` để che text sai. `aria-hidden` loại phần tử và con của nó khỏi accessibility tree; nếu phần tử vẫn Tab được, người dùng có thể focus vào một đối tượng không có tên.
+
+## Bàn phím, focus và component động
+
+Focus là vị trí tương tác hiện tại của keyboard. Mọi thao tác có thể click phải có đường keyboard tương đương. Focus indicator phải nhìn thấy được; xóa `outline` mà không có thay thế tương phản tốt tạo lỗi cho cả người dùng keyboard lẫn người dùng zoom.
+
+### Hợp đồng bàn phím
+
+Dùng browser native giải quyết phần lớn quy ước: `Tab`/`Shift+Tab` đi qua phần tử tương tác, `Enter` theo link/button, `Space` kích hoạt button. Với widget tùy chỉnh như menu, listbox, tabs hay combobox, cần triển khai đầy đủ mẫu keyboard từ WAI-ARIA Authoring Practices hoặc dùng Angular CDK/Material đã hỗ trợ mẫu đó.
+
+Đừng biến mọi vùng thành focusable bằng `tabindex="0"`. Nó làm thứ tự Tab dài, nhiều điểm dừng không có hành động và gây mệt mỏi. `tabindex` dương (`1`, `2`, ...) đặc biệt nguy hiểm vì tạo thứ tự khác DOM; hãy tránh hoàn toàn.
+
+```css
+/* Không xóa outline. Tùy biến nó để chỉ hiện rõ khi điều hướng keyboard. */
+:focus-visible {
+  outline: 3px solid #0b63ce;
+  outline-offset: 3px;
+}
+
+.skip-link {
+  inset-inline-start: 1rem;
+  position: absolute;
+  transform: translateY(-150%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+```
+
+### Quản lý focus khi mở và đóng dialog
+
+Modal thay đổi ngữ cảnh. Khi mở, focus phải đi vào dialog, focus không được Tab ra nội dung phía sau, `Escape` đóng dialog khi không có lý do nghiệp vụ chặn, và khi đóng focus phải quay lại trigger. Tự viết những chi tiết này dễ thiếu case; Angular CDK A11y cung cấp `cdkTrapFocus` cho focus trap.
+
+```ts
+import { Component, signal } from '@angular/core';
+import { A11yModule } from '@angular/cdk/a11y';
+
+@Component({
+  selector: 'app-delete-order',
+  imports: [A11yModule],
+  templateUrl: './delete-order.component.html',
+})
+export class DeleteOrderComponent {
+  readonly isDialogOpen = signal(false);
+
+  openDialog(): void {
+    this.isDialogOpen.set(true);
+  }
+
+  closeDialog(): void {
+    this.isDialogOpen.set(false);
+  }
+}
+```
+
+```html
+<button #deleteTrigger type="button" (click)="openDialog()">
+  Xóa đơn hàng
+</button>
+
+@if (isDialogOpen()) {
+  <div
+    cdkTrapFocus
+    cdkTrapFocusAutoCapture
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="delete-order-title"
+    (keydown.escape)="closeDialog(); deleteTrigger.focus()"
+  >
+    <h2 id="delete-order-title">Xóa đơn hàng?</h2>
+    <p>Hành động này không thể hoàn tác.</p>
+    <button type="button" cdkFocusInitial (click)="closeDialog(); deleteTrigger.focus()">
+      Hủy
+    </button>
+    <button type="button" (click)="deleteOrder()">Xóa</button>
+  </div>
+}
+```
+
+Ví dụ đặt focus ban đầu vào “Hủy” vì đây là hành động an toàn trong thao tác phá hủy. Với dialog có input, focus ban đầu có thể là input đó. Khi component bị hủy hoặc dialog đóng vì click backdrop/API, cũng phải khôi phục focus; một component dialog hoàn chỉnh hoặc CDK overlay thường quản lý đáng tin cậy hơn code template tối giản này.
+
+<Callout type="warn" title="Focus trap không thay thế việc ẩn nền">
+  Focus trap chỉ giữ keyboard. Nội dung phía sau còn có thể bị screen reader hoặc click truy cập nếu không được quản lý. Hãy dùng dialog primitive đáng tin cậy của design system/CDK để xử lý backdrop, scroll, inertness và khôi phục focus nhất quán.
+</Callout>
+
+### Thông báo thay đổi không làm gián đoạn
+
+Khi không chuyển focus, người dùng screen reader có thể không biết kết quả request đã đổi. Dùng `LiveAnnouncer` của CDK cho thông báo ngắn, có ý nghĩa; tránh announce mọi keystroke hoặc mọi lần change detection.
+
+```ts
+import { Component, inject } from '@angular/core';
+import { LiveAnnouncer } from '@angular/cdk/a11y';
+
+@Component({
+  selector: 'app-order-save',
+  template: `<button type="button" (click)="save()">Lưu đơn hàng</button>`,
+})
+export class OrderSaveComponent {
+  private readonly liveAnnouncer = inject(LiveAnnouncer);
+
+  async save(): Promise<void> {
+    // Gọi API và chỉ announce sau khi có kết quả thật.
+    await this.ordersApi.save();
+    await this.liveAnnouncer.announce('Đã lưu đơn hàng', 'polite');
+  }
+
+  private readonly ordersApi = inject(OrdersApi);
+}
+```
+
+`polite` đợi screen reader đọc xong nội dung hiện tại; hợp với thành công hoặc cập nhật không khẩn. `assertive` có thể ngắt lời và chỉ nên dành cho lỗi/tình huống cần biết ngay. Nội dung announce cũng phải qua i18n; không để bản dịch trên giao diện nhưng announce vẫn là chuỗi nguồn.
+
+## Form, validation và lỗi có thể hành động
+
+Form accessible không chỉ có màu đỏ. Mỗi field cần label, hướng dẫn khi cần, lỗi có thể đọc được và một đường rõ ràng để sửa. Validation client phản hồi sớm, nhưng server vẫn là nguồn quyết định cuối cùng về dữ liệu, quyền và quy tắc nghiệp vụ.
+
+### Liên kết label, hướng dẫn và lỗi
+
+`<label for>` và `id` tạo accessible name ổn định cho input. `aria-describedby` nối thêm mô tả/lỗi bằng ID. Chỉ đưa ID lỗi vào `aria-describedby` khi lỗi đang hiển thị; nếu không screen reader có thể đọc một lỗi không còn đúng.
+
+| Nhu cầu | Cơ chế | Tránh |
+| --- | --- | --- |
+| Tên field | `<label for="email">` | Chỉ dùng placeholder. |
+| Hướng dẫn dài | `aria-describedby="email-hint"` | Nhét toàn bộ hướng dẫn vào `aria-label`. |
+| Trạng thái invalid | `[attr.aria-invalid]="..."` khi đã validate | Đặt `aria-invalid="true"` ngay lúc trang tải. |
+| Lỗi field | `aria-describedby` trỏ tới lỗi hiện tại | Chỉ đổi border/màu. |
+| Lỗi submit tổng quát | vùng `role="alert"` hoặc focus vào summary | Toast tự biến mất không thể tìm lại. |
+
+### Ví dụ Reactive Form truy cập được
+
+Component dùng `submitted` để chỉ hiện lỗi sau lần gửi đầu, hoặc sau khi field đã được chạm. Điều này tránh đọc lỗi “bắt buộc” ngay khi người dùng vừa vào trang.
+
+```ts
+import { Component, inject, signal } from '@angular/core';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+
+@Component({
+  selector: 'app-checkout-contact',
+  imports: [ReactiveFormsModule],
+  templateUrl: './checkout-contact.component.html',
+})
+export class CheckoutContactComponent {
+  private readonly fb = inject(FormBuilder);
+  readonly submitted = signal(false);
+
+  readonly form = this.fb.nonNullable.group({
+    email: ['', [Validators.required, Validators.email]],
+  });
+
+  showEmailError(): boolean {
+    const email = this.form.controls.email;
+    return email.invalid && (email.touched || this.submitted());
+  }
+
+  submit(): void {
+    this.submitted.set(true);
+    this.form.markAllAsTouched();
+
+    if (this.form.invalid) return;
+    // Gửi payload đã hợp lệ về mặt client.
+  }
+}
+```
+
+```html
+<form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+  <label for="contact-email">Email nhận xác nhận</label>
+  <p id="contact-email-hint">Ví dụ: name@example.com</p>
+
+  <input
+    id="contact-email"
+    name="email"
+    type="email"
+    autocomplete="email"
+    formControlName="email"
+    [attr.aria-describedby]="showEmailError()
+      ? 'contact-email-hint contact-email-error'
+      : 'contact-email-hint'"
+    [attr.aria-invalid]="showEmailError()"
+  />
+
+  @if (showEmailError()) {
+    <p id="contact-email-error" role="alert">
+      @if (form.controls.email.hasError('required')) {
+        Nhập email nhận xác nhận.
+      } @else {
+        Nhập email hợp lệ, ví dụ name@example.com.
+      }
+    </p>
+  }
+
+  <button type="submit">Tiếp tục</button>
+</form>
+```
+
+Binding `aria-describedby` chỉ có một nguồn, nên khi lỗi biến mất screen reader không còn đọc mô tả lỗi cũ. Điểm quan trọng là tên field, hint và lỗi đều có quan hệ xác định bằng ID. Chuỗi “Email không hợp lệ” cần được thay bằng message i18n có ngữ cảnh; không dùng key validator như `email` làm nội dung cuối cùng cho người dùng.
+
+### Lỗi từ server và tóm tắt lỗi
+
+Server có thể từ chối payload dù validation client đã qua: email vừa được dùng bởi người khác, mã khuyến mại hết hạn, hoặc quyền thay đổi. Map lỗi server về field tương ứng nếu có thể. Với lỗi không gắn field, hiển thị summary ở đầu form.
+
+```html
+@if (submitError()) {
+  <section #errorSummary tabindex="-1" role="alert" aria-labelledby="form-error-title">
+    <h2 id="form-error-title">Không thể lưu biểu mẫu</h2>
+    <p>{{ submitError() }}</p>
+    <a href="#contact-email">Kiểm tra email nhận xác nhận</a>
+  </section>
+}
+```
+
+Sau submit thất bại, focus summary hoặc field lỗi đầu tiên tùy tình huống. Summary phù hợp khi có nhiều lỗi hoặc lỗi hệ thống; focus field đầu tiên phù hợp khi một chỉnh sửa rõ ràng sẽ giúp người dùng tiếp tục. Đừng vừa focus field vừa dùng `role="alert"` cho hàng loạt field; thông tin lặp lại sẽ gây nhiễu.
+
+## Kiểm thử accessibility
+
+Không có một lệnh nào chứng minh sản phẩm “đạt WCAG”. Tool tự động phát hiện rule có thể kiểm tra từ DOM; nó không biết nhãn có dễ hiểu, flow keyboard có hợp với nghiệp vụ hay bản dịch có khiến screen reader hiểu sai không. Hãy kết hợp kiểm thử tự động và thủ công.
+
+### Tự động hóa: lint, unit và quét rule
+
+Ở mức component, test hành vi observable trước: button phải là native button, label nối được input, lỗi xuất hiện sau tương tác, dialog có tên. Không snapshot cả HTML rồi coi đó là a11y test.
+
+```ts
+it('gắn lỗi email vào input sau khi người dùng submit', () => {
+  const fixture = TestBed.createComponent(CheckoutContactComponent);
+  fixture.detectChanges();
+
+  const form = fixture.nativeElement.querySelector('form') as HTMLFormElement;
+  form.dispatchEvent(new Event('submit'));
+  fixture.detectChanges();
+
+  const input = fixture.nativeElement.querySelector('#contact-email') as HTMLInputElement;
+  expect(input.getAttribute('aria-invalid')).toBe('true');
+  expect(input.getAttribute('aria-describedby')).toContain('contact-email-error');
+  expect(fixture.nativeElement.querySelector('#contact-email-error')).not.toBeNull();
+});
+```
+
+Dùng axe trong component/browser test để phát hiện các vi phạm có rule xác định. Ví dụ E2E với Playwright cần cài riêng `@axe-core/playwright`; selector, đường dẫn và ngưỡng policy phải được đội dự án quyết định.
+
+```ts
+import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+
+test('checkout không có vi phạm axe nghiêm trọng', async ({ page }) => {
+  await page.goto('/checkout');
+  const results = await new AxeBuilder({ page })
+    .include('main')
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+});
+```
+
+Lệnh test này không thuộc Angular CLI mặc định và package ví dụ có thể chưa tồn tại trong repository. Hãy thêm nó cùng cấu hình CI trong một thay đổi được phê duyệt, thay vì copy test rồi kỳ vọng build hiện có tự chạy.
+
+### Kịch bản kiểm thử thủ công
+
+Mỗi feature có tương tác nên có kịch bản ngắn, lặp lại được. Test trên browser và công nghệ hỗ trợ mà người dùng thật dùng; không tự khẳng định tương thích chỉ từ simulator.
+
+1. **Chỉ keyboard:** tải trang, bấm `Tab`/`Shift+Tab`; xác nhận thứ tự focus hợp lý, indicator luôn thấy, không có keyboard trap và mọi hành động hoàn thành được.
+2. **Dialog/menu:** mở bằng keyboard, kiểm tra focus ban đầu, `Escape`, `Tab` vòng trong dialog và focus quay về trigger.
+3. **Form:** gửi rỗng, gửi sai, sửa từng lỗi và mô phỏng lỗi server. Kiểm tra cả màu, text, focus lẫn khả năng quay lại lỗi.
+4. **Screen reader:** kiểm tra title, heading, landmark, tên/role/state của control và announcement sau request. Ví dụ dùng NVDA + Firefox trên Windows, VoiceOver + Safari trên macOS/iOS, hoặc tổ hợp phù hợp với khách hàng của sản phẩm.
+5. **Zoom và reflow:** thử browser zoom 200% và viewport hẹp. Nội dung không được che, cắt, hoặc đòi cuộn hai chiều ở nội dung văn bản thông thường.
+6. **Tương phản và reduced motion:** kiểm tra focus, disabled, error và trạng thái hover; nếu có animation, tôn trọng `prefers-reduced-motion`.
+
+### Diễn giải kết quả đúng cách
+
+Một cảnh báo axe là tín hiệu cần điều tra, không phải license để thêm ARIA mù quáng. Ví dụ axe báo input không có label thì sửa bằng `<label>` là tốt hơn thêm `aria-label` nếu label nhìn thấy được. Ngược lại, không có warning không chứng minh flow đúng: tool không biết việc thông báo “Đã lưu” có đúng thời điểm, đúng ngôn ngữ hay có hữu ích hay không.
+
+Lưu bằng chứng test kèm route, viewport, browser/assistive technology, locale và phiên bản release. Điều này biến kết quả thủ công thành regression checklist, không phải nhận xét “đã test a11y” không tái hiện được.
+
+## i18n tích hợp sẵn của Angular
+
+Angular i18n tích hợp sẵn dùng message được đánh dấu trong source, trích xuất thành catalog dịch và thay nội dung khi build cho từng locale. Cách này tốt cho ứng dụng cần bundle tối ưu, SEO/SSR theo locale và quy trình dịch có kiểm soát.
+
+### Mô hình biên dịch và giới hạn của nó
+
+Luồng chuẩn gồm bốn bước: đánh dấu message bằng `i18n` hoặc `$localize`; chạy extraction; dịch file catalog; build với các locale đã cấu hình. Mỗi output locale chứa message đã dịch và dùng `LOCALE_ID` tương ứng để pipe định dạng.
+
+Ưu điểm là không phải tải catalog dịch ở runtime và Angular có thể tối ưu từng bản build. Trade-off là đổi ngôn ngữ thường là đi đến bản build/URL locale khác hoặc reload ứng dụng. Nếu sản phẩm yêu cầu đổi ngôn ngữ tức thì trong cùng một SPA session, đánh giá thư viện runtime translation và thiết kế state/SSR/cache tương ứng; không giả định i18n biên dịch đáp ứng yêu cầu đó.
+
+<Callout type="info" title="Chọn locale trước, rồi mới dịch">
+  Locale không chỉ là `vi` hay `en`. Hãy quyết định source locale, các thị trường hỗ trợ, URL cho từng locale, fallback, timezone nghiệp vụ và ai sở hữu chất lượng dịch. Một chuỗi được dịch đúng vẫn có thể hiển thị sai ngày hoặc tiền nếu locale policy chưa rõ.
+</Callout>
+
+### Đánh dấu nội dung trong template và TypeScript
+
+Dùng `i18n` cho text node và `i18n-<attribute>` cho attribute có chuỗi cần dịch. Metadata có dạng `meaning|description@@id`: meaning phân biệt ngữ nghĩa, description giúp translator hiểu bối cảnh, custom ID chỉ nên ổn định khi đội có chính sách quản lý ID.
+
+```html
+<h1 i18n="checkout page title|Heading on checkout@@checkoutTitle">
+  Thanh toán
+</h1>
+
+<button type="submit" i18n="checkout|Submits the checkout form">
+  Đặt hàng
+</button>
+
+<img
+  src="/assets/card.svg"
+  i18n-alt="payment illustration|Describes the payment card image"
+  alt="Thẻ thanh toán"
+/>
+
+<p i18n>
+  Xin chào, <strong>{{ customerName }}</strong>.
+</p>
+```
+
+Đừng tách một câu thành nhiều message rồi nối lại trong template. Thứ tự từ và cách chia câu khác nhau giữa ngôn ngữ. Interpolation trong một message cho phép translator đổi vị trí placeholder mà vẫn giữ ngữ pháp.
+
+Với chuỗi trong TypeScript, dùng tagged template `$localize`. Để CLI và type system biết `$localize`, dự án thường thêm gói/localize polyfill bằng `ng add @angular/localize` theo phiên bản Angular đang dùng.
+
+```ts
+export function saveMessage(orderNumber: string): string {
+  return $localize`:success message|Shown after an order is saved@@orderSaved:Đã lưu đơn hàng ${orderNumber}:orderNumber:.`;
+}
+```
+
+Tên placeholder `:orderNumber:` là ngữ cảnh cho translator. Không tạo message bằng phép nối như `'Đã lưu đơn hàng ' + orderNumber`; extraction không có một câu hoàn chỉnh để dịch và nhiều ngôn ngữ cần đảo thứ tự.
+
+### Trích xuất, dịch và build locale
+
+Ví dụ sau dùng XLIFF 2.0. Xác nhận option CLI và vị trí cấu hình bằng `ng version`/tài liệu phiên bản Angular đang chạy, vì cấu trúc builder có thể khác giữa các major version.
+
+```bash
+ng add @angular/localize
+ng extract-i18n --output-path src/locale --format xlf2
+```
+
+Khai báo source locale và translation file trong cấu hình workspace. Minh họa thường nằm trong phần build của `angular.json`:
+
+```json
+{
+  "projects": {
+    "shop": {
+      "i18n": {
+        "sourceLocale": "vi",
+        "locales": {
+          "en-GB": "src/locale/messages.en-GB.xlf",
+          "ar": "src/locale/messages.ar.xlf"
+        }
+      }
+    }
+  }
+}
+```
+
+Catalog do CLI tạo có nhiều metadata; translator chỉ sửa target theo quy trình translation management của dự án. Không tự đổi ID hoặc placeholder. Hình dạng tối giản của một unit XLIFF như sau:
+
+```xml
+<unit id="orderSaved">
+  <segment>
+    <source>Đã lưu đơn hàng <ph id="0" equiv="orderNumber"/>.</source>
+    <target>Order <ph id="0" equiv="orderNumber"/> has been saved.</target>
+  </segment>
+</unit>
+```
+
+Sau khi dịch, build tất cả locale đã cấu hình:
+
+```bash
+ng build --localize
+```
+
+Pipeline nên fail hoặc cảnh báo có chủ đích khi translation thiếu, tùy chính sách phát hành. Đừng phát hành locale mới chỉ vì build thành công: mở output của locale đó, kiểm tra heading dài, lỗi form, plural, title/alt text và URL/`lang` thực tế.
+
+## Định dạng locale, ICU và dữ liệu động
+
+Dịch label mới là một nửa i18n. Người dùng kỳ vọng ngày, số, tiền và số nhiều theo locale. Angular pipe đọc `LOCALE_ID`; một localized build cần có locale data phù hợp với cách cấu hình ứng dụng.
+
+### Ngày, số, tiền tệ và timezone
+
+Dùng `DatePipe`, `DecimalPipe`, `PercentPipe` và `CurrencyPipe` thay vì tự ghép chuỗi. Định dạng hiển thị là presentation; model/API nên giữ giá trị máy đọc được như ISO timestamp, decimal có quy ước rõ, và ISO currency code.
+
+```ts
+import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-order-summary',
+  imports: [DatePipe, DecimalPipe, CurrencyPipe],
+  template: `
+    <p>Giao ngày: {{ deliveryAt | date:'longDate' }}</p>
+    <p>Số lượng: {{ quantity | number:'1.0-2' }}</p>
+    <p>Tổng tiền: {{ total | currency:currencyCode }}</p>
+  `,
+})
+export class OrderSummaryComponent {
+  readonly deliveryAt = '2026-04-12T09:00:00Z';
+  readonly quantity = 1234.5;
+  readonly total = 1250000;
+  readonly currencyCode = 'VND';
+}
+```
+
+`LOCALE_ID` quyết định quy ước hiển thị như dấu phân cách và thứ tự ngày, nhưng không tự giải quyết timezone nghiệp vụ. “Giao ngày 12/04” có thể là date-only tại kho, còn `2026-04-12T09:00:00Z` là instant UTC. Xác định rõ kiểu dữ liệu trước: dùng date-only cho ngày không có giờ; với timestamp, chọn timezone hiển thị hoặc timezone người dùng và kiểm thử quanh nửa đêm/DST.
+
+Khi bootstrap locale ngoài mặc định, Angular có thể cần locale data tương ứng. Ví dụ cấu hình chạy riêng một locale Pháp:
+
+```ts
+import { registerLocaleData } from '@angular/common';
+import localeFr from '@angular/common/locales/fr';
+import { LOCALE_ID } from '@angular/core';
+
+registerLocaleData(localeFr);
+
+export const appConfig = {
+  providers: [{ provide: LOCALE_ID, useValue: 'fr-FR' }],
+};
+```
+
+Trong ứng dụng build localized bằng CLI, việc cung cấp locale có thể đã nằm trong cấu hình build/runtime của ứng dụng. Không đăng ký/ghi đè `LOCALE_ID` ở nhiều nơi; kiểm tra output thực tế của từng locale.
+
+### Số nhiều, giới tính và thứ tự câu
+
+ICU message biểu đạt plural/select để translator kiểm soát toàn bộ câu. Đừng viết điều kiện `count === 1 ? '1 sản phẩm' : count + ' sản phẩm'` rồi cố dịch từng mảnh; rule số nhiều thay đổi theo ngôn ngữ.
+
+```html
+<p i18n>
+  {itemCount, plural,
+    =0 {Chưa có sản phẩm}
+    =1 {Có một sản phẩm}
+    other {Có {{ itemCount }} sản phẩm}
+  }
+</p>
+```
+
+Với nội dung phụ thuộc lựa chọn, dùng `select`:
+
+```html
+<p i18n>
+  {role, select,
+    admin {Quản trị viên đã cập nhật đơn hàng.}
+    manager {Quản lý đã cập nhật đơn hàng.}
+    other {Một thành viên đã cập nhật đơn hàng.}
+  }
+</p>
+```
+
+Các category plural hợp lệ phụ thuộc locale. Translator không nên bị buộc giữ đúng `one`/`other` của source locale nếu ngôn ngữ đích có category khác; catalog và công cụ dịch cần giữ cấu trúc ICU hợp lệ. Luôn test count `0`, `1`, `2` và một số lớn trong từng locale hỗ trợ.
+
+### Nội dung do API trả về
+
+Angular extraction chỉ thấy message trong source. Tên sản phẩm, bài viết CMS, lỗi backend và email template do API trả về không tự đi qua catalog frontend. Chọn ownership rõ ràng:
+
+- **Nội dung sản phẩm/CMS:** backend hoặc CMS lưu bản dịch theo locale; frontend gửi locale được thương lượng và render dữ liệu đã chọn.
+- **Lỗi nghiệp vụ:** API trả error code ổn định như `ORDER_ALREADY_CANCELLED`; frontend map code sang message i18n, hoặc backend trả message đã localized theo contract thống nhất.
+- **Dữ liệu có định dạng:** API trả giá trị thô và metadata (`currency`, timezone), frontend format cho locale hiển thị.
+- **Ngôn ngữ người dùng nhập:** giữ nguyên text gốc và gắn `lang` cho đoạn khác ngôn ngữ document khi cần, không “dịch máy” âm thầm trong view.
+
+Không dùng text tiếng Việt từ backend làm key để switch trong frontend. Text thay đổi là code break. Error code/versioned contract tách nội dung trình bày khỏi nghiệp vụ và giúp accessibility announcement cũng dùng được bản dịch đúng.
+
+## RTL và thiết kế không phụ thuộc hướng viết
+
+Arabic, Hebrew và một số ngôn ngữ dùng hướng viết từ phải sang trái (RTL). Chỉ đặt `direction: rtl` lên một panel không đủ: icon điều hướng, vị trí badge, animation, thứ tự focus và CSS trái/phải đều cần được xem lại.
+
+### Khai báo ngôn ngữ và hướng
+
+Đặt `lang` đúng trên phần tử document để browser, screen reader, spell checker và máy tìm kiếm chọn ngôn ngữ phù hợp. Đặt `dir="rtl"` cho document hoặc vùng chứa nội dung RTL. Quyết định này nên nằm ở shell/SSR của locale, trước lúc nội dung render để tránh layout nhảy.
+
+```html
+<html lang="ar" dir="rtl">
+  <body>
+    <app-root></app-root>
+  </body>
+</html>
+```
+
+Nếu một đoạn trích có ngôn ngữ/hướng khác document, gắn ở phạm vi nhỏ nhất:
+
+```html
+<p>Trạng thái: <span lang="en" dir="ltr">Pending review</span></p>
+```
+
+Không suy ra `dir` chỉ từ ngôn ngữ trong dropdown: `en` là LTR, `ar` là RTL, nhưng locale policy cần là một map tường minh do sản phẩm sở hữu.
+
+### CSS logical properties và icon
+
+CSS logical properties mô tả theo `inline`/`block`, nên tự thích nghi với LTR/RTL. Dùng chúng trong component mới và thay dần `left`/`right`, `margin-left`/`margin-right`, `padding-left`/`padding-right` ở các layout cần locale support.
+
+```css
+.order-card {
+  border-inline-start: 4px solid var(--status-color);
+  margin-inline: auto;
+  padding-inline: 1rem;
+  padding-block: 0.75rem;
+  text-align: start;
+}
+
+.order-card__badge {
+  inset-inline-end: 1rem;
+  position: absolute;
+}
+```
+
+Không phải icon nào cũng cần lật. Icon mũi tên “tiếp tục/quay lại”, chevron điều hướng, timeline và progress direction thường phụ thuộc reading direction. Logo, biểu tượng cảnh báo, play hoặc hình minh họa vật lý thường không. Đánh dấu từng icon theo ý nghĩa; dùng CSS `:dir(rtl)` hoặc biến thể SVG có chủ đích thay vì `transform: scaleX(-1)` cho cả thư mục icon.
+
+### Kiểm thử locale RTL
+
+Mở bản build/route RTL thật và kiểm tra ít nhất: sidebar, breadcrumb, icon back/next, menu, dialog, form prefix/suffix, bảng số liệu, toast, animation vào/ra và thứ tự Tab. Thứ tự DOM thường nên giữ theo thứ tự đọc/logic; đừng chỉ đảo bằng CSS `order` nếu nó làm keyboard focus đi trái ngược trình bày.
+
+Dữ liệu hai chiều như số điện thoại, mã đơn và URL có thể trông lẫn lộn trong câu RTL. Kiểm thử bằng dữ liệu thật, không chỉ lorem ipsum. Khi cần, cô lập token LTR bằng `dir="ltr"` ở phần tử nhỏ; không ép toàn bộ form RTL thành LTR chỉ để một mã trông dễ hơn.
+
+## Lỗi thường gặp và trade-off
+
+| Cách làm | Vấn đề | Hướng thay thế | Trade-off |
+| --- | --- | --- | --- |
+| Dùng `<div (click)>` làm button | Thiếu keyboard/semantics mặc định. | Dùng `<button>` rồi style theo thiết kế. | Có thể cần điều chỉnh CSS cũ. |
+| Rải `aria-*` để dập warning | ARIA sai làm accessibility tree mâu thuẫn. | Sửa HTML native trước, thêm ARIA cho state/quan hệ thật. | Cần hiểu widget và test bằng screen reader. |
+| Xóa focus outline | Người dùng keyboard mất vị trí. | `:focus-visible` có tương phản rõ. | Cần thống nhất token thiết kế focus. |
+| Quét axe rồi coi là hoàn tất | Không kiểm được ngữ nghĩa, luồng, announcement. | Giữ E2E tự động và kịch bản thủ công. | Tốn thời gian/thiết bị test. |
+| Dùng placeholder làm label | Nhãn biến mất và có thể không được đọc đủ. | Label nhìn thấy + hint khi cần. | Layout cần dành chỗ cho label. |
+| Nối chuỗi để dịch | Grammar và thứ tự placeholder bị khóa theo source. | Một i18n/ICU message có placeholder được đặt tên. | Catalog dài hơn, cần translator có ngữ cảnh. |
+| Tự format date/price bằng string | Sai dấu, currency hoặc timezone theo locale. | Pipe/`Intl` và policy dữ liệu-thời gian rõ ràng. | Cần test nhiều locale và boundary thời gian. |
+| Mong built-in i18n đổi ngôn ngữ tức thì | Angular built-in chủ yếu thay message lúc build. | Điều hướng/reload localized build hoặc chọn runtime library có chủ đích. | Nhiều bundle hoặc thêm runtime complexity. |
+| Dùng `left`/`right` khắp CSS | Layout RTL bị đảo lệch. | Logical properties và review icon direction. | Cần refactor CSS và visual regression test. |
+
+## Checklist phát hành
+
+### Accessibility
+
+- [ ] Mỗi route có một `h1`, landmark hợp lý và skip link hoạt động khi cần.
+- [ ] Mọi thao tác chuột có đường keyboard; thứ tự Tab và focus indicator đã được kiểm tra.
+- [ ] Button, link, input và form dùng phần tử native khi có thể; không có phần tử focusable bị `aria-hidden`.
+- [ ] Dialog/menu/widget động có tên, state ARIA đúng, keyboard contract, focus trap/khôi phục focus phù hợp.
+- [ ] Form có label, hint/lỗi liên kết bằng ID; lỗi không chỉ biểu đạt bằng màu.
+- [ ] Thông báo động được announce đúng lúc, không spam screen reader.
+- [ ] Đã chạy rule tự động phù hợp và kiểm thử thủ công keyboard, zoom, screen reader cho flow quan trọng.
+
+### i18n và RTL
+
+- [ ] Source locale, locale hỗ trợ, URL/fallback và owner translation đã được xác định.
+- [ ] Text nhìn thấy, `title`, `alt`, aria text và live announcement đều được đánh dấu/đi qua cùng quy trình dịch.
+- [ ] Extraction, translation validation và build từng locale chạy trong CI hoặc có quy trình rõ ràng.
+- [ ] Date, number, currency, plural/select và timezone được kiểm thử bằng dữ liệu biên.
+- [ ] Nội dung API/error code có contract locale rõ, không switch theo text đã dịch.
+- [ ] Document có `lang` và locale RTL có `dir` đúng trước khi render.
+- [ ] Layout, icon, animation và Tab order đã smoke test với locale RTL thực.
+
+## Tóm tắt
+
+Ứng dụng Angular truy cập được bắt đầu bằng semantic HTML: native button, link, label, heading và landmark đã giải quyết phần lớn semantics lẫn keyboard. ARIA, focus trap và live announcement bổ sung cho những trạng thái động mà HTML không tự diễn đạt. Kiểm thử tự động làm regression rẻ hơn, nhưng keyboard, screen reader và zoom vẫn cần kiểm chứng thủ công.
+
+i18n bền vững bắt đầu từ message có ngữ cảnh, không phải chuỗi được nối. Angular built-in i18n hỗ trợ extraction và localized build; pipe/ICU xử lý định dạng và ngữ pháp theo locale. Cuối cùng, `lang`, `dir`, CSS logical properties và test RTL biến “có bản dịch tiếng Ả Rập” thành trải nghiệm thực sự dùng được.
+
+<Cards>
+  <Card title="Validation Reactive Forms" href="/docs/routing-forms/validation" description="Thiết kế rule, thông báo lỗi và kiểm thử form Angular." />
+  <Card title="Kiểm thử component" href="/docs/testing-performance-deploy/component-testing" description="Kiểm thử hành vi UI và regression gần component." />
+  <Card title="SSR và hydration" href="/docs/testing-performance-deploy/ssr-hydration" description="Xem xét render server và trải nghiệm route production." />
+  <Card title="Bảo mật frontend" href="/docs/production-troubleshooting/security" description="Bảo vệ dữ liệu động, CSP và ranh giới frontend/API." />
+</Cards>

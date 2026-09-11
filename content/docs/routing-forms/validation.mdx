@@ -1,10 +1,612 @@
 ---
 title: Validation
-description: Validator đồng bộ, bất đồng bộ và hiển thị lỗi thân thiện.
+description: Thiết kế validator đồng bộ, bất đồng bộ và cross-field cho Angular Reactive Forms; hiển thị lỗi dễ hiểu, dễ truy cập và dễ kiểm thử.
 ---
 
-Trang này sẽ trình bày **Validation** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi">
+  Trang này dùng **Reactive Forms**. Validation phía client giúp phản hồi sớm, nhưng API vẫn phải kiểm tra kiểu dữ liệu, quyền và quy tắc nghiệp vụ một cách độc lập.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Validation trả lời điều gì](#validation-trả-lời-điều-gì)
+  - [Mô hình luồng và trạng thái](#mô-hình-luồng-và-trạng-thái)
+- [Đặt validator vào đúng cấp](#đặt-validator-vào-đúng-cấp)
+  - [Validator có sẵn](#validator-có-sẵn)
+  - [Validator đồng bộ tùy chỉnh](#validator-đồng-bộ-tùy-chỉnh)
+  - [Lỗi, status và thứ tự chạy](#lỗi-status-và-thứ-tự-chạy)
+- [Validator bất đồng bộ](#validator-bất-đồng-bộ)
+  - [Kiểm tra tên đã tồn tại](#kiểm-tra-tên-đã-tồn-tại)
+  - [Tránh request thừa và kết quả cũ](#tránh-request-thừa-và-kết-quả-cũ)
+- [Cross-field validation](#cross-field-validation)
+  - [So sánh ngày bắt đầu và kết thúc](#so-sánh-ngày-bắt-đầu-và-kết-thúc)
+  - [Đặt lỗi ở group hay control](#đặt-lỗi-ở-group-hay-control)
+- [Hiển thị lỗi như một phần của UX](#hiển-thị-lỗi-như-một-phần-của-ux)
+  - [Chọn thời điểm phản hồi](#chọn-thời-điểm-phản-hồi)
+  - [Thông điệp có thể hành động](#thông-điệp-có-thể-hành-động)
+  - [Khả năng tiếp cận](#khả-năng-tiếp-cận)
+  - [Submit, pending và lỗi từ server](#submit-pending-và-lỗi-từ-server)
+- [Kiểm thử validation](#kiểm-thử-validation)
+  - [Test validator thuần và FormControl](#test-validator-thuần-và-formcontrol)
+  - [Test validator async](#test-validator-async)
+  - [Test template ở điểm nối quan trọng](#test-template-ở-điểm-nối-quan-trọng)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Tổng quan
+
+Validation là quá trình biến một quy tắc dữ liệu thành kết quả mà form có thể sử dụng. Trong Angular, một validator nhận một `AbstractControl` và trả về `null` khi dữ liệu đạt yêu cầu, hoặc một object lỗi khi dữ liệu không đạt. Ví dụ, `Validators.required` trả lỗi `{ required: true }` cho chuỗi rỗng.
+
+Reactive Forms giữ kết quả đó trên chính control. Vì vậy component không cần tự duy trì thêm các biến như `isNameValid` hoặc tự phân tích DOM. Template chỉ đọc `control.errors`, `control.valid`, `control.pending` và các cờ tương tác để quyết định thông báo nào nên xuất hiện.
+
+### Validation trả lời điều gì
+
+Validation phía client nên trả lời các câu hỏi mà người dùng có thể sửa ngay trên màn hình:
+
+- Tên sản phẩm có để trống không?
+- Giá có lớn hơn `0` không?
+- Tên đăng nhập có đang được người khác dùng không?
+- Ngày kết thúc có sau ngày bắt đầu không?
+
+Nó **không** là hàng rào bảo mật và không thay thế server. Người dùng có thể thay request hoặc gọi API không qua giao diện. Server phải kiểm tra lại mọi quy tắc quan trọng, đặc biệt là quyền sở hữu dữ liệu, tính duy nhất và trạng thái nghiệp vụ có thể thay đổi đồng thời.
+
+<Callout type="idea" title="Chọn vị trí theo dữ liệu cần đọc">
+  Rule chỉ cần một giá trị thuộc `FormControl`. Rule cần so sánh các field thuộc `FormGroup` nhỏ nhất chứa đủ field. Rule cần dữ liệu bên ngoài, như tên đã tồn tại, thường là async validator hoặc kiểm tra rõ ràng lúc submit.
+</Callout>
+
+### Mô hình luồng và trạng thái
+
+Khi giá trị đổi, Angular cập nhật control, chạy validator đồng bộ, rồi chỉ chạy validator bất đồng bộ nếu phần đồng bộ không có lỗi. Trong lúc chờ kết quả async, control có trạng thái `PENDING`. Kết quả của control con lại được tổng hợp lên group cha.
+
+```text
+Người dùng nhập giá trị
+         │
+         ▼
+┌────────────────────────────────────────┐
+│ FormControl: cập nhật value            │
+└───────────────────┬────────────────────┘
+                    │
+                    ▼
+┌────────────────────────────────────────┐
+│ Sync validators                        │
+│ null → có thể chạy async               │
+│ error map → INVALID ngay               │
+└───────────────────┬────────────────────┘
+                    │ hợp lệ ở bước sync
+                    ▼
+┌────────────────────────────────────────┐
+│ Async validator → PENDING              │
+│ kết quả cuối: VALID hoặc INVALID       │
+└───────────────────┬────────────────────┘
+                    │ tổng hợp trạng thái
+                    ▼
+       FormGroup, thông báo lỗi, submit
+```
+
+Bốn `status` thường gặp là `VALID`, `INVALID`, `PENDING` và `DISABLED`. `disabled` nghĩa là control không tham gia validation và cũng bị bỏ khỏi `form.value` của parent. `errors` là `null` khi không có lỗi; nếu không, nó là map với key do validator tạo ra. Dùng `hasError('required')` hoặc `getError('minlength')` thay vì so sánh cả object lỗi.
+
+## Đặt validator vào đúng cấp
+
+Hãy khai báo rule bên cạnh form model. Điều này tạo một nguồn sự thật: TypeScript cho biết field nào có rule, còn template chỉ hiển thị kết quả. Không viết lại điều kiện `value.length < 3` ở nhiều nơi trong HTML vì rule hiển thị và rule submit sẽ dễ lệch nhau.
+
+### Validator có sẵn
+
+Angular có các validator phổ biến trong `Validators`: `required`, `requiredTrue`, `min`, `max`, `minLength`, `maxLength`, `pattern`, `email` và `nullValidator`. Chúng phù hợp cho những rule đơn giản, ổn định và không cần service.
+
+Ví dụ form sản phẩm sau dùng `FormBuilder.nonNullable` để những field này không nhận `null`. `required` vẫn cần thiết: kiểu `string` không ngăn người dùng nhập chuỗi rỗng.
+
+```ts
+import { Component, inject } from '@angular/core';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+
+@Component({
+  selector: 'app-product-editor',
+  imports: [ReactiveFormsModule],
+  templateUrl: './product-editor.component.html',
+})
+export class ProductEditorComponent {
+  private readonly fb = inject(FormBuilder);
+
+  readonly form = this.fb.nonNullable.group({
+    name: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(80)]],
+    price: [0, [Validators.required, Validators.min(0.01)]],
+    sku: ['', [Validators.required, Validators.pattern(/^[A-Z0-9-]+$/)]],
+    published: [false, Validators.requiredTrue],
+  });
+}
+```
+
+Các validator trong array đều chạy và các lỗi được gộp vào map. Một field rỗng có thể đồng thời có `required` và `minlength`; UI thường nên ưu tiên một thông điệp hữu ích thay vì đọc tất cả lỗi cùng lúc. Phần [Thông điệp có thể hành động](#thông-điệp-có-thể-hành-động) minh họa thứ tự đó.
+
+<Callout type="warn" title="Attribute HTML không thay thế form model">
+  Thuộc tính như `minlength`, `required` và `min` hữu ích cho semantics và một số hành vi browser. Tuy nhiên, hãy khai báo validator trong Reactive Form để model, `errors`, submit và unit test cùng dựa vào một rule rõ ràng. Dùng `novalidate` trên thẻ `<form>` nếu bạn muốn Angular thay popup native bằng trải nghiệm lỗi của ứng dụng.
+</Callout>
+
+### Validator đồng bộ tùy chỉnh
+
+Một sync validator phải là hàm thuần: chỉ đọc control và trả về `ValidationErrors | null`. Nó không được đổi giá trị control khác, gọi HTTP, điều hướng, hiển thị toast hoặc subscribe. Angular có thể gọi validator nhiều lần; side effect trong đó tạo request trùng, vòng lặp hoặc state khó dự đoán.
+
+Ví dụ dưới đây cấm chuỗi chỉ gồm khoảng trắng. Key `whitespaceOnly` là contract giữa validator và template, vì vậy hãy đặt tên theo ý nghĩa nghiệp vụ thay vì một tên chung chung như `invalid`.
+
+```ts
+import { AbstractControl, ValidationErrors, ValidatorFn } from '@angular/forms';
+
+export function noWhitespaceOnly(): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    const value = control.value;
+
+    if (typeof value !== 'string' || value.trim().length > 0) {
+      return null;
+    }
+
+    return { whitespaceOnly: true };
+  };
+}
+```
+
+Gắn custom validator như validator có sẵn:
+
+```ts
+readonly form = this.fb.nonNullable.group({
+  name: ['', [Validators.required, noWhitespaceOnly(), Validators.minLength(3)]],
+  price: [0, [Validators.min(0.01)]],
+});
+```
+
+Validator nên trả metadata khi template thật sự cần nó. Chẳng hạn, validator kiểm tra range có thể trả `{ outOfRange: { min: 1, max: 12 } }`; template có thể dùng dữ liệu này để tạo câu thông báo chính xác. Không đưa câu tiếng Việt vào validator nếu ứng dụng cần i18n hoặc nếu rule sẽ được tái sử dụng ở nơi khác.
+
+### Lỗi, status và thứ tự chạy
+
+Có ba API nên đọc thường xuyên:
+
+| API | Ví dụ | Khi dùng |
+| --- | --- | --- |
+| `errors` | `name.errors` | Debug hoặc cần đọc metadata lỗi. |
+| `hasError()` | `name.hasError('minlength')` | Template chỉ cần biết một lỗi cụ thể có tồn tại không. |
+| `getError()` | `name.getError('minlength').requiredLength` | Template cần dữ liệu mà validator trả về. |
+
+`valid` và `invalid` phản ánh toàn bộ validator của control. Ở group, chúng phản ánh cả validator của group lẫn trạng thái của descendants đang enabled. Một group có control async đang chờ sẽ là `pending`; vì vậy `form.valid` không phải cách diễn đạt tốt cho trạng thái “đã sẵn sàng gửi”. Hãy kiểm tra cả `form.invalid || form.pending` trong luồng submit.
+
+Các method như `setValidators()`, `addValidators()` và `removeValidators()` thay đổi cấu hình validator nhưng không tự chạy tính lại ngay trong mọi tình huống. Sau khi thay đổi rule động, gọi `updateValueAndValidity()` trên control phù hợp. Dùng API này khi rule thực sự phụ thuộc chế độ form; không gọi nó trong template hoặc trong một `valueChanges` không có điều kiện vì sẽ làm validation chạy quá nhiều.
+
+```ts
+const description = this.form.controls.description;
+
+description.addValidators(Validators.maxLength(500));
+description.updateValueAndValidity();
+```
+
+## Validator bất đồng bộ
+
+Async validator trả `Promise<ValidationErrors | null>` hoặc `Observable<ValidationErrors | null>`. Nó phù hợp khi kết quả cần một nguồn ngoài form, ví dụ kiểm tra username còn trống, mã khuyến mại hợp lệ hoặc mã SKU đã tồn tại.
+
+Angular chỉ chạy async validator sau khi sync validator đạt. Đây là lý do `Validators.required` và `Validators.minLength(3)` nên nằm trên username trước: không gửi request kiểm tra tên rỗng hoặc mới gõ một ký tự.
+
+### Kiểm tra tên đã tồn tại
+
+Service dưới đây chỉ là interface minh họa. API thật nên trả về dữ liệu tối thiểu, ví dụ `true` nếu username đã có. Nếu endpoint cần biết bản ghi đang sửa, truyền `currentUserId` để server không coi chính username hiện tại là trùng.
+
+```ts
+import { AbstractControl, AsyncValidatorFn, ValidationErrors } from '@angular/forms';
+import { Observable, of, timer } from 'rxjs';
+import { catchError, first, map, switchMap } from 'rxjs/operators';
+
+export interface AccountsApi {
+  isUsernameTaken(username: string): Observable<boolean>;
+}
+
+export function usernameAvailable(api: AccountsApi): AsyncValidatorFn {
+  return (control: AbstractControl): Observable<ValidationErrors | null> => {
+    const username = typeof control.value === 'string' ? control.value.trim() : '';
+
+    if (!username) {
+      return of(null);
+    }
+
+    return timer(300).pipe(
+      switchMap(() => api.isUsernameTaken(username)),
+      map((taken) => (taken ? { usernameTaken: true } : null)),
+      // Không biến lỗi mạng thành “tên hợp lệ”; hiển thị trạng thái kiểm tra riêng.
+      catchError(() => of({ usernameCheckFailed: true })),
+      first(),
+    );
+  };
+}
+```
+
+Khai báo async validator qua object options. `updateOn: 'blur'` là lựa chọn tốt cho kiểm tra từ server: người dùng hoàn thành một lần nhập trước rồi mới chờ request. Với field cần phản hồi tức thì, giữ `change` và debounce trong validator như ví dụ trên.
+
+```ts
+readonly form = this.fb.nonNullable.group({
+  username: this.fb.nonNullable.control('', {
+    validators: [Validators.required, Validators.minLength(3)],
+    asyncValidators: [usernameAvailable(this.accountsApi)],
+    updateOn: 'blur',
+  }),
+});
+```
+
+Trong khi Observable chưa hoàn thành, `username.pending` là `true` và `username.status` là `PENDING`. Đây là trạng thái có ý nghĩa cho người dùng, không phải lỗi. UI nên nói “Đang kiểm tra tên…” thay vì báo username invalid.
+
+### Tránh request thừa và kết quả cũ
+
+Async validation có hai chi phí: độ trễ phản hồi và request mạng. Chọn chiến lược dựa trên ý nghĩa của field:
+
+| Chiến lược | Phù hợp khi | Đánh đổi |
+| --- | --- | --- |
+| `updateOn: 'blur'` | Người dùng cần nhập xong rồi mới kiểm tra, như username hoặc mã mời. | Không có phản hồi cho đến khi ô mất focus. |
+| `timer()` / debounce | Cần kiểm tra khi đang gõ nhưng muốn gom các lần gõ gần nhau. | UI cần xử lý `PENDING` rõ ràng. |
+| Kiểm tra khi submit | Check tốn kém hoặc chỉ có giá trị trong toàn bộ payload. | Phản hồi muộn hơn; cần map lỗi server tốt. |
+
+Angular quản lý subscription do async validator trả về và sẽ hủy lần kiểm tra cũ khi giá trị mới kích hoạt validation. Điều này giúp kết quả cũ không ghi đè kết quả mới, miễn là validator trả về Observable/Promise đúng cách. Đừng tự `subscribe()` bên trong validator rồi gọi `control.setErrors()` sau đó: Angular không biết lifecycle của subscription ấy và race condition sẽ quay lại.
+
+`catchError(() => of({ usernameCheckFailed: true }))` trong ví dụ chọn **fail closed cho UX**: form không thể gửi khi không kiểm tra được tên. Đây không phải lựa chọn duy nhất. Nếu có kiểm tra cuối cùng ở API submit và muốn người dùng vẫn tiếp tục khi mạng chập chờn, bạn có thể trả `null` rồi hiển thị cảnh báo không chặn. Hãy chọn một chính sách rõ ràng theo rủi ro nghiệp vụ, không coi lỗi mạng là “tên còn trống” một cách im lặng.
+
+## Cross-field validation
+
+Một `FormControl` không nên đi tìm sibling để áp đặt một quy tắc nhiều field. Quy tắc “mật khẩu xác nhận phải bằng mật khẩu” hoặc “ngày kết thúc phải sau ngày bắt đầu” thuộc về group chứa hai field đó. Cách đặt này mô tả đúng dữ liệu validator cần và giúp group cha trở thành invalid khi quan hệ sai.
+
+### So sánh ngày bắt đầu và kết thúc
+
+Ví dụ form đặt chỗ dùng chuỗi định dạng `YYYY-MM-DD`, là định dạng mà `<input type="date">` phát ra. Vì định dạng này sắp xếp từ điển cùng thứ tự thời gian, phép so sánh chuỗi là đủ cho rule ngày thuần; nếu có giờ, timezone hoặc timezone của nghiệp vụ, hãy parse và so sánh một kiểu thời gian rõ ràng thay vì dựa vào chuỗi.
+
+```ts
+import { AbstractControl, ValidationErrors, ValidatorFn } from '@angular/forms';
+
+export function endAfterStart(): ValidatorFn {
+  return (group: AbstractControl): ValidationErrors | null => {
+    const value = group.value as { startDate?: string; endDate?: string };
+    const { startDate, endDate } = value;
+
+    // `required` thuộc từng control; group chỉ kiểm tra quan hệ khi đủ dữ liệu.
+    if (!startDate || !endDate || endDate >= startDate) {
+      return null;
+    }
+
+    return { dateOrder: { startDate, endDate } };
+  };
+}
+```
+
+Gắn validator trong options của `FormGroup`, không gắn vào riêng `endDate`:
+
+```ts
+readonly bookingForm = this.fb.nonNullable.group(
+  {
+    startDate: ['', Validators.required],
+    endDate: ['', Validators.required],
+  },
+  { validators: [endAfterStart()] },
+);
+```
+
+Khi `endDate` trước `startDate`, `bookingForm.hasError('dateOrder')` là `true`, trong khi `bookingForm.controls.endDate.errors` vẫn có thể là `null`. Đây là kết quả đúng: lỗi là quan hệ của cả group chứ không phải đặc tính riêng vốn có của end date.
+
+### Đặt lỗi ở group hay control
+
+Có hai cách trình bày lỗi cross-field:
+
+1. **Giữ lỗi ở group** — cách mặc định và ít bất ngờ nhất. Template đọc `form.hasError('dateOrder')`, sau đó đặt thông báo gần field người dùng cần sửa.
+2. **Gán thêm lỗi lên control** — chỉ làm khi contract UI hoặc component tái sử dụng thực sự cần `endDate.hasError('dateOrder')`. Khi đó phải hợp nhất error map hiện có và dọn lỗi đúng lúc; việc này dễ vô tình xóa `required` hoặc `min`.
+
+Thông thường hãy chọn cách thứ nhất. Đừng gọi `endDate.setErrors(...)` bên trong group validator. Mỗi lần validator chạy, nó lại đổi child, có thể kích hoạt validation ngược và làm state trở nên khó hiểu. Validator chỉ nên trả lỗi cho control mà Angular đưa vào.
+
+```html
+<fieldset [formGroup]="bookingForm" aria-describedby="date-order-error">
+  <legend>Thời gian lưu trú</legend>
+
+  <label for="start-date">Ngày bắt đầu</label>
+  <input id="start-date" type="date" formControlName="startDate" />
+
+  <label for="end-date">Ngày kết thúc</label>
+  <input id="end-date" type="date" formControlName="endDate" />
+
+  @if (bookingForm.hasError('dateOrder') && (bookingForm.touched || hasSubmitted)) {
+    <p id="date-order-error" role="alert">
+      Ngày kết thúc phải cùng hoặc sau ngày bắt đầu.
+    </p>
+  }
+</fieldset>
+```
+
+## Hiển thị lỗi như một phần của UX
+
+Một rule đúng vẫn có thể tạo trải nghiệm kém nếu thông báo xuất hiện sai thời điểm hoặc không cho biết cách sửa. Tách **trạng thái hợp lệ** khỏi **quyết định hiển thị**: `invalid` nói dữ liệu có vấn đề, còn `touched`, `dirty` và `hasSubmitted` nói người dùng đã có cơ hội nhận phản hồi hay chưa.
+
+### Chọn thời điểm phản hồi
+
+Mặc định thực tế cho form tạo/chỉnh sửa là chỉ hiển thị lỗi field khi field `touched`, hoặc sau lần submit đầu tiên. Đừng hiện hàng loạt lỗi khi form vừa mở. Với kiểm tra tốn kém, dùng `updateOn: 'blur'`; với feedback rất ngắn như bộ đếm ký tự, có thể phản hồi khi `dirty`.
+
+```ts
+hasSubmitted = false;
+
+shouldShowError(control: AbstractControl): boolean {
+  return control.invalid && (control.touched || this.hasSubmitted);
+}
+
+submit(): void {
+  this.hasSubmitted = true;
+
+  if (this.form.invalid || this.form.pending) {
+    this.form.markAllAsTouched();
+    return;
+  }
+
+  // Gửi payload ở đây.
+}
+```
+
+`markAllAsTouched()` không biến dữ liệu thành invalid; nó chỉ đưa các thông báo lỗi hiện có ra sau một hành động gửi rõ ràng. Khi form được reset thành bản ghi mới hoặc lưu thành công, đặt lại `hasSubmitted = false` cùng lúc với `form.reset()` để trạng thái UI nhất quán.
+
+### Thông điệp có thể hành động
+
+Lỗi nên nói *cần sửa gì*, không chỉ nói “dữ liệu không hợp lệ”. Một hàm chọn thông điệp giữ template ngắn và cho phép ưu tiên lỗi. `required` đứng trước `minlength` vì người dùng nên biết phải nhập gì trước khi biết cần bao nhiêu ký tự.
+
+```ts
+import { AbstractControl } from '@angular/forms';
+
+export function nameErrorMessage(control: AbstractControl): string | null {
+  if (control.hasError('required')) {
+    return 'Nhập tên sản phẩm.';
+  }
+
+  if (control.hasError('whitespaceOnly')) {
+    return 'Tên sản phẩm không được chỉ gồm khoảng trắng.';
+  }
+
+  const minLengthError = control.getError('minlength') as { requiredLength: number } | null;
+  if (minLengthError) {
+    return `Tên sản phẩm cần ít nhất ${minLengthError.requiredLength} ký tự.`;
+  }
+
+  return null;
+}
+```
+
+Không dùng `control.errors?.['minlength']` như một message trực tiếp cho người dùng. Error map là dữ liệu kỹ thuật. Hãy chuyển nó thành câu theo ngôn ngữ sản phẩm; nếu ứng dụng đa ngôn ngữ, map key lỗi sang translation key thay vì trả chuỗi từ validator.
+
+### Khả năng tiếp cận
+
+Validation có ích cho cả người dùng bàn phím và screen reader khi input, nhãn và thông báo được liên kết có chủ đích:
+
+- Mỗi input có một `<label for="...">` hiển thị được. Placeholder không thay label.
+- Khi lỗi đang hiển thị, đặt `[attr.aria-invalid]="shouldShowError(control) ? 'true' : null"`.
+- Dùng `aria-describedby` trỏ đến phần mô tả và/hoặc thông báo lỗi đang thấy.
+- Dùng `role="alert"` cho một lỗi mới cần được đọc ngay sau thao tác. Nếu màn hình có nhiều thay đổi cùng lúc, một vùng `aria-live="polite"` tóm tắt lỗi thường ít gây ngắt lời hơn.
+- Không chỉ dùng màu đỏ hay biểu tượng để truyền đạt lỗi; text phải tự đủ nghĩa.
+
+Ví dụ template kết nối đủ label, lỗi và trạng thái. `novalidate` tắt popup native để không có hai hệ thông báo cạnh tranh nhau.
+
+```html
+<form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+  <label for="product-name">Tên sản phẩm</label>
+  <input
+    id="product-name"
+    type="text"
+    formControlName="name"
+    [attr.aria-invalid]="shouldShowError(form.controls.name) ? 'true' : null"
+    [attr.aria-describedby]="shouldShowError(form.controls.name) ? 'product-name-error' : null"
+  />
+
+  @if (shouldShowError(form.controls.name); as showError) {
+    <p id="product-name-error" role="alert">
+      {{ nameErrorMessage(form.controls.name) }}
+    </p>
+  }
+
+  @if (form.controls.username.pending) {
+    <p aria-live="polite">Đang kiểm tra tên đăng nhập…</p>
+  }
+
+  <button type="submit" [disabled]="form.invalid || form.pending">Lưu sản phẩm</button>
+</form>
+```
+
+`[disabled]` là phản hồi trực quan, không phải guard duy nhất. Người dùng có thể gửi form bằng bàn phím hoặc method `submit()` có thể bị gọi từ code. Vì vậy method submit vẫn phải chặn `invalid`, `pending` và trạng thái đang lưu.
+
+### Submit, pending và lỗi từ server
+
+Server có thể trả một lỗi mà client không biết trước: mã SKU vừa bị một người khác lấy, promotion đã hết hạn hoặc phiên bản bản ghi đã cũ. Hãy phân loại lỗi server theo nơi nó có ích nhất:
+
+- Lỗi gắn với một field: hiện gần field đó, ví dụ `sku` đã tồn tại.
+- Lỗi liên quan toàn form: hiện summary ở đầu form, ví dụ dữ liệu đã bị người khác sửa.
+- Lỗi hạ tầng: hiện thông báo thử lại, không gán nhầm thành lỗi validation nghiệp vụ.
+
+`setErrors()` hữu ích để gắn lỗi server tạm thời, nhưng lần chạy validator kế tiếp có thể ghi đè error map đó. Với lỗi cần tồn tại cho đến khi giá trị đổi, giữ state server riêng hoặc viết một validator có nguồn dữ liệu rõ ràng. Nếu chỉ cần phản hồi của lần submit hiện tại, hãy hợp nhất lỗi đang có thay vì xóa mất chúng:
+
+```ts
+showFormError: string | null = null;
+
+applySkuTakenError(): void {
+  const sku = this.form.controls.sku;
+  sku.setErrors({ ...(sku.errors ?? {}), skuTaken: true });
+  sku.markAsTouched();
+}
+
+submit(): void {
+  this.hasSubmitted = true;
+  this.showFormError = null;
+
+  if (this.form.invalid || this.form.pending || this.isSaving) {
+    this.form.markAllAsTouched();
+    return;
+  }
+
+  this.isSaving = true;
+  this.productsApi.create(this.form.getRawValue()).subscribe({
+    next: () => {
+      this.form.reset();
+      this.hasSubmitted = false;
+      this.isSaving = false;
+    },
+    error: (response) => {
+      this.isSaving = false;
+      if (response.status === 409 && response.error?.field === 'sku') {
+        this.applySkuTakenError();
+      } else {
+        this.showFormError = 'Không thể lưu sản phẩm. Hãy thử lại.';
+      }
+    },
+  });
+}
+```
+
+Một summary lỗi ở đầu form có thể dùng `tabindex="-1"` và được focus sau submit thất bại nếu màn hình dài. Chỉ chuyển focus khi nó giúp người dùng biết vì sao thao tác vừa thất bại; không giật focus mỗi lần họ đang gõ trong một field.
+
+## Kiểm thử validation
+
+Ưu tiên test contract quan sát được: giá trị nào invalid, error key nào xuất hiện, submit có bị chặn không và thông báo có liên kết đúng không. Không cần test Angular gọi validator nội bộ bao nhiêu lần. Validator thuần và model form không cần DOM, nên chúng là lớp test nhanh nhất.
+
+### Test validator thuần và FormControl
+
+Ví dụ Jasmine dưới đây test cả custom validator và built-in validator. Test dùng `FormControl` trực tiếp; không cần `TestBed` vì không có template hay dependency injection.
+
+```ts
+import { FormControl, Validators } from '@angular/forms';
+
+import { noWhitespaceOnly } from './no-whitespace-only.validator';
+
+describe('noWhitespaceOnly', () => {
+  it('báo lỗi khi chuỗi chỉ có khoảng trắng', () => {
+    const control = new FormControl('   ', [noWhitespaceOnly()]);
+
+    expect(control.hasError('whitespaceOnly')).toBeTrue();
+  });
+
+  it('chấp nhận tên có nội dung', () => {
+    const control = new FormControl('Bút chì', [noWhitespaceOnly()]);
+
+    expect(control.errors).toBeNull();
+  });
+});
+
+describe('name control', () => {
+  it('giữ metadata minlength để UI tạo thông điệp', () => {
+    const control = new FormControl('', [Validators.minLength(3)]);
+
+    control.setValue('ab');
+
+    expect(control.getError('minlength')).toEqual({
+      requiredLength: 3,
+      actualLength: 2,
+    });
+  });
+});
+```
+
+Với cross-field validator, tạo group có cả hai dates. Assert lỗi nằm ở group để test phản ánh đúng thiết kế, thay vì vô tình khóa implementation vào `endDate.errors`.
+
+```ts
+import { FormControl, FormGroup, Validators } from '@angular/forms';
+
+import { endAfterStart } from './end-after-start.validator';
+
+it('báo dateOrder khi ngày kết thúc trước ngày bắt đầu', () => {
+  const form = new FormGroup(
+    {
+      startDate: new FormControl('2026-06-10', { nonNullable: true, validators: Validators.required }),
+      endDate: new FormControl('2026-06-09', { nonNullable: true, validators: Validators.required }),
+    },
+    { validators: endAfterStart() },
+  );
+
+  expect(form.hasError('dateOrder')).toBeTrue();
+  expect(form.controls.endDate.hasError('dateOrder')).toBeFalse();
+});
+```
+
+### Test validator async
+
+Async test cần chờ Observable hoặc Promise hoàn thành. Với `timer(300)` trong validator, Jasmine `fakeAsync` và `tick()` diễn đạt chính xác thời gian. Fake API giúp test không gọi mạng thật.
+
+```ts
+import { fakeAsync, tick } from '@angular/core/testing';
+import { FormControl } from '@angular/forms';
+import { of } from 'rxjs';
+
+import { AccountsApi, usernameAvailable } from './username-available.validator';
+
+it('báo usernameTaken khi API nói tên đã tồn tại', fakeAsync(() => {
+  const api = jasmine.createSpyObj<AccountsApi>('AccountsApi', ['isUsernameTaken']);
+  api.isUsernameTaken.and.returnValue(of(true));
+
+  const control = new FormControl('', {
+    nonNullable: true,
+    asyncValidators: [usernameAvailable(api)],
+  });
+
+  control.setValue('linh');
+
+  expect(control.pending).toBeTrue();
+  tick(300);
+
+  expect(api.isUsernameTaken).toHaveBeenCalledWith('linh');
+  expect(control.hasError('usernameTaken')).toBeTrue();
+  expect(control.pending).toBeFalse();
+}));
+```
+
+Thêm một test cho `usernameCheckFailed` hoặc chính sách mạng mà feature đã chọn. Nếu kiểm tra thật dùng `HttpClient`, test service bằng `HttpTestingController`; đừng để unit test phụ thuộc backend đang chạy.
+
+### Test template ở điểm nối quan trọng
+
+Một số bug chỉ xuất hiện khi model nối với template: gõ sai `formControlName`, lỗi có id không khớp `aria-describedby`, hoặc submit event không gọi method. Viết ít integration test cho những điểm nối quan trọng này.
+
+Ví dụ, render component, để trống tên, gọi submit và assert cả lỗi lẫn thuộc tính accessibility. Tên component và fixture phụ thuộc feature của bạn, nhưng contract nên giống sau:
+
+```ts
+it('hiển thị lỗi tên và đánh dấu input sau khi submit', () => {
+  const fixture = TestBed.createComponent(ProductEditorComponent);
+  fixture.detectChanges();
+
+  fixture.debugElement.query(By.css('form')).triggerEventHandler('ngSubmit', {});
+  fixture.detectChanges();
+
+  const input = fixture.debugElement.query(By.css('#product-name')).nativeElement as HTMLInputElement;
+  const error = fixture.debugElement.query(By.css('#product-name-error')).nativeElement as HTMLElement;
+
+  expect(input.getAttribute('aria-invalid')).toBe('true');
+  expect(input.getAttribute('aria-describedby')).toBe('product-name-error');
+  expect(error.textContent).toContain('Nhập tên sản phẩm');
+});
+```
+
+Không cần snapshot toàn bộ form để chứng minh một lỗi hoạt động. Assert text, attribute và call service có ý nghĩa bền hơn khi markup được chỉnh sửa.
+
+## Lỗi thường gặp và trade-off
+
+| Vấn đề | Hậu quả | Cách xử lý |
+| --- | --- | --- |
+| Gọi HTTP trong sync validator | Request lặp lại trong mỗi lần Angular tính validation; khó hủy và khó test. | Dùng `AsyncValidatorFn` hoặc kiểm tra có chủ đích lúc submit. |
+| `subscribe()` trong async validator | Kết quả cũ có thể ghi đè giá trị mới; Angular không quản lý vòng đời. | Trả Observable/Promise cho Angular. |
+| Gắn cross-field rule vào một child | Rule phải đọc sibling và lỗi bị đặt sai cấp. | Gắn rule vào `FormGroup` nhỏ nhất chứa các field liên quan. |
+| Gọi `setErrors()` trong validator | Dễ xóa lỗi khác hoặc tạo vòng lặp tính lại. | Validator chỉ trả error map cho control nhận vào. |
+| Hiện mọi lỗi từ lần render đầu | Người dùng bị quá tải trước khi thao tác. | Dùng `touched` hoặc `hasSubmitted`. |
+| Chỉ disable nút Lưu | Method vẫn có thể bị gọi khi form `PENDING` hoặc invalid. | Guard lại trong `submit()`. |
+| Xem client validation là bảo mật | Payload bị sửa vẫn có thể vào API. | Validate và authorize độc lập ở server. |
+| Chuyển mọi lỗi server thành `setErrors()` | Lỗi hạ tầng hoặc lỗi toàn form mất ngữ cảnh; lỗi field bị ghi đè ở lần validate sau. | Phân loại field/form/infrastructure error và giữ state phù hợp. |
+
+Không có một timing phù hợp cho mọi field. `change` cho phản hồi nhanh nhưng có thể gây nhiễu và tốn request. `blur` yên tĩnh hơn nhưng phản hồi muộn. Submit-only đơn giản cho rule đắt tiền nhưng bắt người dùng chờ đến cuối. Nói ngắn gọn: chọn theo chi phí kiểm tra và thời điểm người dùng có thể hành động, sau đó hiển thị rõ `PENDING` nếu có chờ đợi.
+
+## Checklist và tóm tắt
+
+Trước khi hoàn thành một form có validation, kiểm tra:
+
+- [ ] Validator sync đặt trên `FormControl` hoặc `FormGroup` đúng cấp dữ liệu cần đọc.
+- [ ] Custom validator là hàm thuần, trả `null` hoặc error map có key mang ý nghĩa nghiệp vụ.
+- [ ] Async validator chỉ chạy sau rule sync cần thiết, có chiến lược debounce hoặc `updateOn` phù hợp.
+- [ ] UI phân biệt `INVALID` với `PENDING`; `submit()` chặn cả hai trạng thái.
+- [ ] Cross-field error giữ ở group trừ khi có lý do rõ ràng để đặt thêm lên child.
+- [ ] Thông báo chỉ xuất hiện sau `touched` hoặc submit, chỉ rõ cách sửa và không chỉ dựa vào màu sắc.
+- [ ] Input có label; lỗi được nối bằng `aria-describedby` và thông báo động có live region phù hợp.
+- [ ] Lỗi server được phân loại theo field, form hoặc hạ tầng; server vẫn validate độc lập.
+- [ ] Có unit test cho rule quan trọng và integration test cho binding/UX quan trọng.
+
+Tóm lại, validation tốt là sự kết hợp của một model có rule rõ ràng và một trải nghiệm phản hồi đúng lúc. Sync validator xử lý quy tắc cục bộ nhanh; async validator kiểm tra dữ liệu ngoài form; group validator bảo vệ quan hệ giữa các field. `errors` và `status` là dữ liệu kỹ thuật, còn message, timing và accessibility biến chúng thành hướng dẫn hữu ích cho con người.
+
+<Cards>
+  <Card title="Reactive Forms" href="/docs/routing-forms/reactive-forms" description="Ôn lại FormControl, FormGroup, FormArray và luồng submit." />
+  <Card title="Typed và dynamic forms" href="/docs/routing-forms/typed-dynamic-forms" description="Tiếp tục với typed forms, FormRecord và form sinh từ schema." />
+  <Card title="Routing & Forms" href="/docs/routing-forms" description="Quay lại lộ trình Router và Forms." />
+</Cards>

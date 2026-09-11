@@ -1,24 +1,196 @@
 ---
 title: DI & Kiến trúc
-description: Tổ chức dependency, service và cấu trúc ứng dụng có khả năng mở rộng.
+description: Lộ trình tổ chức dependency, service và feature Angular để ứng dụng dễ thay đổi, kiểm thử và mở rộng.
 ---
 
-Đây là trang khung cho nhóm **DI & Kiến trúc**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+<Callout type="info" title="Đích đến của nhóm bài">
+  Bạn sẽ biết một dependency nên được tạo ở đâu, đưa vào đâu và sống trong bao lâu; đồng thời biết cách chia ứng dụng thành các feature có ranh giới rõ ràng. Mục tiêu là tạo mã dễ thay đổi, không phải thêm thật nhiều lớp trừu tượng.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Mục tiêu của nhóm bài](#mục-tiêu-của-nhóm-bài)
+- [Kiến thức đầu vào](#kiến-thức-đầu-vào)
+- [Mô hình DI và kiến trúc](#mô-hình-di-và-kiến-trúc)
+  - [DI giải quyết dependency theo phạm vi](#di-giải-quyết-dependency-theo-phạm-vi)
+  - [Kiến trúc giữ hướng phụ thuộc rõ ràng](#kiến-trúc-giữ-hướng-phụ-thuộc-rõ-ràng)
+- [Thứ tự học các bài con](#thứ-tự-học-các-bài-con)
+  - [Chặng 1: hiểu cách Angular cấp dependency](#chặng-1-hiểu-cách-angular-cấp-dependency)
+  - [Chặng 2: thiết kế ranh giới logic](#chặng-2-thiết-kế-ranh-giới-logic)
+  - [Chặng 3: tổ chức ứng dụng hiện đại](#chặng-3-tổ-chức-ứng-dụng-hiện-đại)
+  - [Chặng 4: mở rộng UI có kiểm soát](#chặng-4-mở-rộng-ui-có-kiểm-soát)
+- [Lộ trình thực hành](#lộ-trình-thực-hành)
+- [Dấu hiệu kiến trúc đang đi sai hướng](#dấu-hiệu-kiến-trúc-đang-đi-sai-hướng)
+- [Bắt đầu học](#bắt-đầu-học)
 
-## Phạm vi dự kiến
+## Mục tiêu của nhóm bài
 
-Tổ chức dependency, service và cấu trúc ứng dụng có khả năng mở rộng. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+**Dependency Injection (DI)** là cơ chế Angular dùng để cung cấp một đối tượng mà mã nguồn cần dùng, thay vì để mã đó tự tạo đối tượng bằng `new`. Đối tượng được cung cấp gọi là **dependency**. Ví dụ, component trang sản phẩm cần một service lấy dữ liệu; component nên yêu cầu service đó, còn Angular quyết định instance phù hợp để đưa vào.
 
-## Các bài trong nhóm
+Sau nhóm bài này, bạn có thể:
 
-- **[Dependency Injection](/docs/di-kien-truc/dependency-injection)** — Cơ chế inject dependency và cây injector của Angular.
-- **[Provider và token](/docs/di-kien-truc/provider-token)** — Cấu hình provider, InjectionToken và phạm vi dependency.
-- **[Thiết kế service](/docs/di-kien-truc/service)** — Phân tách nghiệp vụ, dữ liệu và side effect vào service.
-- **[Kiến trúc standalone](/docs/di-kien-truc/standalone-architecture)** — Tổ chức ứng dụng hiện đại không phụ thuộc NgModule.
-- **[Kiến trúc theo feature](/docs/di-kien-truc/feature-architecture)** — Chia module nghiệp vụ, ranh giới phụ thuộc và quy ước thư mục.
-- **[Dynamic component](/docs/di-kien-truc/dynamic-component)** — Tạo và chèn component động theo ngữ cảnh chạy.
+- Phân biệt dependency, provider, token và injector; giải thích vì sao cùng một token có thể nhận instance khác nhau theo phạm vi.
+- Đặt service ở đúng nơi: dùng chung toàn ứng dụng, chỉ thuộc một route/feature, hoặc chỉ phục vụ một component.
+- Tách logic giao diện, nghiệp vụ, truy cập dữ liệu và side effect để mỗi phần có một trách nhiệm dễ kiểm thử.
+- Tổ chức ứng dụng standalone theo feature thay vì gom mã theo loại tệp trên toàn dự án.
+- Tạo component động khi UI thật sự cần thay đổi theo cấu hình hoặc ngữ cảnh, nhưng không dùng nó thay cho component tĩnh thông thường.
+
+<Callout type="idea" title="Nguyên tắc xuyên suốt">
+  Hãy bắt đầu từ nơi một dependency được tiêu thụ và vòng đời nó cần có. Chỉ sau đó mới chọn `providedIn`, `providers`, token hoặc một lớp trừu tượng. DI tốt làm quan hệ rõ hơn; DI quá mức chỉ che quan hệ đó đi.
+</Callout>
+
+## Kiến thức đầu vào
+
+Bạn nên hoàn thành, hoặc có thể tự tin làm các việc sau trước khi bắt đầu:
+
+- Đọc được component standalone, `imports`, binding và event binding.
+- Hiểu `class`, `interface`, hàm, `import`/`export` trong TypeScript. Interface chỉ tồn tại khi biên dịch, vì vậy không thể dùng trực tiếp làm token ở thời điểm chạy.
+- Biết component, template và service có vai trò khác nhau trong một ứng dụng Angular.
+- Biết state nào thuộc UI cục bộ và state nào cần được chia sẻ. Không cần biết NgRx trước khi học nhóm này.
+
+<Cards>
+  <Card title="Kiến trúc Angular" href="/docs/nen-tang/kien-truc-angular" description="Ôn mô hình các khối chính của một ứng dụng Angular." />
+  <Card title="Standalone component" href="/docs/component-template/component-standalone" description="Nắm component, metadata và imports trước khi tổ chức dependency." />
+  <Card title="Giao tiếp component" href="/docs/component-template/giao-tiep-component" description="Phân biệt dữ liệu đi qua input/output với dependency được inject." />
+  <Card title="Signals" href="/docs/reactivity-state/signals" description="Chuẩn bị kiến thức state cục bộ thường được service hoặc feature điều phối." />
+</Cards>
+
+Nếu chưa vững, hãy đọc các bài trên rồi quay lại. Bạn không cần thuộc API DI ngay từ đầu; điều quan trọng là có thể nhìn một component và chỉ ra dữ liệu, hành vi, dependency của nó đến từ đâu.
+
+## Mô hình DI và kiến trúc
+
+Một feature dễ bảo trì có hai câu hỏi tách biệt: **Angular cấp dependency nào, ở phạm vi nào?** và **các phần mã được phép phụ thuộc vào nhau theo hướng nào?** DI trả lời câu hỏi đầu. Kiến trúc trả lời câu hỏi sau.
+
+### DI giải quyết dependency theo phạm vi
+
+Provider là cấu hình nói với Angular cách tạo hoặc trả về một giá trị cho một token. Token là khóa mà mã yêu cầu; nó có thể là một class injectable hoặc một `InjectionToken`. Injector là nơi giữ các provider và thực hiện việc tìm dependency.
+
+Trong ứng dụng standalone, provider cấp ở cấu hình khởi tạo thường thuộc phạm vi ứng dụng. Provider cấp ở route/feature có thể tạo phạm vi hẹp hơn. Provider khai báo trên component chỉ dành cho component đó và cây con của nó. Khi mã yêu cầu một token, Angular bắt đầu tìm từ injector gần nơi dùng, rồi đi lên các injector cha cho đến khi tìm thấy provider phù hợp.
+
+```text
+bootstrapApplication / app.config
+        │
+        ▼
+┌─────────────────────────────────┐
+│ Injector phạm vi ứng dụng       │
+│ HttpClient, cấu hình dùng chung │
+└────────────────┬────────────────┘
+                 │ kế thừa
+                 ▼
+┌─────────────────────────────────┐
+│ Injector route hoặc feature     │
+│ CatalogFacade, quyền feature    │
+└────────────────┬────────────────┘
+                 │ kế thừa
+                 ▼
+┌─────────────────────────────────┐
+│ Injector component (nếu có)     │
+│ bộ lọc hoặc state riêng         │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+      Component yêu cầu token
+```
+
+Ví dụ, `HttpClient` thường phù hợp với phạm vi ứng dụng vì nhiều feature dùng cùng cấu hình HTTP. Ngược lại, state bộ lọc của một màn hình danh mục có thể phù hợp với provider ở feature hoặc component, vì rời màn hình thì state đó không cần tồn tại nữa.
+
+<Callout type="warn" title="Phạm vi quyết định vòng đời">
+  Đừng đưa mọi service vào root chỉ để tránh viết `providers`. Một service root thường sống cùng ứng dụng và có thể vô tình giữ state khi người dùng đã rời feature. Hãy chọn phạm vi theo người sở hữu state và thời điểm state cần được hủy.
+</Callout>
+
+### Kiến trúc giữ hướng phụ thuộc rõ ràng
+
+DI không tự tạo ra kiến trúc tốt. Một component vẫn có thể inject quá nhiều service hoặc gọi HTTP trực tiếp. Kiến trúc tốt đặt ranh giới để phần giao diện chỉ phối hợp hiển thị và tương tác, còn quy tắc nghiệp vụ và hạ tầng nằm ở nơi phù hợp.
+
+Một cách nhìn thực dụng cho một feature như `catalog` là:
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│ UI: page, component, template                           │
+│ đọc state; phát thao tác của người dùng                 │
+└───────────────────────────┬─────────────────────────────┘
+                            │ gọi use case / facade
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│ Logic feature: service, quy tắc, state điều phối        │
+│ quyết định tải, lọc, chọn hoặc cập nhật dữ liệu         │
+└───────────────────────────┬─────────────────────────────┘
+                            │ dùng contract hoặc token
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│ Hạ tầng: repository, HttpClient, storage, analytics     │
+│ nói chuyện với API hoặc trình duyệt                     │
+└─────────────────────────────────────────────────────────┘
+```
+
+Không phải feature nhỏ nào cũng cần đủ ba lớp. Một trang chỉ hiển thị dữ liệu tĩnh có thể chỉ cần component. Khi feature có nhiều màn hình, luồng bất đồng bộ hoặc quy tắc dùng lại, tách logic feature khỏi UI sẽ giảm việc lặp lại và giúp kiểm thử không cần render template.
+
+Nói ngắn gọn: component nên phụ thuộc vào API mà nó cần, không cần biết dependency được tạo ra bằng class cụ thể, HTTP hay dữ liệu giả. `InjectionToken` và provider cho phép thay thế cách cung cấp đó khi cần; chúng không phải lý do để tạo một abstraction cho mọi class.
+
+## Thứ tự học các bài con
+
+Học theo thứ tự này để biết cơ chế trước khi thiết kế cấu trúc. Mỗi bài thêm một quyết định cụ thể vào cùng một ứng dụng, thay vì đổi kiến trúc trên giấy mà không có ngữ cảnh chạy.
+
+### Chặng 1: hiểu cách Angular cấp dependency
+
+1. **[Dependency Injection](/docs/di-kien-truc/dependency-injection)** — bắt đầu với `inject()`, constructor injection và cây injector. Bài này trả lời: Angular tìm dependency ở đâu, và vì sao hai component có thể dùng chung hoặc không dùng chung một instance?
+2. **[Provider và token](/docs/di-kien-truc/provider-token)** — tiếp tục với `useClass`, `useValue`, `useFactory`, `InjectionToken` và phạm vi provider. Bạn sẽ biết cách thay thế implementation mà nơi sử dụng không phải sửa.
+
+**Mốc hoàn thành:** bạn có thể giải thích token nào được inject vào một component và lý do instance đó được dùng chung hoặc được tạo mới.
+
+### Chặng 2: thiết kế ranh giới logic
+
+3. **[Thiết kế service](/docs/di-kien-truc/service)** — học cách tách logic nghiệp vụ, truy cập dữ liệu và side effect ra khỏi component. Bài này nối cơ chế DI với quyết định thiết kế hằng ngày.
+
+**Mốc hoàn thành:** một component trang của bạn chủ yếu nhận input, hiển thị state và chuyển sự kiện; nó không chứa quy tắc nghiệp vụ dài hoặc chi tiết gọi API.
+
+### Chặng 3: tổ chức ứng dụng hiện đại
+
+4. **[Kiến trúc standalone](/docs/di-kien-truc/standalone-architecture)** — tổ chức bootstrap, cấu hình provider, route và imports mà không phụ thuộc `NgModule`. Học bài này sau DI để hiểu provider trong cấu hình ứng dụng thực sự đi vào đâu.
+5. **[Kiến trúc theo feature](/docs/di-kien-truc/feature-architecture)** — nhóm UI, logic và hạ tầng theo một khả năng nghiệp vụ như `orders` hoặc `catalog`. Sau bài này, bạn có thể quyết định mã nào ở trong feature và dependency nào không được đi ngược từ lớp trong ra UI.
+
+**Mốc hoàn thành:** bạn thêm được một feature có route, UI, service và mã truy cập dữ liệu mà không phải sửa một thư mục `services` hay `components` dùng chung khổng lồ.
+
+### Chặng 4: mở rộng UI có kiểm soát
+
+6. **[Dynamic component](/docs/di-kien-truc/dynamic-component)** — tạo component tại thời điểm chạy khi loại UI chỉ được biết từ cấu hình, quyền hoặc dữ liệu. Đây là bài cuối vì nó dựa vào component, DI và ranh giới feature đã có.
+
+**Mốc hoàn thành:** bạn phân biệt được UI động với UI điều kiện. Nếu các loại UI đã biết khi viết mã, `@if` hoặc `@switch` thường đơn giản và dễ kiểm tra hơn component động.
+
+## Lộ trình thực hành
+
+Dùng một ứng dụng duy nhất xuyên suốt: xây feature **Danh mục sản phẩm** có trang danh sách, bộ lọc và một vùng nội dung thay đổi theo cấu hình. Làm từng chặng, chạy ứng dụng và kiểm tra hành vi trước khi tiếp tục.
+
+1. **Tạo dependency nhỏ, quan sát phạm vi.** Tạo `CatalogService` với một giá trị nhận diện instance. Inject nó vào hai component. Sau đó cấp provider ở component để quan sát khi nào hai component dùng chung và khi nào nhận instance riêng.
+2. **Thay implementation bằng token.** Khai báo `CATALOG_API_URL` bằng `InjectionToken<string>`. Cấp URL môi trường bằng provider và inject token vào repository. Thay URL trong cấu hình mà không sửa component hoặc logic feature.
+3. **Đưa logic ra khỏi trang.** Chuyển việc tải danh sách, xử lý trạng thái `loading`/`error` và lọc sản phẩm từ page component sang service hoặc facade của feature. Giữ template chỉ đọc state và phát thao tác như đổi từ khóa tìm kiếm.
+4. **Chuyển feature sang standalone.** Đặt provider toàn ứng dụng ở `app.config`, khai báo route của `catalog`, rồi lazy-load route khi hợp lý. Xác nhận việc mở feature chỉ tạo state cần thiết cho feature đó.
+5. **Đặt ranh giới theo feature.** Gom mã của `catalog` gần nhau: `pages`, `ui`, `data-access` và `utils` chỉ khi từng phần có lý do tồn tại. Tránh tạo thư mục dùng chung cho đến khi ít nhất hai feature có nhu cầu dùng chung thật sự.
+6. **Thêm một điểm mở rộng động.** Tạo vùng hiển thị widget khuyến mãi theo cấu hình. Dùng component động chỉ cho widget được chọn lúc chạy; giữ các màn hình và biến thể đã biết ở component tĩnh.
+
+<Callout type="idea" title="Cách tự kiểm tra sau mỗi chặng">
+  Hãy thử thay một provider bằng dữ liệu giả, mở/đóng route rồi quay lại, và xóa một dependency không dùng. Nếu thay đổi chỉ chạm đúng ranh giới dự kiến, kiến trúc của bạn đang hỗ trợ việc thay đổi thay vì chống lại nó.
+</Callout>
+
+Sau khi feature có dữ liệu thật, hãy học **[HttpClient](/docs/http-api-auth/http-client)** để chuẩn hóa request và response. Khi state của feature phức tạp hơn, quay lại nhóm **[Reactivity & State](/docs/reactivity-state)** để chọn Signals, RxJS hoặc store ở phạm vi phù hợp.
+
+## Dấu hiệu kiến trúc đang đi sai hướng
+
+- **Component inject quá nhiều thứ:** nếu một page cần nhiều service không liên quan, hãy kiểm tra xem có một use case hoặc facade cấp feature đang thiếu hay không. Đừng gom chúng vào một “god service” chỉ để giảm số dòng constructor.
+- **Service root giữ state màn hình:** nếu bộ lọc cũ vẫn xuất hiện sau khi rời rồi mở lại một feature, hãy xem lại phạm vi provider trước khi thêm mã reset thủ công.
+- **UI gọi hạ tầng trực tiếp:** template hoặc component gọi `HttpClient`, `localStorage` hay analytics làm việc kiểm thử và thay đổi implementation khó hơn. Hãy đưa side effect về service hoặc adapter có trách nhiệm rõ.
+- **Thư mục chia theo loại tệp làm feature bị phân tán:** khi cần sửa `catalog`, nếu bạn phải tìm qua nhiều thư mục toàn cục như `components`, `services`, `models`, feature chưa có ranh giới đủ rõ.
+- **Trừu tượng hóa trước khi có biến thể:** một token hoặc interface chỉ có ích khi cần thay implementation, cấu hình hoặc test. Với một implementation ổn định và nội bộ, class service trực tiếp thường dễ đọc hơn.
+
+## Bắt đầu học
+
+Mở bài **Dependency Injection** trước. Đọc xong, hãy quay lại sơ đồ ở trên và chỉ ra dependency nào nên thuộc ứng dụng, feature hay component trong dự án của bạn.
+
+<Cards>
+  <Card title="1. Dependency Injection" href="/docs/di-kien-truc/dependency-injection" description="Hiểu injector, cách inject dependency và cây phạm vi." />
+  <Card title="2. Provider và token" href="/docs/di-kien-truc/provider-token" description="Cấu hình cách Angular cung cấp giá trị hoặc implementation." />
+  <Card title="3. Thiết kế service" href="/docs/di-kien-truc/service" description="Tách logic nghiệp vụ, dữ liệu và side effect khỏi UI." />
+  <Card title="4. Kiến trúc standalone" href="/docs/di-kien-truc/standalone-architecture" description="Tổ chức bootstrap, provider, route và imports hiện đại." />
+  <Card title="5. Kiến trúc theo feature" href="/docs/di-kien-truc/feature-architecture" description="Đặt ranh giới dependency theo khả năng nghiệp vụ." />
+  <Card title="6. Dynamic component" href="/docs/di-kien-truc/dynamic-component" description="Mở rộng UI theo ngữ cảnh chạy mà vẫn giữ cấu trúc rõ ràng." />
+</Cards>

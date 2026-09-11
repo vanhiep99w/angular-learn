@@ -1,10 +1,474 @@
 ---
 title: Angular Router
-description: Định nghĩa route, outlet, link và đọc tham số điều hướng.
+description: Cấu hình route, hiển thị nội dung, điều hướng và quản lý trạng thái URL trong Angular.
 ---
 
-Trang này sẽ trình bày **Angular Router** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi">
+  Trang này dùng API standalone hiện đại của Angular. Các khái niệm vẫn áp dụng cho ứng dụng dùng `RouterModule`, nhưng cách đăng ký router sẽ khác.
 </Callout>
+
+## Mục lục
+
+- [Router là gì](#router-là-gì)
+  - [URL là trạng thái của ứng dụng](#url-là-trạng-thái-của-ứng-dụng)
+  - [Luồng xử lý một lần điều hướng](#luồng-xử-lý-một-lần-điều-hướng)
+- [Cấu hình route](#cấu-hình-route)
+  - [Đăng ký router](#đăng-ký-router)
+  - [Khai báo các route cơ bản](#khai-báo-các-route-cơ-bản)
+  - [Thứ tự khớp và chuyển hướng](#thứ-tự-khớp-và-chuyển-hướng)
+- [Hiển thị trang và tạo liên kết](#hiển-thị-trang-và-tạo-liên-kết)
+  - [`RouterOutlet` là vị trí hiển thị](#routeroutlet-là-vị-trí-hiển-thị)
+  - [`RouterLink` và trạng thái liên kết](#routerlink-và-trạng-thái-liên-kết)
+  - [Điều hướng bằng mã](#điều-hướng-bằng-mã)
+- [Đọc và tạo tham số URL](#đọc-và-tạo-tham-số-url)
+  - [Phân biệt route params và query params](#phân-biệt-route-params-và-query-params)
+  - [Đọc params trong component](#đọc-params-trong-component)
+  - [Giữ hoặc ghép query params](#giữ-hoặc-ghép-query-params)
+- [Dữ liệu tĩnh và tiêu đề trang](#dữ-liệu-tĩnh-và-tiêu-đề-trang)
+  - [`data` cho metadata của route](#data-cho-metadata-của-route)
+  - [`title` và `TitleStrategy`](#title-và-titlestrategy)
+- [Chiến lược thiết kế router](#chiến-lược-thiết-kế-router)
+  - [Tổ chức URL theo tài nguyên](#tổ-chức-url-theo-tài-nguyên)
+  - [Chọn snapshot, stream hay component input](#chọn-snapshot-stream-hay-component-input)
+  - [Ranh giới trách nhiệm và các trade-off](#ranh-giới-trách-nhiệm-và-các-trade-off)
+- [Lỗi thường gặp](#lỗi-thường-gặp)
+- [Tóm tắt](#tóm-tắt)
+
+## Router là gì
+
+**Angular Router** ánh xạ một URL của trình duyệt tới cây component. Khi người dùng mở `/products/42`, router đối chiếu URL với cấu hình route, chọn component phù hợp và đặt component đó vào một `RouterOutlet`. Với ứng dụng SPA, việc này thường không tải lại toàn bộ tài liệu HTML; router thay đổi lịch sử trình duyệt và cập nhật phần giao diện cần thiết.
+
+### URL là trạng thái của ứng dụng
+
+URL không chỉ là địa chỉ. Nó là trạng thái có thể bookmark, chia sẻ và khôi phục khi người dùng tải lại trang. Ví dụ, `/products/42?tab=reviews` diễn đạt hai loại thông tin:
+
+- `42` xác định **tài nguyên đang xem**: sản phẩm có mã 42.
+- `tab=reviews` xác định **cách xem tài nguyên đó**: tab đánh giá đang được chọn.
+
+Thiết kế URL như một trạng thái công khai giúp nút Back/Forward hoạt động tự nhiên và tránh phải sao chép cùng một trạng thái vào nhiều service. Ngược lại, dữ liệu tạm thời như nội dung form chưa lưu hoặc trạng thái mở của một popover thường không nên đưa vào URL.
+
+### Luồng xử lý một lần điều hướng
+
+```text
+Người dùng bấm liên kết / gọi Router.navigate()
+                     │
+                     ▼
+Router phân tích URL và tìm route khớp đầu tiên
+                     │
+                     ▼
+Áp dụng redirect, kiểm tra guard / resolver (nếu có)
+                     │
+                     ▼
+Kích hoạt component trong RouterOutlet và cập nhật history
+                     │
+                     ▼
+Component đọc params, query params, data và render giao diện
+```
+
+Route được xét theo thứ tự khai báo. Vì vậy cấu hình là một phần của hành vi ứng dụng, không chỉ là danh sách đường dẫn.
+
+## Cấu hình route
+
+### Đăng ký router
+
+Trong ứng dụng standalone, khai báo mảng `Routes` và cung cấp nó khi bootstrap. `provideRouter()` tạo các service router cần thiết cho toàn ứng dụng.
+
+```ts
+// app.routes.ts
+import { Routes } from '@angular/router';
+import { HomeComponent } from './pages/home/home.component';
+import { ProductDetailComponent } from './pages/product-detail/product-detail.component';
+
+export const routes: Routes = [
+  { path: '', component: HomeComponent, title: 'Trang chủ' },
+  {
+    path: 'products/:productId',
+    component: ProductDetailComponent,
+    title: 'Chi tiết sản phẩm',
+  },
+];
+```
+
+```ts
+// app.config.ts
+import { ApplicationConfig } from '@angular/core';
+import { provideRouter } from '@angular/router';
+import { routes } from './app.routes';
+
+export const appConfig: ApplicationConfig = {
+  providers: [provideRouter(routes)],
+};
+```
+
+Với ứng dụng dựa trên NgModule, ý tưởng tương đương là `RouterModule.forRoot(routes)`. Không trộn hai cách khởi tạo trong cùng một ứng dụng; mỗi ứng dụng chỉ cần một router gốc.
+
+### Khai báo các route cơ bản
+
+Một đối tượng `Route` thường có `path` và một đích hiển thị. Đích có thể là `component` đã import sẵn, hoặc một route lazy như `loadComponent`/`loadChildren` khi feature nên được tải theo nhu cầu.
+
+```ts
+import { Routes } from '@angular/router';
+import { NotFoundComponent } from './pages/not-found/not-found.component';
+
+export const routes: Routes = [
+  {
+    path: 'products',
+    loadComponent: () => import('./pages/products/products.component').then((m) => m.ProductsComponent),
+  },
+  {
+    path: 'products/:productId',
+    loadComponent: () => import('./pages/product-detail/product-detail.component').then((m) => m.ProductDetailComponent),
+  },
+  { path: '**', component: NotFoundComponent, title: 'Không tìm thấy trang' },
+];
+```
+
+Các trường thường gặp:
+
+| Trường | Mục đích | Ví dụ |
+| --- | --- | --- |
+| `path` | Mẫu URL cần khớp | `'products/:productId'` |
+| `component` | Component được kích hoạt ngay | `ProductDetailComponent` |
+| `loadComponent` | Tải một standalone component khi cần | `() => import('./products.component')` |
+| `children` | Các route con dưới cùng một URL cha | route cho `products/:id/reviews` |
+| `redirectTo` | Chuyển URL cũ sang URL khác | `'products'` |
+| `data` | Metadata tĩnh cho route | `{ section: 'catalog' }` |
+| `title` | Tiêu đề tài liệu cho route | `'Sản phẩm'` |
+
+Route lazy là một tối ưu tải ban đầu, không phải một cơ chế phân quyền. Quyền truy cập phải được kiểm soát bằng guard và, quan trọng hơn, ở API phía máy chủ.
+
+### Thứ tự khớp và chuyển hướng
+
+Router dùng route **khớp đầu tiên**. Đặt route cụ thể trước route động, và đặt wildcard `**` cuối cùng.
+
+```ts
+export const routes: Routes = [
+  { path: 'products/new', component: ProductCreateComponent },
+  { path: 'products/:productId', component: ProductDetailComponent },
+  { path: '', redirectTo: 'products', pathMatch: 'full' },
+  { path: '**', component: NotFoundComponent },
+];
+```
+
+Nếu `products/:productId` đứng trước `products/new`, URL `/products/new` vẫn khớp nhưng `productId` sẽ là chuỗi `new`. Đây là lỗi logic khó nhận ra vì router không báo lỗi.
+
+`pathMatch: 'full'` nghĩa là toàn bộ URL còn lại phải khớp với `path`. Redirect rỗng ở root gần như luôn cần giá trị này. Nếu dùng `pathMatch: 'prefix'` mặc định cho route `path: ''`, route đó khớp mọi URL và có thể tạo redirect sai hoặc vòng lặp.
+
+<Callout type="warn" title="Đừng dùng wildcard quá sớm">
+  `{ path: '**', ... }` khớp mọi URL chưa khớp. Nếu nó không ở cuối mảng, các route phía sau sẽ không bao giờ được kích hoạt.
+</Callout>
+
+## Hiển thị trang và tạo liên kết
+
+### `RouterOutlet` là vị trí hiển thị
+
+`RouterOutlet` là directive đánh dấu nơi router chèn component của route đang hoạt động. Layout gốc thường chỉ có một outlet chính.
+
+```ts
+import { Component } from '@angular/core';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+
+@Component({
+  selector: 'app-root',
+  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  template: `
+    <header>
+      <a routerLink="/" routerLinkActive="is-active" [routerLinkActiveOptions]="{ exact: true }">
+        Trang chủ
+      </a>
+      <a routerLink="/products" routerLinkActive="is-active">Sản phẩm</a>
+    </header>
+
+    <main>
+      <router-outlet />
+    </main>
+  `,
+})
+export class AppComponent {}
+```
+
+Một route cha có `children` cần một `RouterOutlet` trong template của component cha để render route con. Router hỗ trợ outlet có tên cho các vùng phụ, nhưng một outlet chính là lựa chọn đơn giản và dễ duy trì cho phần lớn màn hình.
+
+### `RouterLink` và trạng thái liên kết
+
+Dùng `RouterLink` thay vì `href` nội bộ để Angular tự điều hướng mà không tải lại trang. Dạng mảng tách từng đoạn URL, an toàn hơn khi một phần là biến.
+
+```html
+<!-- URL tuyệt đối: /products/42 -->
+<a [routerLink]="['/products', product.id]">Xem sản phẩm</a>
+
+<!-- URL tương đối với route đang hoạt động -->
+<a [routerLink]="['reviews']">Đánh giá</a>
+
+<!-- /products/42?tab=reviews -->
+<a [routerLink]="['/products', product.id]" [queryParams]="{ tab: 'reviews' }">
+  Đánh giá
+</a>
+```
+
+`routerLinkActive` thêm class CSS khi liên kết khớp URL hiện tại. Mặc định, `/products` cũng được coi là đang hoạt động tại `/products/42`. Dùng `[routerLinkActiveOptions]="{ exact: true }"` cho menu cần khớp chính xác, như liên kết Trang chủ.
+
+### Điều hướng bằng mã
+
+Khi điều hướng là kết quả của một sự kiện trong component, inject `Router` và gọi `navigate()`. Hãy biểu diễn URL bằng mảng segment thay vì tự nối chuỗi.
+
+```ts
+import { Component, inject } from '@angular/core';
+import { Router } from '@angular/router';
+
+@Component({
+  template: `<button (click)="createProduct()">Tạo sản phẩm</button>`,
+})
+export class ProductCreateComponent {
+  private readonly router = inject(Router);
+
+  createProduct(): void {
+    const createdId = 42;
+
+    this.router.navigate(['/products', createdId], {
+      queryParams: { created: '1' },
+    });
+  }
+}
+```
+
+`navigate()` nhận mảng lệnh và có thể tính URL tương đối qua `relativeTo`. `navigateByUrl()` nhận một URL hoàn chỉnh, ví dụ `this.router.navigateByUrl('/products/42?tab=reviews')`. Chọn `navigate()` khi ghép URL từ dữ liệu; chọn `navigateByUrl()` khi đã có URL hoàn chỉnh từ nguồn tin cậy.
+
+Đừng chuyển hướng vô điều kiện trong constructor hoặc mỗi lần component render. Một điều hướng như vậy có thể lặp lại khi route được kích hoạt lại. Điều kiện truy cập nên được đặt trong guard; điều hướng sau thao tác người dùng nên chỉ chạy sau khi thao tác thành công.
+
+## Đọc và tạo tham số URL
+
+### Phân biệt route params và query params
+
+**Route params** là phần biến trong mẫu `path`. Chúng thường xác định tài nguyên hoặc màn hình cần hiển thị.
+
+```ts
+{ path: 'products/:productId', component: ProductDetailComponent }
+```
+
+URL `/products/42` cho `productId = '42'`.
+
+**Query params** là cặp khóa/giá trị sau dấu `?`. Chúng phù hợp cho bộ lọc, sắp xếp, phân trang hoặc tab vì không thay đổi cấu trúc resource.
+
+```text
+/products?category=books&page=2&sort=price
+```
+
+Cả hai đều được đọc dưới dạng chuỗi. Hãy kiểm tra và chuyển kiểu ở ranh giới component trước khi gọi API.
+
+```ts
+const rawPage = queryParamMap.get('page');
+const page = Number(rawPage ?? 1);
+const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+```
+
+Không tin giá trị URL chỉ vì nó do giao diện tạo ra. Người dùng có thể gõ, chia sẻ hoặc sửa URL trực tiếp.
+
+### Đọc params trong component
+
+Inject `ActivatedRoute` để đọc dữ liệu của route đang kích hoạt. Dùng `snapshot` khi component chỉ được tạo một lần cho URL đó. Dùng stream `paramMap` hoặc `queryParamMap` khi URL có thể đổi trong lúc Angular tái sử dụng cùng instance component.
+
+```ts
+import { Component, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+
+@Component({
+  template: `Chi tiết sản phẩm`,
+})
+export class ProductDetailComponent {
+  private readonly route = inject(ActivatedRoute);
+
+  // Phù hợp nếu component không cần phản ứng với /products/43 sau /products/42.
+  readonly productIdAtCreation = this.route.snapshot.paramMap.get('productId');
+
+  constructor() {
+    this.route.paramMap.subscribe((params) => {
+      const productId = params.get('productId');
+      // Tải lại dữ liệu khi productId thay đổi.
+      console.log(productId);
+    });
+  }
+}
+```
+
+Snapshot là ảnh chụp ở thời điểm kích hoạt; nó không tự thay đổi. Stream phát giá trị mới khi params đổi. Trong code thực tế, hãy liên kết stream với vòng đời component, chẳng hạn dùng `takeUntilDestroyed()`, hoặc chuyển Observable thành signal bằng `toSignal()`.
+
+Khi chỉ đọc route cha, dùng `this.route.parent`. Đừng giả định `this.route` luôn chứa mọi param của URL lồng nhau; mỗi `ActivatedRoute` đại diện cho một node trong cây route.
+
+### Giữ hoặc ghép query params
+
+Một navigation mới sẽ thay query params hiện tại nếu bạn truyền `queryParams`. `queryParamsHandling` cho phép giữ lại chúng có chủ đích.
+
+```ts
+// Từ /products?category=books&page=2
+this.router.navigate(['/products'], {
+  queryParams: { page: 3 },
+  queryParamsHandling: 'merge',
+});
+// Kết quả: /products?category=books&page=3
+```
+
+- `'merge'` giữ query params cũ và ghi đè các khóa được cung cấp.
+- `'preserve'` giữ nguyên toàn bộ query params hiện tại, bỏ qua `queryParams` mới.
+- Không đặt `queryParamsHandling` khi muốn URL mới chỉ có đúng tập params được truyền vào.
+
+`merge` làm trải nghiệm bộ lọc liên tục hơn, nhưng có thể giữ lại filter không còn phù hợp khi chuyển sang màn hình khác. Chỉ dùng nó trong cùng một ngữ cảnh tìm kiếm hoặc danh sách.
+
+## Dữ liệu tĩnh và tiêu đề trang
+
+### `data` cho metadata của route
+
+`data` chứa metadata tĩnh gắn với một route. Nó phù hợp cho breadcrumb, tên khu vực, cờ giao diện hoặc thông tin mà layout cần biết. Nó không phù hợp cho dữ liệu thay đổi theo API; trường hợp đó thuộc về resolver hoặc chính component.
+
+```ts
+export const routes: Routes = [
+  {
+    path: 'products',
+    loadComponent: () => import('./pages/products/products.component').then((m) => m.ProductsComponent),
+    title: 'Sản phẩm',
+    data: {
+      breadcrumb: 'Sản phẩm',
+      section: 'catalog',
+      requiresToolbar: true,
+    },
+  },
+];
+```
+
+Đọc dữ liệu qua `ActivatedRoute.data`. Stream này cũng là lựa chọn tốt cho layout có thể ở lại trong khi người dùng chuyển route con.
+
+```ts
+readonly route = inject(ActivatedRoute);
+
+constructor() {
+  this.route.data.subscribe((data) => {
+    console.log(data['breadcrumb']);
+  });
+}
+```
+
+Giữ keys của `data` nhất quán trên toàn ứng dụng. Ví dụ, dùng thống nhất `breadcrumb` thay vì nơi dùng `label`, nơi dùng `pageName`; sự không thống nhất này sẽ làm component layout phải chứa nhiều nhánh đặc biệt.
+
+### `title` và `TitleStrategy`
+
+Thuộc tính `title` trên route khai báo tiêu đề của tài liệu. Angular dùng `TitleStrategy` mặc định để lấy title của route sâu nhất có title và cập nhật thẻ `<title>` khi navigation hoàn tất.
+
+```ts
+export const routes: Routes = [
+  { path: '', title: 'Cửa hàng Acme', component: HomeComponent },
+  { path: 'products', title: 'Sản phẩm | Cửa hàng Acme', component: ProductsComponent },
+];
+```
+
+Nếu mọi tiêu đề cần cùng hậu tố, tập trung quy tắc trong một `TitleStrategy` thay vì lặp hậu tố trong từng route.
+
+```ts
+import { Injectable } from '@angular/core';
+import { Title } from '@angular/platform-browser';
+import { RouterStateSnapshot, TitleStrategy } from '@angular/router';
+
+@Injectable({ providedIn: 'root' })
+export class AppTitleStrategy extends TitleStrategy {
+  constructor(private readonly title: Title) {
+    super();
+  }
+
+  override updateTitle(snapshot: RouterStateSnapshot): void {
+    const pageTitle = this.buildTitle(snapshot);
+    this.title.setTitle(pageTitle ? `${pageTitle} | Cửa hàng Acme` : 'Cửa hàng Acme');
+  }
+}
+```
+
+```ts
+import { provideRouter, TitleStrategy } from '@angular/router';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideRouter(routes),
+    { provide: TitleStrategy, useClass: AppTitleStrategy },
+  ],
+};
+```
+
+Dùng `title: 'Sản phẩm'` trong từng route khi áp dụng strategy này, không phải `title: 'Sản phẩm | Cửa hàng Acme'`. Nếu title phụ thuộc dữ liệu tải bất đồng bộ, ưu tiên resolver cho title hoặc cập nhật `Title` sau khi dữ liệu đáng tin cậy đã sẵn sàng. Tránh đặt title tạm rồi quên thay thế vì nó gây nhấp nháy và làm title không phản ánh nội dung thực.
+
+## Chiến lược thiết kế router
+
+### Tổ chức URL theo tài nguyên
+
+Bắt đầu từ hành động người dùng và trạng thái cần chia sẻ, rồi mới viết route. Một cấu trúc nhất quán có thể là:
+
+```text
+/products                    Danh sách sản phẩm
+/products?category=books     Cùng danh sách, có bộ lọc
+/products/42                 Một sản phẩm cụ thể
+/products/42/reviews         Tài nguyên con: đánh giá của sản phẩm 42
+```
+
+Dùng danh từ số nhiều cho collection và segment ổn định, dễ đọc. Không nhét trạng thái riêng tư hoặc dữ liệu lớn vào query string. URL quá nhiều flags như `/products/42?edit=1&modal=share&step=3` khó khôi phục và khó kiểm thử; chỉ giữ những trạng thái mà người dùng thực sự cần bookmark hoặc chia sẻ.
+
+### Chọn snapshot, stream hay component input
+
+Ba cách đọc dữ liệu route phục vụ ba tình huống khác nhau:
+
+| Cách | Nên dùng khi | Trade-off |
+| --- | --- | --- |
+| `route.snapshot` | Param không đổi trong vòng đời component | Gọn, nhưng giữ giá trị cũ khi component được tái sử dụng |
+| `route.paramMap` / `queryParamMap` | Cần phản ứng khi URL đổi | Cần quản lý subscription và trạng thái tải/lỗi |
+| Component inputs với `withComponentInputBinding()` | Muốn component nhận route state như input rõ ràng | Cần quy ước tên input và hiểu nguồn dữ liệu được bind |
+
+`withComponentInputBinding()` là lựa chọn đáng cân nhắc cho component route-centric. Nó cho phép router bind route params, query params và `data` vào input có tên tương ứng. Tuy nhiên, nó không thay thế việc kiểm tra kiểu và giá trị. Một `productId` từ URL vẫn là chuỗi chưa được xác thực.
+
+```ts
+// app.config.ts
+provideRouter(routes, withComponentInputBinding());
+```
+
+```ts
+import { Component, input } from '@angular/core';
+
+@Component({ template: `Chi tiết sản phẩm` })
+export class ProductDetailComponent {
+  readonly productId = input.required<string>();
+}
+```
+
+Chọn một cách mặc định cho feature để code nhất quán. Với màn hình đơn giản, `ActivatedRoute` là rõ ràng. Với nhiều inputs lấy trực tiếp từ route, component input binding giúp giảm mã đọc route lặp lại.
+
+### Ranh giới trách nhiệm và các trade-off
+
+Router nên chịu trách nhiệm nhận diện URL, kích hoạt màn hình và điều phối lifecycle điều hướng. Component nên chịu trách nhiệm render và phản ứng với state route. Service hoặc API chịu trách nhiệm lấy dữ liệu nghiệp vụ.
+
+| Quyết định | Lợi ích | Cái giá cần chấp nhận |
+| --- | --- | --- |
+| Đưa filter vào query params | Chia sẻ được URL, Back/Forward đúng | Phải parse, validate và đặt tên key ổn định |
+| Lazy-load feature | Giảm JavaScript tải ban đầu | Tăng điểm tách bundle và cần thiết kế loading/error UX |
+| Dùng route động `:id` | URL ngắn, tái sử dụng component | Phải đặt route tĩnh cụ thể trước nó |
+| Dùng `data` | Layout và breadcrumb không phụ thuộc component | Chỉ phù hợp metadata tĩnh |
+| Redirect trong guard | Tập trung chính sách điều hướng | Không được xem guard là rào chắn bảo mật duy nhất |
+
+Khi một màn hình cần data trước khi render, dùng resolver hoặc hiển thị loading state trong component tùy trải nghiệm mong muốn. Resolver làm route chỉ kích hoạt sau khi data sẵn sàng, nhưng một API chậm sẽ trì hoãn toàn bộ navigation. Hiển thị loading state mở trang sớm hơn, nhưng component phải xử lý trạng thái rỗng. Chọn theo việc data đó có bắt buộc để màn hình có ý nghĩa hay không.
+
+## Lỗi thường gặp
+
+1. **Dùng `<a href="/products">` cho liên kết nội bộ.** Trình duyệt tải lại trang thay vì để Angular xử lý. Dùng `routerLink`.
+2. **Dùng snapshot cho URL thay đổi.** Đi từ `/products/42` sang `/products/43` có thể tái sử dụng component. Subscribe `paramMap` hoặc dùng component input binding nếu cần tải lại data.
+3. **Không encode URL bằng router commands.** Nối chuỗi như `'/search/' + term` dễ làm sai với ký tự đặc biệt. Dùng `navigate(['/search', term])` hoặc `[routerLink]` dạng mảng.
+4. **Đặt `**` hoặc `:id` trước route cụ thể.** Các route sau bị che khuất hoặc URL bị diễn giải sai. Kiểm tra thứ tự route từ cụ thể đến tổng quát.
+5. **Dùng `data` để chứa kết quả API.** `data` trong config là tĩnh. Dùng resolver hoặc service cho dữ liệu động.
+6. **Tin route guard là bảo mật.** Guard cải thiện UX và hạn chế truy cập trên client, nhưng người dùng vẫn có thể gọi API trực tiếp. API phải xác thực và phân quyền độc lập.
+7. **Giữ query params bằng `merge` ở mọi nơi.** Filter của trang trước có thể rò sang trang sau. Ghép chỉ trong cùng ngữ cảnh.
+
+<Callout type="idea" title="Checklist khi thêm route">
+  Xác định URL có thể chia sẻ, đặt route cụ thể trước route động, chọn cách đọc params, khai báo title, và kiểm tra trực tiếp Back/Forward cùng URL được dán vào thanh địa chỉ.
+</Callout>
+
+## Tóm tắt
+
+- `Routes` là bảng ánh xạ URL sang component; router chọn route khớp đầu tiên.
+- Đặt `<router-outlet />` tại nơi nội dung route cần hiển thị, và dùng `RouterLink` cho liên kết nội bộ.
+- Dùng route params để nhận diện tài nguyên, query params cho trạng thái xem có thể chia sẻ. Luôn parse và validate chúng.
+- `snapshot` phù hợp với giá trị bất biến trong vòng đời component; `paramMap` và `queryParamMap` phù hợp với URL có thể đổi.
+- Dùng `data` cho metadata tĩnh, `title` hoặc `TitleStrategy` cho tiêu đề trang, và giữ quy tắc URL nhất quán giữa các feature.
+- Router điều phối navigation, nhưng xác thực và phân quyền thật sự vẫn phải nằm ở máy chủ.

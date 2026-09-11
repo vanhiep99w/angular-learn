@@ -1,10 +1,778 @@
 ---
 title: Control flow
-description: Sử dụng cú pháp @if, @for và @switch trong template.
+description: Hiểu và dùng @if, @for, @switch để biến state của component thành giao diện rõ ràng, hiệu quả và dễ bảo trì.
 ---
 
-Trang này sẽ trình bày **Control flow** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi bài học">
+  Bài này dùng built-in control flow của Angular hiện đại. Các block `@if`, `@for` và `@switch` là cú pháp template dựng sẵn, nên không cần import `NgIf`, `NgFor` hoặc `NgSwitch` vào component.
 </Callout>
+
+## Mục lục
+
+- [Control flow giải quyết việc gì](#control-flow-giải-quyết-việc-gì)
+  - [Từ state đến DOM](#từ-state-đến-dom)
+  - [Khi nào chọn block nào](#khi-nào-chọn-block-nào)
+- [Cơ chế của built-in control flow](#cơ-chế-của-built-in-control-flow)
+  - [Block là cú pháp template, không phải directive](#block-là-cú-pháp-template-không-phải-directive)
+  - [Một lần state thay đổi](#một-lần-state-thay-đổi)
+- [`@if`: hiển thị theo điều kiện](#if-hiển-thị-theo-điều-kiện)
+  - [Cú pháp cơ bản và `@else`](#cú-pháp-cơ-bản-và-else)
+  - [Nhiều nhánh với `@else if`](#nhiều-nhánh-với-else-if)
+  - [Lưu kết quả bằng `as`](#lưu-kết-quả-bằng-as)
+  - [Điều gì xảy ra khi điều kiện đổi](#điều-gì-xảy-ra-khi-điều-kiện-đổi)
+- [`@for`: lặp danh sách](#for-lặp-danh-sách)
+  - [Cú pháp và `track` bắt buộc](#cú-pháp-và-track-bắt-buộc)
+  - [Chọn khóa tracking đúng](#chọn-khóa-tracking-đúng)
+  - [Biến ngữ cảnh của vòng lặp](#biến-ngữ-cảnh-của-vòng-lặp)
+  - [`@empty`: trạng thái danh sách rỗng](#empty-trạng-thái-danh-sách-rỗng)
+  - [Dữ liệu thay đổi, Angular cập nhật gì](#dữ-liệu-thay-đổi-angular-cập-nhật-gì)
+- [`@switch`: chọn một giao diện theo giá trị](#switch-chọn-một-giao-diện-theo-giá-trị)
+  - [Cú pháp `@case` và `@default`](#cú-pháp-case-và-default)
+  - [Khi nào dùng `@switch` thay vì chuỗi `@if`](#khi-nào-dùng-switch-thay-vì-chuỗi-if)
+- [Ví dụ hoàn chỉnh: màn hình kết quả tìm kiếm](#ví-dụ-hoàn-chỉnh-màn-hình-kết-quả-tìm-kiếm)
+  - [Component giữ state](#component-giữ-state)
+  - [Template biểu diễn từng trạng thái](#template-biểu-diễn-từng-trạng-thái)
+  - [Đọc một lần chuyển trạng thái](#đọc-một-lần-chuyển-trạng-thái)
+- [Performance và trade-off](#performance-và-trade-off)
+  - [`@if` không phải cách ẩn bằng CSS](#if-không-phải-cách-ẩn-bằng-css)
+  - [Tracking quyết định chi phí cập nhật danh sách](#tracking-quyết-định-chi-phí-cập-nhật-danh-sách)
+  - [Đừng đưa tính toán nặng vào template](#đừng-đưa-tính-toán-nặng-vào-template)
+  - [Khả năng đọc quan trọng hơn việc nén template](#khả-năng-đọc-quan-trọng-hơn-việc-nén-template)
+- [Chuyển từ structural directives](#chuyển-từ-structural-directives)
+  - [Bảng ánh xạ cú pháp](#bảng-ánh-xạ-cú-pháp)
+  - [Chuyển `*ngIf` có `else`](#chuyển-ngif-có-else)
+  - [Chuyển `*ngFor` và trạng thái rỗng](#chuyển-ngfor-và-trạng-thái-rỗng)
+  - [Chuyển `ngSwitch`](#chuyển-ngswitch)
+  - [Lộ trình migration an toàn](#lộ-trình-migration-an-toàn)
+- [Lỗi phổ biến và cách gỡ](#lỗi-phổ-biến-và-cách-gỡ)
+  - [Quên hoặc chọn sai biểu thức `track`](#quên-hoặc-chọn-sai-biểu-thức-track)
+  - [Nhầm `@empty` với dữ liệu đang tải](#nhầm-empty-với-dữ-liệu-đang-tải)
+  - [Dùng `@if` khi chỉ cần đổi kiểu hiển thị](#dùng-if-khi-chỉ-cần-đổi-kiểu-hiển-thị)
+  - [Sai phạm vi biến vòng lặp](#sai-phạm-vi-biến-vòng-lặp)
+  - [Trộn cú pháp cũ và mới không có chủ đích](#trộn-cú-pháp-cũ-và-mới-không-có-chủ-đích)
+- [Danh sách kiểm tra](#danh-sách-kiểm-tra)
+- [Tóm tắt](#tóm-tắt)
+
+## Control flow giải quyết việc gì
+
+Giao diện không phải lúc nào cũng có cùng một tập phần tử. Khi đang tải dữ liệu, người dùng cần thấy trạng thái chờ. Khi API trả về mảng rỗng, họ cần thông báo rõ ràng. Khi một đơn hàng đổi từ `pending` sang `shipped`, nhãn, nút hành động và hướng dẫn tiếp theo cũng phải đổi theo.
+
+**Control flow** là cú pháp trong template để mô tả các quyết định đó từ state của component. Angular đọc state, chọn nhánh phù hợp hoặc tạo các phần tử lặp lại, rồi đồng bộ DOM — cây node mà trình duyệt thực sự hiển thị.
+
+### Từ state đến DOM
+
+Ví dụ, component có một mảng `products` và trạng thái tải. Template không cần tự gọi `document.createElement()` hay tự xóa thẻ cũ. Nó chỉ mô tả kết quả mong muốn:
+
+```ts
+products: Product[] = [];
+isLoading = true;
+```
+
+```html
+@if (isLoading) {
+  <p>Đang tải sản phẩm...</p>
+} @else {
+  @for (product of products; track product.id) {
+    <app-product-card [product]="product" />
+  } @empty {
+    <p>Chưa có sản phẩm nào.</p>
+  }
+}
+```
+
+Trong lúc `isLoading` là `true`, DOM chỉ có đoạn thông báo tải. Sau khi tải xong, Angular bỏ nhánh đó, chạy `@for` và tạo card hoặc nội dung `@empty`. Đây là cách UI luôn được suy ra từ state hiện tại thay vì từ chuỗi thao tác DOM thủ công.
+
+### Khi nào chọn block nào
+
+| Nhu cầu UI | Block nên dùng | Ví dụ |
+| --- | --- | --- |
+| Có hoặc không có một phần UI | `@if` | Hiện nút đăng nhập khi chưa có phiên người dùng. |
+| Chọn một trong nhiều giá trị rời rạc | `@switch` | Hiện badge theo trạng thái đơn hàng. |
+| Tạo một phần UI cho từng phần tử | `@for` | Render từng sản phẩm, bình luận hoặc menu item. |
+| Danh sách không có phần tử | `@empty` đi cùng `@for` | Hiện “Không tìm thấy kết quả”. |
+
+`@if` có thể xử lý nhiều nhánh, nhưng đừng dùng nó để mô phỏng mọi trường hợp. Nếu nhiều nhánh đều so sánh **cùng một giá trị** như `status`, `@switch` cho thấy ý định rõ hơn. Nếu UI được tạo từ từng phần tử trong một mảng, dùng `@for`; đừng sao chép cùng một đoạn HTML bằng tay.
+
+## Cơ chế của built-in control flow
+
+### Block là cú pháp template, không phải directive
+
+`@if`, `@for` và `@switch` được Angular nhận biết trực tiếp khi biên dịch template. Chúng tạo ra các **block**: vùng template có thể được chọn, lặp hoặc bỏ qua. Vì vậy, standalone component dùng các block này không cần thêm `CommonModule` chỉ cho control flow.
+
+```ts
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-availability',
+  template: `
+    @if (inStock) {
+      <p>Còn hàng</p>
+    } @else {
+      <p>Tạm hết hàng</p>
+    }
+  `,
+})
+export class AvailabilityComponent {
+  inStock = true;
+}
+```
+
+Điều này khác với structural directive cũ như `*ngIf` và `*ngFor`. Các directive đó là class Angular được đưa vào phạm vi template, thường thông qua `CommonModule` hoặc import riêng. Built-in control flow không có class directive để inject hay import cho mỗi component.
+
+<Callout type="idea" title="Không có import không có nghĩa là không có biên dịch">
+  Angular vẫn kiểm tra cú pháp, type-check biểu thức và tạo mã cập nhật DOM cho block. “Built-in” chỉ nói rằng compiler hiểu cú pháp này trực tiếp, không phải template được xử lý như JavaScript tùy ý.
+</Callout>
+
+### Một lần state thay đổi
+
+Mô hình đơn giản dưới đây giúp hình dung Angular làm gì khi state mà template đọc thay đổi:
+
+```text
+State của component thay đổi
+          │
+          ▼
+Angular đánh giá biểu thức trong block
+          │
+          ├── @if: chọn hoặc bỏ một nhánh
+          ├── @for: đối chiếu item bằng track key
+          └── @switch: chọn case khớp giá trị
+          │
+          ▼
+Angular tạo, cập nhật, di chuyển hoặc hủy node cần thiết
+          │
+          ▼
+Trình duyệt vẽ DOM mới
+```
+
+Block không “render lại toàn bộ trang” theo nghĩa xóa sạch mọi node. Đặc biệt với `@for`, Angular dùng tracking để liên hệ item mới với view và node DOM đã có. Nhưng chính xác node nào được giữ lại còn phụ thuộc vào state, khóa `track` và cấu trúc template.
+
+## `@if`: hiển thị theo điều kiện
+
+### Cú pháp cơ bản và `@else`
+
+`@if` nhận một biểu thức có thể được JavaScript đánh giá là đúng hoặc sai. Khi biểu thức đúng, Angular tạo nội dung trong cặp dấu ngoặc nhọn đầu tiên. `@else` là nhánh còn lại khi biểu thức sai.
+
+```html
+@if (cartItems.length > 0) {
+  <a routerLink="/checkout">Thanh toán</a>
+} @else {
+  <p>Giỏ hàng đang trống.</p>
+}
+```
+
+Điều kiện nên nói lên quy tắc UI. `cartItems.length > 0` trả lời trực tiếp câu hỏi “có thể thanh toán không?”. Tránh tên boolean mơ hồ như `showThing` khi một tên như `canCheckout` hoặc biểu thức nghiệp vụ rõ ràng làm người đọc hiểu lý do nhánh xuất hiện.
+
+### Nhiều nhánh với `@else if`
+
+Dùng `@else if` khi các điều kiện có thứ tự ưu tiên. Angular xét từ trên xuống và lấy nhánh đúng đầu tiên.
+
+```html
+@if (isLoading) {
+  <app-loading-spinner />
+} @else if (errorMessage) {
+  <p role="alert">{{ errorMessage }}</p>
+} @else if (orders.length === 0) {
+  <p>Bạn chưa có đơn hàng.</p>
+} @else {
+  <app-order-list [orders]="orders" />
+}
+```
+
+Thứ tự ở đây là một phần của yêu cầu. Nếu `isLoading` và `errorMessage` cùng có giá trị, spinner xuất hiện vì nhánh tải đứng trước. Hãy xác định rõ state nào được ưu tiên hoặc thiết kế state sao cho các trạng thái loại trừ nhau.
+
+<Callout type="warn" title="Đừng để state mâu thuẫn tự quyết định UX">
+  Một component có đồng thời `isLoading = true`, `errorMessage` khác rỗng và dữ liệu cũ là có thể xảy ra nếu cập nhật state rải rác. Hãy đặt quy ước rõ: khi bắt đầu tải thì có xóa lỗi không, khi lỗi thì có giữ dữ liệu cũ không. Control flow chỉ phản ánh state; nó không tự sửa một state mâu thuẫn.
+</Callout>
+
+### Lưu kết quả bằng `as`
+
+Một biểu thức điều kiện đôi khi vừa xác định có hiển thị hay không, vừa trả về giá trị cần dùng trong nhánh. `as` lưu kết quả đó vào biến cục bộ để không phải lặp lại biểu thức.
+
+```html
+@if (user.profile; as profile) {
+  <h2>{{ profile.displayName }}</h2>
+  <p>{{ profile.email }}</p>
+} @else {
+  <a routerLink="/complete-profile">Hoàn thiện hồ sơ</a>
+}
+```
+
+`profile` chỉ tồn tại trong nhánh `@if` này. Ví dụ giả định `user.profile` là một object hoặc `null`; object có giá trị truthy nên nhánh đầu được chọn khi có hồ sơ. Đừng dùng `as` để che một biểu thức dài có tác dụng phụ. Biểu thức template nên chỉ đọc state hoặc gọi hàm nhẹ, có kết quả dự đoán được.
+
+### Điều gì xảy ra khi điều kiện đổi
+
+Khi điều kiện chuyển từ đúng sang sai, Angular hủy view của nhánh `@if` cũ và node DOM trong đó không còn tồn tại. Khi điều kiện đúng trở lại, Angular tạo lại nhánh đó. Vì vậy, input HTML nằm bên trong một `@if` có thể mất giá trị người dùng vừa gõ nếu nhánh bị tắt.
+
+```html
+@if (showFilters) {
+  <input #keyword placeholder="Lọc theo tên" />
+}
+```
+
+Nếu mục tiêu chỉ là tạm che phần tử nhưng vẫn giữ DOM, focus hoặc state của input, CSS như `[hidden]` hay class CSS có thể phù hợp hơn:
+
+```html
+<input [hidden]="!showFilters" placeholder="Lọc theo tên" />
+```
+
+Không có lựa chọn luôn đúng. `@if` giảm node không cần thiết và hủy component con khi không hiển thị. CSS giữ node sống nhưng vẫn có chi phí tồn tại và cần được dùng đúng về accessibility. Chọn theo lifecycle mà UX cần.
+
+## `@for`: lặp danh sách
+
+### Cú pháp và `track` bắt buộc
+
+`@for` lặp qua một iterable — giá trị có thể duyệt tuần tự, thường là mảng — và tạo một view cho mỗi item. Cú pháp thông dụng gồm biến item, nguồn dữ liệu và biểu thức `track`:
+
+```html
+@for (product of products; track product.id) {
+  <article class="product-card">
+    <h2>{{ product.name }}</h2>
+    <p>{{ product.price | currency: 'VND' }}</p>
+  </article>
+}
+```
+
+- `product` là biến cục bộ đại diện cho phần tử hiện tại.
+- `products` là mảng hoặc iterable mà template đọc.
+- `track product.id` tạo **track key**, định danh Angular dùng để ghép item dữ liệu với view/DOM qua các lần cập nhật.
+
+Với phần lớn danh sách, Angular yêu cầu mệnh đề `track`. Đây là quyết định có chủ ý: danh sách có thể thay đổi theo nhiều cách và Angular cần biết item nào là “cùng một item” để cập nhật hiệu quả, đúng vị trí.
+
+### Chọn khóa tracking đúng
+
+Khóa tốt phải **duy nhất trong danh sách** và **ổn định theo thời gian sống của item**. `id` từ cơ sở dữ liệu hoặc UUID là lựa chọn phổ biến.
+
+| Dữ liệu | `track` nên dùng | Lý do |
+| --- | --- | --- |
+| Sản phẩm có `id` | `track product.id` | ID nhận diện cùng sản phẩm dù đổi tên hoặc vị trí. |
+| Bình luận có `commentId` | `track comment.commentId` | Thêm bình luận đầu danh sách không làm nhầm các comment cũ. |
+| Danh sách hằng, không thêm/xóa/sắp xếp | `track $index` | Vị trí ổn định trong tình huống rất hẹp. |
+| Object không có khóa ổn định | Bổ sung khóa khi tạo dữ liệu | Tránh dựa vào tham chiếu object. |
+
+Ví dụ sau **không** phù hợp nếu người dùng có thể xóa hoặc chèn sản phẩm ở đầu mảng:
+
+```html
+@for (product of products; track $index) {
+  <app-product-editor [product]="product" />
+}
+```
+
+Khi phần tử đầu bị xóa, index `0` nay trỏ tới sản phẩm trước đó ở index `1`. Angular có thể tái sử dụng view của item cũ cho item mới ở vị trí đó. Với card thuần hiển thị, kết quả có thể chỉ là cập nhật text; với component con có state cục bộ, input hoặc animation, việc ghép nhầm theo vị trí có thể tạo ra hành vi khó hiểu.
+
+<Callout type="idea" title="Quy tắc thực hành">
+  Nếu item biểu diễn một thực thể thật — sản phẩm, người dùng, đơn hàng, tin nhắn — hãy đưa khóa của thực thể vào `track`. Chỉ dùng `$index` khi danh sách thực sự cố định về thứ tự và thành phần.
+</Callout>
+
+Angular cũng cho phép `track identity`, tức theo chính tham chiếu object. Cách này chỉ phù hợp khi bạn chắc object giữ nguyên tham chiếu giữa các lần cập nhật. Nếu API tạo object mới cho cùng một thực thể, Angular không nhận ra chúng là cùng item. Khóa dữ liệu rõ ràng vẫn đáng tin cậy hơn.
+
+### Biến ngữ cảnh của vòng lặp
+
+Bên trong thân `@for`, Angular cung cấp các biến bắt đầu bằng `$`. Bạn có thể dùng trực tiếp hoặc đặt alias để tên có ý nghĩa trong template.
+
+```html
+@for (
+  product of products;
+  track product.id;
+  let position = $index, first = $first, last = $last
+) {
+  <article [class.first-card]="first" [class.last-card]="last">
+    <span>#{{ position + 1 }}</span>
+    {{ product.name }}
+  </article>
+}
+```
+
+| Biến | Giá trị |
+| --- | --- |
+| `$count` | Tổng số item của vòng lặp. |
+| `$index` | Vị trí hiện tại, bắt đầu từ `0`. |
+| `$first` | `true` cho item đầu tiên. |
+| `$last` | `true` cho item cuối cùng. |
+| `$even` | `true` nếu `$index` là số chẵn. |
+| `$odd` | `true` nếu `$index` là số lẻ. |
+
+Alias đặc biệt hữu ích khi lồng vòng lặp. Nếu cả vòng ngoài và trong đều đọc `$index`, hãy đổi tên từng cái để tránh dùng nhầm.
+
+```html
+@for (category of categories; track category.id; let categoryIndex = $index) {
+  <h2>{{ categoryIndex + 1 }}. {{ category.name }}</h2>
+
+  @for (product of category.products; track product.id; let productIndex = $index) {
+    <p>{{ categoryIndex + 1 }}.{{ productIndex + 1 }} {{ product.name }}</p>
+  }
+}
+```
+
+### `@empty`: trạng thái danh sách rỗng
+
+`@empty` là block tùy chọn đi ngay sau thân `@for`. Nó được hiển thị khi iterable không có item.
+
+```html
+@for (result of searchResults; track result.id) {
+  <a [routerLink]="['/products', result.id]">{{ result.name }}</a>
+} @empty {
+  <p>Không tìm thấy sản phẩm phù hợp.</p>
+}
+```
+
+Đây là nơi phù hợp cho **kết quả đã có nhưng rỗng**. Nó không tự phân biệt mảng rỗng vì “chưa tải” với mảng rỗng vì “không có kết quả”. Nếu UI có trạng thái tải hoặc lỗi, đặt `@for` vào nhánh `@else` sau khi bạn đã kiểm tra các state đó:
+
+```html
+@if (isLoading) {
+  <p>Đang tìm kiếm...</p>
+} @else if (errorMessage) {
+  <p role="alert">{{ errorMessage }}</p>
+} @else {
+  @for (result of searchResults; track result.id) {
+    <app-search-result [result]="result" />
+  } @empty {
+    <p>Không có kết quả cho “{{ query }}”.</p>
+  }
+}
+```
+
+### Dữ liệu thay đổi, Angular cập nhật gì
+
+Giả sử danh sách ban đầu là `A`, `B`, `C`, có key tương ứng `1`, `2`, `3`. Sau đó người dùng ghim `C` lên đầu, danh sách thành `C`, `A`, `B`.
+
+```text
+Lần render đầu:    [A key=1] [B key=2] [C key=3]
+Sau khi sắp xếp:   [C key=3] [A key=1] [B key=2]
+                         │         │         │
+Angular nhận ra:   dùng lại C  dùng lại A  dùng lại B
+                   và di chuyển node/view theo thứ tự mới
+```
+
+Với `track product.id`, Angular có thể ghép mỗi item theo ID rồi tạo item mới, hủy item mất đi hoặc di chuyển item đổi vị trí. Nếu ID trùng nhau hoặc thay đổi tùy lần render, phép ghép này không còn đáng tin. Nói ngắn gọn: khóa không chỉ là tối ưu hiệu năng; nó là mô tả danh tính của dữ liệu trong UI.
+
+## `@switch`: chọn một giao diện theo giá trị
+
+### Cú pháp `@case` và `@default`
+
+`@switch` đánh giá một biểu thức một lần, sau đó chọn `@case` có giá trị khớp. `@default` xử lý giá trị không có case tương ứng.
+
+```html
+@switch (order.status) {
+  @case ('pending') {
+    <span class="badge badge-warning">Chờ xác nhận</span>
+  }
+  @case ('paid') {
+    <span class="badge badge-info">Đã thanh toán</span>
+  }
+  @case ('shipped') {
+    <span class="badge badge-success">Đang giao</span>
+  }
+  @case ('cancelled') {
+    <span class="badge badge-muted">Đã hủy</span>
+  }
+  @default {
+    <span class="badge">Trạng thái chưa xác định</span>
+  }
+}
+```
+
+Việc so khớp case dùng so sánh nghiêm ngặt (`===`). Vì vậy, `@case (1)` không khớp giá trị chuỗi `'1'`. Mỗi case là một block riêng; không có cơ chế *fall-through* như `switch` trong JavaScript, nơi quên `break` có thể chạy sang case tiếp theo.
+
+`@default` không bắt buộc về cú pháp, nhưng nên có khi giá trị có thể đến từ API, feature flag hoặc dữ liệu ngoài phạm vi TypeScript của bạn. Nó biến một giá trị lạ thành UI có chủ đích thay vì vùng trống khó chẩn đoán.
+
+### Khi nào dùng `@switch` thay vì chuỗi `@if`
+
+Hai cách sau đều có thể hoạt động, nhưng chúng truyền đạt ý định khác nhau:
+
+```html
+<!-- Chuỗi điều kiện: mỗi điều kiện có thể khác bản chất -->
+@if (isLoading) {
+  <app-loading-spinner />
+} @else if (hasPermission) {
+  <button>Chỉnh sửa</button>
+} @else {
+  <p>Bạn chỉ có quyền xem.</p>
+}
+```
+
+```html
+<!-- Một giá trị status quyết định nhiều biến thể giao diện -->
+@switch (order.status) {
+  @case ('pending') { <app-pending-order [order]="order" /> }
+  @case ('shipped') { <app-shipped-order [order]="order" /> }
+  @default { <app-unknown-order [order]="order" /> }
+}
+```
+
+Dùng `@if` khi mỗi nhánh là một câu hỏi có/không hoặc có thứ tự ưu tiên. Dùng `@switch` khi tất cả nhánh là các khả năng của **một giá trị phân loại**. Nếu `status` là union type trong TypeScript, hãy giữ tên case đồng bộ với union đó để refactor an toàn hơn.
+
+## Ví dụ hoàn chỉnh: màn hình kết quả tìm kiếm
+
+Ví dụ dưới đây ghép ba block vào một màn hình. Mục tiêu là phân biệt rõ bốn trạng thái: đang chờ từ khóa, đang tải, đã tải nhưng không có kết quả, và có kết quả với badge tồn kho.
+
+### Component giữ state
+
+Ví dụ dùng `signal()` để state có thể được template đọc qua `query()`, `isLoading()` và `results()`. Bạn có thể áp dụng control flow tương tự cho thuộc tính class thông thường; điều quan trọng là biểu thức phải trả về state hiện tại.
+
+```ts
+import { Component, signal } from '@angular/core';
+
+interface SearchResult {
+  id: string;
+  name: string;
+  price: number;
+  stock: 'in-stock' | 'low-stock' | 'out-of-stock';
+}
+
+@Component({
+  selector: 'app-product-search',
+  templateUrl: './product-search.component.html',
+})
+export class ProductSearchComponent {
+  query = signal('');
+  isLoading = signal(false);
+  errorMessage = signal<string | null>(null);
+  results = signal<SearchResult[]>([]);
+
+  search(term: string) {
+    this.query.set(term);
+    this.errorMessage.set(null);
+    this.isLoading.set(true);
+
+    // Ví dụ rút gọn: khi API trả về, gọi results.set(...) và isLoading.set(false).
+  }
+}
+```
+
+### Template biểu diễn từng trạng thái
+
+```html
+<section aria-labelledby="search-heading">
+  <h2 id="search-heading">Tìm sản phẩm</h2>
+
+  @if (!query()) {
+    <p>Nhập từ khóa để bắt đầu tìm kiếm.</p>
+  } @else if (isLoading()) {
+    <p aria-live="polite">Đang tìm “{{ query() }}”...</p>
+  } @else if (errorMessage(); as message) {
+    <p role="alert">Không thể tìm kiếm: {{ message }}</p>
+  } @else {
+    <p aria-live="polite">Có {{ results().length }} kết quả.</p>
+
+    @for (result of results(); track result.id; let position = $index) {
+      <article class="search-result">
+        <h3>{{ position + 1 }}. {{ result.name }}</h3>
+        <p>{{ result.price | currency: 'VND' }}</p>
+
+        @switch (result.stock) {
+          @case ('in-stock') {
+            <span class="stock stock-ok">Còn hàng</span>
+          }
+          @case ('low-stock') {
+            <span class="stock stock-low">Sắp hết hàng</span>
+          }
+          @case ('out-of-stock') {
+            <span class="stock stock-none">Hết hàng</span>
+          }
+          @default {
+            <span class="stock">Chưa rõ tồn kho</span>
+          }
+        }
+      </article>
+    } @empty {
+      <p>Không có kết quả cho “{{ query() }}”.</p>
+    }
+  }
+</section>
+```
+
+`results()` được gọi trong `@for` để lấy mảng hiện tại của signal. `track result.id` giữ liên hệ giữa cùng một kết quả qua các lần tìm kiếm hoặc sắp xếp. `@empty` chỉ chạy sau khi đã qua nhánh không có từ khóa, tải và lỗi, nên thông báo của nó có nghĩa chính xác là “đã tìm xong nhưng không có kết quả”.
+
+### Đọc một lần chuyển trạng thái
+
+Giả sử người dùng gõ `chuột` và API trả về hai kết quả. UI đi qua chuỗi sau:
+
+1. Ban đầu `query()` rỗng, nhánh đầu của `@if` hướng dẫn người dùng nhập từ khóa.
+2. `search('chuột')` cập nhật query và đặt `isLoading()` thành `true`; spinner/thông báo tải thay thế nhánh hướng dẫn.
+3. API trả về hai object có `id` ổn định. Component gọi `results.set(data)` rồi `isLoading.set(false)`.
+4. Nhánh cuối chạy `@for`, Angular tạo hai `article` và `@switch` của mỗi item chọn badge tồn kho.
+5. Nếu lần tìm kế tiếp trả về mảng `[]`, Angular bỏ các article cũ và hiển thị `@empty`.
+
+Mỗi bước chỉ thay đổi state. Template giữ toàn bộ quy tắc “state nào cho ra UI nào” ở một nơi có thể đọc và kiểm tra được.
+
+## Performance và trade-off
+
+### `@if` không phải cách ẩn bằng CSS
+
+`@if` quyết định node có tồn tại trong DOM hay không. Khi nhánh false, component con trong nhánh không còn được render và các resource gắn với lifecycle của nó được dọn theo cơ chế Angular. Đây là lợi ích khi vùng UI nặng, hiếm dùng hoặc không được phép tương tác.
+
+Ngược lại, CSS như `[hidden]`, `display: none` hoặc class ẩn giữ element trong DOM. Cách này thường hợp với panel bật/tắt liên tục khi bạn muốn giữ trạng thái input, scroll hoặc focus, nhưng cần cân nhắc accessibility và việc nội dung ẩn có nên còn trong cây truy cập hay không.
+
+**Kết luận thực hành:** dùng `@if` cho sự tồn tại có điều kiện. Dùng CSS khi yêu cầu là giữ phần tử sống nhưng đổi khả năng nhìn thấy.
+
+### Tracking quyết định chi phí cập nhật danh sách
+
+`track` giúp Angular tái sử dụng view đúng item thay vì coi mọi phần tử là mới. Lợi ích rõ nhất với danh sách dài, danh sách có component con, hoặc thao tác chèn/xóa/sắp xếp. Tuy nhiên, một `track` sai không được cứu bởi việc “nhanh hơn”: nó có thể ghép state cục bộ với item sai.
+
+Đừng tạo key ngẫu nhiên ngay trong template:
+
+```html
+<!-- Sai: giá trị đổi mỗi lần Angular đánh giá template. -->
+@for (product of products; track createRandomId(product)) {
+  <app-product-card [product]="product" />
+}
+```
+
+Cũng không nên gọi hàm tạo key tốn kém trong `track`. Tạo `id` một lần ở lớp dữ liệu, rồi đọc trực tiếp `product.id`:
+
+```html
+@for (product of products; track product.id) {
+  <app-product-card [product]="product" />
+}
+```
+
+### Đừng đưa tính toán nặng vào template
+
+Control flow có thể đánh giá biểu thức khi Angular kiểm tra giao diện. Một biểu thức như `products.filter(...).sort(...)` đặt thẳng trong `@for` vừa khó đọc vừa có thể tạo mảng mới nhiều lần.
+
+```html
+<!-- Tránh: vừa lọc vừa sắp xếp ngay trong template. -->
+@for (product of products.filter(matchesQuery).sort(byPrice); track product.id) {
+  <app-product-card [product]="product" />
+}
+```
+
+Hãy chuẩn bị state dẫn xuất trong component. Với signal, `computed()` là một lựa chọn tự nhiên:
+
+```ts
+import { computed, signal } from '@angular/core';
+
+products = signal<Product[]>([]);
+query = signal('');
+
+visibleProducts = computed(() => {
+  const keyword = this.query().trim().toLowerCase();
+  return this.products()
+    .filter((product) => product.name.toLowerCase().includes(keyword))
+    .toSorted((a, b) => a.price - b.price);
+});
+```
+
+```html
+@for (product of visibleProducts(); track product.id) {
+  <app-product-card [product]="product" />
+}
+```
+
+Điểm chính không phải cấm mọi biểu thức. Một phép đọc như `items.length === 0` hoàn toàn rõ và nhẹ. Hãy đưa logic có nhiều bước, lọc/sắp xếp hoặc tác dụng phụ ra khỏi template để dữ liệu dễ kiểm thử và kết quả dễ dự đoán.
+
+### Khả năng đọc quan trọng hơn việc nén template
+
+Một template nhồi nhiều block lồng nhau có thể đúng về cú pháp nhưng rất khó bảo trì:
+
+```html
+@if (account) {
+  @for (order of account.orders; track order.id) {
+    @if (order.visible) {
+      @switch (order.status) {
+        <!-- nhiều giao diện phức tạp -->
+      }
+    }
+  }
+}
+```
+
+Lồng block là bình thường khi nó diễn tả cấu trúc UI thật. Nhưng nếu mỗi nhánh dài hoặc có logic nghiệp vụ khác nhau, hãy tách thành component như `<app-order-row>` hoặc chuẩn bị dữ liệu `visibleOrders` trong class. Ranh giới component tốt làm control flow của màn hình đọc như một bản đồ trạng thái, thay vì như một chương trình nhiều tầng.
+
+## Chuyển từ structural directives
+
+Built-in control flow được giới thiệu để template diễn tả khối điều khiển rõ ràng hơn và có cơ chế tracking hiện đại. Structural directives cũ vẫn tồn tại để tương thích; bạn không cần migration mọi file trong một lần. Quan trọng là hiểu ánh xạ cú pháp và kiểm tra hành vi, đặc biệt với `ng-template` tham chiếu.
+
+### Bảng ánh xạ cú pháp
+
+| Structural directive | Built-in control flow | Ghi chú migration |
+| --- | --- | --- |
+| `*ngIf="condition"` | `@if (condition) { ... }` | Bỏ import `NgIf` nếu không còn dùng. |
+| `*ngIf="value as local"` | `@if (value; as local) { ... }` | Biến cục bộ chỉ sống trong block. |
+| `*ngIf="condition; else empty"` | `@if (condition) { ... } @else { ... }` | Không cần `ng-template #empty` chỉ cho else. |
+| `*ngFor="let item of items; trackBy: trackById"` | `@for (item of items; track item.id) { ... }` | Chuyển từ hàm `trackBy` sang biểu thức khóa. |
+| `*ngFor` + template rỗng riêng | `@for (...) { ... } @empty { ... }` | `@empty` là block đi kèm. |
+| `[ngSwitch]`, `*ngSwitchCase`, `*ngSwitchDefault` | `@switch (...) { @case (...) { ... } @default { ... } }` | Chuyển cả cụm, không chuyển từng case rời. |
+
+Các directive khác như `*ngTemplateOutlet`, `*ngComponentOutlet` hoặc structural directive tự viết không có phép thay thế một-một bằng ba block này. Chỉ đổi chúng khi bạn hiểu rõ mục đích và API tương ứng.
+
+### Chuyển `*ngIf` có `else`
+
+Mẫu cũ dùng tên template để nối nhánh else:
+
+```html
+<div *ngIf="user; else loggedOut">
+  Xin chào {{ user.name }}
+</div>
+
+<ng-template #loggedOut>
+  <a routerLink="/login">Đăng nhập</a>
+</ng-template>
+```
+
+Mẫu mới đặt hai nhánh cạnh nhau. Người đọc không cần tìm template được tham chiếu ở vị trí khác:
+
+```html
+@if (user) {
+  <div>Xin chào {{ user.name }}</div>
+} @else {
+  <a routerLink="/login">Đăng nhập</a>
+}
+```
+
+Sau khi đổi, xóa `NgIf` khỏi `imports` của standalone component nếu đó là nơi duy nhất dùng directive này. Nhưng vẫn giữ `CommonModule` nếu template còn dùng `AsyncPipe`, `NgClass` hay directive/pipe khác mà module cung cấp. Migration cú pháp không phải lý do để xóa dependency một cách mù quáng.
+
+### Chuyển `*ngFor` và trạng thái rỗng
+
+Với `*ngFor`, dự án cũ thường khai báo một hàm `trackBy`. Hàm đó nhận index và item rồi trả về key:
+
+```ts
+trackByProductId(_index: number, product: Product) {
+  return product.id;
+}
+```
+
+```html
+<ng-container *ngIf="products.length; else empty">
+  <app-product-card
+    *ngFor="let product of products; trackBy: trackByProductId"
+    [product]="product"
+  />
+</ng-container>
+
+<ng-template #empty>
+  <p>Chưa có sản phẩm.</p>
+</ng-template>
+```
+
+Sau migration, key xuất hiện ngay cạnh item và trạng thái rỗng ở cạnh vòng lặp:
+
+```html
+@for (product of products; track product.id) {
+  <app-product-card [product]="product" />
+} @empty {
+  <p>Chưa có sản phẩm.</p>
+}
+```
+
+Nếu `trackByProductId` chỉ trả về `product.id`, nó không còn cần thiết. Nếu hàm cũ có logic phức tạp — chẳng hạn ghép nhiều trường hoặc xử lý dữ liệu thiếu ID — hãy quyết định key rõ ràng trước khi xóa hàm. Đừng dịch máy móc một hàm có side effect vào biểu thức `track`.
+
+### Chuyển `ngSwitch`
+
+Mẫu `ngSwitch` đặt giá trị trên phần tử cha và case trên các phần tử con:
+
+```html
+<div [ngSwitch]="payment.status">
+  <p *ngSwitchCase="'pending'">Đang chờ thanh toán</p>
+  <p *ngSwitchCase="'paid'">Đã thanh toán</p>
+  <p *ngSwitchDefault>Không rõ trạng thái</p>
+</div>
+```
+
+Mẫu mới gom toàn bộ cấu trúc điều khiển vào `@switch`. Bạn có thể giữ lại phần tử bọc nếu nó cần cho layout hoặc semantics:
+
+```html
+<div>
+  @switch (payment.status) {
+    @case ('pending') {
+      <p>Đang chờ thanh toán</p>
+    }
+    @case ('paid') {
+      <p>Đã thanh toán</p>
+    }
+    @default {
+      <p>Không rõ trạng thái</p>
+    }
+  }
+</div>
+```
+
+Hãy kiểm tra lại hành vi nếu template cũ dựa vào nhiều `*ngSwitchCase` cùng khớp hoặc cấu trúc DOM đặc biệt. Mục tiêu là giữ đúng UX và semantics, không chỉ làm diff trông hiện đại hơn.
+
+### Lộ trình migration an toàn
+
+1. **Xác định phiên bản Angular.** Built-in control flow cần phiên bản Angular hỗ trợ cú pháp này. Không đưa `@if` vào một ứng dụng cũ chưa thể biên dịch nó.
+2. **Chuyển một component hoặc một feature nhỏ.** Bắt đầu từ template có điều kiện/danh sách đơn giản và có test hoặc màn hình dễ mở.
+3. **Giữ nguyên state và CSS trước.** Chỉ đổi cấu trúc template trong bước đầu để nguyên nhân lỗi dễ xác định.
+4. **Kiểm tra `track` và các biến cục bộ.** Đặc biệt kiểm tra thêm, xóa, sắp xếp danh sách; không chỉ kiểm tra render lần đầu.
+5. **Dọn import sau cùng.** Chỉ bỏ `NgIf`, `NgFor`, `NgSwitch` hoặc `CommonModule` khi compiler và template không còn cần chúng.
+6. **Thống nhất quy ước cho mã mới.** Một codebase có thể giữ cú pháp cũ khi migration dần, nhưng file mới nên theo một phong cách rõ ràng.
+
+## Lỗi phổ biến và cách gỡ
+
+### Quên hoặc chọn sai biểu thức `track`
+
+**Dấu hiệu:** compiler báo thiếu `track`; hoặc danh sách bị mất focus, mất state component con hay hiển thị hành vi lạ sau khi chèn/sắp xếp item.
+
+**Cách xử lý:** chọn khóa duy nhất, ổn định của thực thể:
+
+```html
+@for (customer of customers; track customer.id) {
+  <app-customer-row [customer]="customer" />
+}
+```
+
+Không chọn `track $index` cho mảng mà người dùng có thể lọc, xóa hoặc đổi thứ tự. Không tạo khóa ngẫu nhiên trong template. Nếu backend chưa trả ID, giải quyết danh tính ở model/API adapter thay vì giấu vấn đề trong `@for`.
+
+### Nhầm `@empty` với dữ liệu đang tải
+
+**Dấu hiệu:** người dùng vừa mở trang đã thấy “Không có dữ liệu” trong khi request vẫn đang chạy.
+
+**Nguyên nhân:** `@empty` chỉ biết iterable hiện tại rỗng. Trước khi API trả về, mảng khởi tạo `[]` cũng rỗng.
+
+**Cách xử lý:** biểu diễn tải, lỗi và dữ liệu thành state riêng, rồi đặt `@for` sau các nhánh đó như ví dụ tìm kiếm ở trên. Nếu ứng dụng dùng một resource/state machine, hãy để template đọc status của resource trước khi quyết định hiển thị `@empty`.
+
+### Dùng `@if` khi chỉ cần đổi kiểu hiển thị
+
+**Dấu hiệu:** menu đóng/mở làm mất text đã nhập, reset scroll hoặc hủy component con không mong muốn.
+
+**Nguyên nhân:** `@if` hủy node của nhánh false, trong khi yêu cầu thực tế là giữ node nhưng ẩn nó.
+
+**Cách xử lý:** nếu cần giữ lifecycle của node, cân nhắc `[hidden]`, class CSS hoặc một component điều khiển overlay phù hợp. Nếu nội dung không nên tồn tại hoặc không nên tương tác, `@if` vẫn là lựa chọn rõ ràng hơn.
+
+### Sai phạm vi biến vòng lặp
+
+**Dấu hiệu:** template báo không tìm thấy `index`, hoặc số thứ tự lồng nhau hiển thị sai.
+
+**Nguyên nhân:** biến hệ thống là `$index`, `$count`..., không phải `index` tự do; alias của vòng trong có thể che ý nghĩa của vòng ngoài.
+
+**Cách xử lý:** dùng biến `$` trực tiếp hoặc tạo alias có tên rõ:
+
+```html
+@for (group of groups; track group.id; let groupIndex = $index) {
+  @for (member of group.members; track member.id; let memberIndex = $index) {
+    <p>{{ groupIndex + 1 }}-{{ memberIndex + 1 }}: {{ member.name }}</p>
+  }
+}
+```
+
+### Trộn cú pháp cũ và mới không có chủ đích
+
+**Dấu hiệu:** component vẫn import `NgIf`/`NgFor` dù không dùng, hoặc reviewer khó biết dự án đang migration đến đâu.
+
+**Cách xử lý:** Trộn hai phong cách trong cả codebase là bình thường khi chuyển dần. Nhưng trong một template nhỏ, ưu tiên một phong cách nếu không có lý do tương thích. Sau mỗi migration, rà soát `imports` của component và giữ lại đúng dependency template đang dùng.
+
+## Danh sách kiểm tra
+
+- [ ] `@if` phản ánh một điều kiện UI có tên hoặc ý nghĩa rõ ràng.
+- [ ] Nhánh `@else if` được sắp theo ưu tiên UX đã định.
+- [ ] Mọi `@for` có `track` dựa trên khóa duy nhất, ổn định của item.
+- [ ] `$index` chỉ được dùng làm track cho danh sách thực sự cố định.
+- [ ] `@empty` chỉ đại diện cho kết quả rỗng, không che trạng thái tải hoặc lỗi.
+- [ ] `@switch` được dùng khi nhiều UI phụ thuộc vào cùng một giá trị phân loại.
+- [ ] Có `@default` khi giá trị ngoài dự kiến cần được xử lý an toàn.
+- [ ] Biểu thức template chỉ đọc hoặc tính toán nhẹ; lọc/sắp xếp phức tạp nằm trong component.
+- [ ] Khi migration, bạn đã kiểm tra import còn cần và đã thử thêm/xóa/sắp xếp danh sách.
+- [ ] Bạn đã cân nhắc `@if` hay CSS dựa trên việc node có cần giữ lifecycle hay không.
+
+## Tóm tắt
+
+Built-in control flow giúp template Angular mô tả UI từ state một cách trực tiếp. `@if` chọn phần UI tồn tại theo điều kiện; `@for` tạo UI cho từng item và dùng `track` để giữ đúng danh tính; `@empty` nói rõ danh sách đã rỗng; `@switch` biểu diễn các biến thể của một giá trị.
+
+Ba quy tắc quan trọng nhất là: chuẩn bị state rõ ràng trước khi render, track theo ID ổn định thay vì vị trí, và phân biệt “hủy DOM” của `@if` với “ẩn DOM” bằng CSS. Khi chuyển từ `*ngIf`, `*ngFor`, `ngSwitch`, hãy đổi theo từng lát nhỏ và kiểm tra hành vi thay đổi dữ liệu, không chỉ kiểm tra giao diện lần đầu.
+
+<Cards>
+  <Card title="Data binding" href="/docs/component-template/data-binding" description="Đưa dữ liệu vào template và nhận sự kiện từ người dùng." />
+  <Card title="Standalone component" href="/docs/component-template/component-standalone" description="Hiểu imports của template và kiến trúc component hiện đại." />
+  <Card title="Giao tiếp giữa component" href="/docs/component-template/giao-tiep-component" description="Truyền dữ liệu, phát sự kiện và giữ state ở đúng nơi." />
+</Cards>

@@ -1,10 +1,534 @@
 ---
 title: Interceptors
-description: Can thiệp request/response cho auth, logging và metadata.
+description: Tập trung auth, lỗi, retry và quan sát HTTP bằng functional interceptor trong Angular.
 ---
 
-Trang này sẽ trình bày **Interceptors** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi bài viết">
+  Bài này dùng **functional interceptor** — lựa chọn được Angular khuyến nghị cho
+  ứng dụng mới. Interceptor giúp áp dụng chính sách HTTP dùng chung; nó không
+  thay thế kiểm tra xác thực, phân quyền hay validation ở backend.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Interceptor giải quyết vấn đề gì?](#interceptor-giải-quyết-vấn-đề-gì)
+  - [Khi nào nên và không nên dùng?](#khi-nào-nên-và-không-nên-dùng)
+- [Đăng ký functional interceptor](#đăng-ký-functional-interceptor)
+- [Cơ chế chuỗi xử lý](#cơ-chế-chuỗi-xử-lý)
+  - [Request đi xuôi, response quay ngược](#request-đi-xuôi-response-quay-ngược)
+  - [Dependency injection trong interceptor](#dependency-injection-trong-interceptor)
+- [Request bất biến và `clone()`](#request-bất-biến-và-clone)
+- [Các interceptor thực tế](#các-interceptor-thực-tế)
+  - [Gắn access token có chọn lọc](#gắn-access-token-có-chọn-lọc)
+  - [Phân loại lỗi xác thực](#phân-loại-lỗi-xác-thực)
+  - [Retry lỗi tạm thời](#retry-lỗi-tạm-thời)
+  - [Quan sát request mà không lộ dữ liệu](#quan-sát-request-mà-không-lộ-dữ-liệu)
+- [Khi không dùng interceptor](#khi-không-dùng-interceptor)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Kiểm thử interceptor](#kiểm-thử-interceptor)
+- [Tóm tắt](#tóm-tắt)
+
+## Tổng quan
+
+Interceptor là một hàm nằm trên đường đi của mọi request mà `HttpClient` đã
+được cấu hình để xử lý. Hàm này nhận request hiện tại, có thể tạo một bản sao
+đã chỉnh sửa, rồi chuyển nó cho handler kế tiếp. Khi response hoặc lỗi quay về,
+interceptor cũng có thể quan sát hoặc biến đổi luồng `Observable` đó.
+
+### Interceptor giải quyết vấn đề gì?
+
+Không có interceptor, mỗi API service thường phải tự thêm `Authorization`,
+request ID, đo thời gian hoặc lặp lại một số lỗi. Cách này nhanh cho một request
+nhưng sớm tạo ra quy ước không đồng nhất. Một endpoint bị quên token hoặc một
+log vô tình chứa dữ liệu nhạy cảm là lỗi khó dò.
+
+Interceptor phù hợp cho **chính sách kỹ thuật dùng chung**, chẳng hạn:
+
+- gắn access token cho các request đến API tin cậy;
+- gắn correlation ID để đối chiếu log client và server;
+- chuẩn hóa phản ứng trước `401 Unauthorized`;
+- retry có giới hạn cho lỗi mạng và một số lỗi server tạm thời;
+- đo thời gian request hoặc gửi metric.
+
+Nó không nên chứa quy tắc nghiệp vụ của một màn hình. Ví dụ, “sau khi tạo công
+việc thì làm mới danh sách công việc” thuộc `TaskApiService` hoặc state của
+màn hình, không phải interceptor.
+
+### Khi nào nên và không nên dùng?
+
+Dùng interceptor khi hành vi cần nhất quán trên nhiều request và không phụ
+thuộc vào ngữ cảnh UI. Đặt tên interceptor theo **một trách nhiệm**,
+ví dụ `authInterceptor`, `retryInterceptor` và `telemetryInterceptor`, thay vì
+một `globalInterceptor` làm mọi việc.
+
+Không dùng interceptor khi hành vi chỉ áp dụng cho một endpoint hoặc cần dữ
+liệu UI cụ thể như toast, form control hay component đang hiển thị. Những dữ
+liệu đó làm tầng HTTP phụ thuộc ngược vào giao diện và khó kiểm thử. Phần
+[Khi không dùng interceptor](#khi-không-dùng-interceptor) đưa ra các lựa chọn
+thay thế cụ thể.
+
+## Đăng ký functional interceptor
+
+Với standalone application, đăng ký `HttpClient` và chuỗi interceptor ở
+`app.config.ts`. Thứ tự trong mảng là thứ tự request đi qua các interceptor.
+
+```ts
+// src/app/app.config.ts
+import { ApplicationConfig } from "@angular/core";
+import { provideHttpClient, withInterceptors } from "@angular/common/http";
+import { authInterceptor } from "./core/http/auth.interceptor";
+import { telemetryInterceptor } from "./core/http/telemetry.interceptor";
+import { retryInterceptor } from "./core/http/retry.interceptor";
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(
+      withInterceptors([
+        telemetryInterceptor,
+        authInterceptor,
+        retryInterceptor,
+      ]),
+    ),
+  ],
+};
+```
+
+Một functional interceptor có dạng `HttpInterceptorFn`. `next` là handler cho
+phần còn lại của chuỗi; đa số interceptor phải gọi `next(request)`. Nếu không
+gọi nó, request bị chặn hoặc được trả lời ngay từ interceptor, ví dụ cache có
+thể trả một `HttpResponse` đã có sẵn.
+
+```ts
+// src/app/core/http/telemetry.interceptor.ts
+import { HttpInterceptorFn } from "@angular/common/http";
+
+export const telemetryInterceptor: HttpInterceptorFn = (request, next) => {
+  return next(request);
+};
+```
+
+<Callout type="idea" title="Ưu tiên function thay vì class">
+  Functional interceptor có thứ tự xử lý rõ ràng theo cấu hình và có thể gọi
+  `inject()` trong injection context của Angular. `HttpInterceptor` dạng class
+  vẫn hữu ích khi bảo trì mã cũ, nhưng không nên là mặc định cho code mới.
+</Callout>
+
+## Cơ chế chuỗi xử lý
+
+### Request đi xuôi, response quay ngược
+
+Giả sử mảng đăng ký là `[telemetry, auth, retry]`. Request đi theo thứ tự từ
+trái sang phải. Mỗi interceptor gọi `next()` để giao quyền cho interceptor sau;
+sau interceptor cuối cùng là HTTP backend. Response và error quay lại qua các
+`Observable` theo chiều ngược lại.
+
+```text
+Request
+HttpClient → telemetry → auth → retry → HTTP backend
+
+Response / error
+HttpClient ← telemetry ← auth ← retry ← HTTP backend
+```
+
+Nói chính xác hơn, `telemetry` bọc lời gọi `next()` của nó, `auth` bọc lời gọi
+`next()` tiếp theo. Vì vậy một toán tử RxJS đặt **sau** `next(request)` ở
+`retry` quan sát kết quả trước, rồi mới đến `auth` và `telemetry`. Đừng dựa vào
+thứ tự ngầm định: hãy khai báo thứ tự như một phần của thiết kế.
+
+Ví dụ, telemetry đặt đầu chuỗi sẽ đo cả thời gian retry. Nếu chỉ muốn đo lần
+gọi mạng cuối cùng, nó phải ở vị trí khác hoặc retry phải tự phát metric.
+Không có thứ tự “đúng” tuyệt đối; hãy chọn theo ý nghĩa metric cần thu thập.
+
+### Dependency injection trong interceptor
+
+Functional interceptor chạy trong injection context. Do đó có thể lấy service
+bằng `inject()` ngay trong thân hàm, thay vì truyền dependency qua biến toàn
+cục.
+
+```ts
+import { inject } from "@angular/core";
+import { HttpInterceptorFn } from "@angular/common/http";
+import { SessionService } from "../auth/session.service";
+
+export const authInterceptor: HttpInterceptorFn = (request, next) => {
+  const session = inject(SessionService);
+  const token = session.accessToken();
+
+  return next(token ? request.clone({ setHeaders: {
+    Authorization: `Bearer ${token}`,
+  } }) : request);
+};
+```
+
+Chỉ inject dependency cần thiết. Một interceptor inject service mà service đó
+lại gọi `HttpClient` dễ tạo vòng lặp hoặc làm cùng interceptor chạy lại. Nếu
+cần gọi endpoint refresh token, hãy thiết kế đường đi riêng và cơ chế bỏ qua
+interceptor phù hợp, thay vì để mọi request `401` tự gọi refresh vô hạn.
+
+## Request bất biến và `clone()`
+
+`HttpRequest` là bất biến (_immutable_): không gán trực tiếp lại URL, header,
+params hay method của request đang có. `HttpHeaders` và `HttpParams` cũng trả
+về đối tượng mới khi gọi `set()` hoặc `append()`. Tính chất này cho phép nhiều
+interceptor hoạt động dự đoán được trên cùng một request.
+
+Vì vậy, luôn gọi `clone()` khi thêm hoặc thay đổi thông tin:
+
+```ts
+import { HttpInterceptorFn } from "@angular/common/http";
+
+export const localeInterceptor: HttpInterceptorFn = (request, next) => {
+  const localizedRequest = request.clone({
+    setHeaders: { "Accept-Language": "vi-VN" },
+    setParams: { source: "web" },
+  });
+
+  return next(localizedRequest);
+};
+```
+
+`setHeaders` là cách ngắn gọn để thêm hoặc ghi đè header. Khi cần thao tác có
+điều kiện phức tạp, tạo `headers` mới rồi truyền vào `clone()`:
+
+```ts
+const headers = request.headers.set("X-Request-ID", crypto.randomUUID());
+return next(request.clone({ headers }));
+```
+
+<Callout type="warn" title="Body không tự deep-clone">
+  `clone()` tạo request mới nhưng không sao chép sâu object trong `body`. Đừng
+  sửa trực tiếp `request.body` trong interceptor. Nếu thực sự phải đổi payload,
+  hãy tạo object body mới rồi truyền `body: newBody` vào `clone()`.
+</Callout>
+
+Interceptor cũng có thể đọc hoặc thay đổi `HttpContext`. Context là kênh metadata
+nội bộ, không được gửi thành HTTP header. Nó phù hợp để một request yêu cầu bỏ
+qua chính sách chung mà không phải dựa vào so khớp URL mong manh.
+
+## Các interceptor thực tế
+
+### Gắn access token có chọn lọc
+
+Không phải mọi request đều nên nhận token. Endpoint đăng nhập, refresh token,
+tải asset hoặc URL của bên thứ ba có thể không được gắn `Authorization`. Hãy
+kết hợp hai điều kiện: chỉ tin cậy một API origin đã cấu hình và cho phép request
+chủ động bỏ qua auth bằng `HttpContextToken`.
+
+```ts
+// src/app/core/http/auth-context.ts
+import { HttpContextToken } from "@angular/common/http";
+
+export const SKIP_AUTH = new HttpContextToken<boolean>(() => false);
+export const SKIP_AUTH_ERROR = new HttpContextToken<boolean>(() => false);
+```
+
+```ts
+// src/app/core/http/auth.interceptor.ts
+import { inject } from "@angular/core";
+import { HttpInterceptorFn } from "@angular/common/http";
+import { SessionService } from "../auth/session.service";
+import { SKIP_AUTH } from "./auth-context";
+
+const apiOrigin = "https://api.example.test";
+
+export const authInterceptor: HttpInterceptorFn = (request, next) => {
+  const session = inject(SessionService);
+  const requestOrigin = new URL(request.url, apiOrigin).origin;
+  const isTrustedApi = requestOrigin === apiOrigin;
+  const skipAuth = request.context.get(SKIP_AUTH);
+  const token = session.accessToken();
+
+  if (!isTrustedApi || skipAuth || !token) {
+    return next(request);
+  }
+
+  return next(request.clone({
+    setHeaders: { Authorization: `Bearer ${token}` },
+  }));
+};
+```
+
+Request login chỉ cần chọn bỏ qua khi nó đi đến cùng API origin:
+
+```ts
+import { HttpContext } from "@angular/common/http";
+
+return this.http.post("https://api.example.test/auth/login", credentials, {
+  context: new HttpContext()
+    .set(SKIP_AUTH, true)
+    .set(SKIP_AUTH_ERROR, true),
+});
+```
+
+Không dùng `startsWith()` để kiểm tra origin: chuỗi
+`https://api.example.test.attacker.invalid` cũng bắt đầu bằng
+`https://api.example.test`. Ví dụ so sánh `origin` tuyệt đối sau khi parse URL.
+`apiOrigin` là base URL cấu hình, không phải `window.location`, nên đoạn này chạy
+được cả khi Angular render ở server. Vì vậy token chỉ đi đến đúng API origin đã
+cấu hình.
+
+Nếu backend dùng cookie phiên thay vì bearer token, interceptor có thể clone
+request với `withCredentials: true` cho API phù hợp. Cookie `HttpOnly`,
+`Secure`, `SameSite`, CORS và phòng chống CSRF vẫn là thiết kế của cả client và
+backend; `withCredentials` không tự làm cookie an toàn.
+
+### Phân loại lỗi xác thực
+
+`HttpErrorResponse` biểu diễn lỗi HTTP và lỗi mạng từ `HttpClient`. `401` nghĩa
+là request chưa xác thực hoặc token hết hạn; `403` nghĩa là danh tính hiện tại
+đã được xác thực nhưng không có quyền. Đừng xóa phiên hay điều hướng login khi
+nhận `403`.
+
+Một interceptor xử lý `401` có thể xóa phiên rồi điều hướng. Tuy nhiên, việc
+hiển thị thông báo chi tiết cho người dùng thường nên nằm ở error handler hoặc
+tầng UI, nơi có ngữ cảnh màn hình.
+
+```ts
+import { inject } from "@angular/core";
+import { HttpErrorResponse, HttpInterceptorFn } from "@angular/common/http";
+import { Router } from "@angular/router";
+import { catchError, throwError } from "rxjs";
+import { SessionService } from "../auth/session.service";
+import { SKIP_AUTH_ERROR } from "./auth-context";
+
+export const unauthorizedInterceptor: HttpInterceptorFn = (request, next) => {
+  const session = inject(SessionService);
+  const router = inject(Router);
+
+  return next(request).pipe(
+    catchError((error: unknown) => {
+      if (
+        error instanceof HttpErrorResponse &&
+        error.status === 401 &&
+        !request.context.get(SKIP_AUTH_ERROR)
+      ) {
+        session.clear();
+        void router.navigateByUrl("/login");
+      }
+
+      return throwError(() => error);
+    }),
+  );
+};
+```
+
+Đoạn mã vẫn phát lại lỗi sau khi dọn phiên. Nhờ vậy service gọi API có thể dừng
+loading và UI vẫn hiển thị trạng thái phù hợp. Login đặt `SKIP_AUTH_ERROR` nên
+một mật khẩu sai không bị hiểu nhầm là phiên hết hạn. Trong ứng dụng thật, cần
+ngăn nhiều request `401` đồng thời tạo nhiều lần điều hướng; một service quản
+lý phiên có thể giữ cờ “đang đăng xuất”.
+
+<Callout type="warn" title="Refresh token cần điều phối">
+  Đừng refresh token cho từng `401` độc lập. Các request đồng thời có thể tạo
+  nhiều refresh request, ghi đè token hoặc lặp vô hạn khi refresh cũng thất bại.
+  Nếu có refresh flow, dùng một service điều phối một lần refresh, chờ các
+  request khác, giới hạn một lần thử và bỏ qua endpoint refresh.
+</Callout>
+
+### Retry lỗi tạm thời
+
+Retry chỉ phù hợp với lỗi có khả năng tự hồi phục. Lỗi mạng thường có
+`status === 0`; lỗi `5xx` có thể tạm thời, nhưng phải được backend và sản phẩm
+cho phép. Không retry mặc định `401`, `403`, validation `4xx`, hoặc request ghi
+như `POST` vì retry có thể tạo dữ liệu trùng.
+
+Ví dụ dưới chỉ retry `GET` và `HEAD`, tối đa hai lần, với thời gian chờ tăng
+dần. `throwError` dừng retry ngay khi lỗi không đủ điều kiện.
+
+```ts
+import { HttpErrorResponse, HttpInterceptorFn } from "@angular/common/http";
+import { retry, throwError, timer } from "rxjs";
+
+function canRetry(requestMethod: string, error: unknown): boolean {
+  if (requestMethod !== "GET" && requestMethod !== "HEAD") return false;
+  if (!(error instanceof HttpErrorResponse)) return false;
+
+  return error.status === 0 || error.status >= 500;
+}
+
+export const retryInterceptor: HttpInterceptorFn = (request, next) => {
+  return next(request).pipe(
+    retry({
+      count: 2,
+      delay: (error, retryCount) => {
+        if (!canRetry(request.method, error)) {
+          return throwError(() => error);
+        }
+
+        return timer(250 * retryCount);
+      },
+    }),
+  );
+};
+```
+
+Trong production, thêm jitter (một độ ngẫu nhiên nhỏ vào thời gian chờ) để
+nhiều client không retry cùng một lúc. Với `429 Too Many Requests`, ưu tiên
+`Retry-After` do server trả về nếu hợp đồng API hỗ trợ. Với thao tác ghi cần
+retry, chỉ làm khi API cung cấp idempotency key hoặc nghiệp vụ chứng minh việc
+lặp request là an toàn.
+
+### Quan sát request mà không lộ dữ liệu
+
+Telemetry giúp trả lời “request nào chậm?” và liên kết báo lỗi với log server.
+Một interceptor có thể đo thời gian ở `finalize()`, vì toán tử này chạy cả khi
+request thành công, thất bại hoặc bị hủy subscription.
+
+```ts
+import { HttpInterceptorFn } from "@angular/common/http";
+import { finalize } from "rxjs";
+
+export const telemetryInterceptor: HttpInterceptorFn = (request, next) => {
+  const startedAt = performance.now();
+  const requestId = crypto.randomUUID();
+  const observedRequest = request.clone({
+    setHeaders: { "X-Request-ID": requestId },
+  });
+
+  return next(observedRequest).pipe(
+    finalize(() => {
+      const durationMs = Math.round(performance.now() - startedAt);
+      console.info("http.complete", {
+        method: observedRequest.method,
+        path: new URL(observedRequest.url, location.origin).pathname,
+        requestId,
+        durationMs,
+      });
+    }),
+  );
+};
+```
+
+Chỉ log method, đường dẫn đã lọc, status hoặc duration khi cần. Không log
+`Authorization`, cookie, password, access token, query chứa dữ liệu nhạy cảm
+hay toàn bộ body. Nếu gửi `X-Request-ID` khác origin, backend phải cho phép
+header này trong CORS; hãy cân nhắc thêm preflight request và chi phí của nó.
+
+## Khi không dùng interceptor
+
+Interceptor không phải lối tắt cho mọi request. Chọn tầng có ngữ cảnh phù hợp:
+
+| Nhu cầu | Nên đặt ở đâu? | Lý do |
+| --- | --- | --- |
+| Thêm query `page`, `sort`, `filter` cho một danh sách | API service | Đây là tham số nghiệp vụ riêng của endpoint. |
+| Chuyển DTO thành model hiển thị | API service hoặc mapper | UI nhận model rõ ràng, interceptor không biết endpoint nào trả DTO nào. |
+| Hiện toast “Đã lưu” sau `POST` | Component, facade hoặc effect | Thông điệp phụ thuộc hành động và trạng thái UI. |
+| Header chỉ cho một lần upload | Tùy chọn của request hoặc API service | Quy tắc không áp dụng toàn cục. |
+| Bỏ qua auth/cache/retry cho một request | `HttpContext` | Vẫn giữ chính sách chung, nhưng ngoại lệ được khai báo tường minh. |
+| Cấu hình timeout hoặc signal hủy theo thao tác UI | Request/service gọi API | Vòng đời của thao tác do UI hoặc nghiệp vụ quyết định. |
+
+Một interceptor cache cũng không phải luôn là lựa chọn tốt. Cache cần biết key,
+tính mới, invalidation sau thao tác ghi và đôi khi quyền của người dùng. Nếu
+những quy tắc đó gắn chặt với domain `Task`, cache ở `TaskApiService` thường rõ
+ràng hơn cache toàn cục theo URL.
+
+## Lỗi thường gặp và trade-off
+
+- **Quên gọi `next()`:** request không đến backend. Chỉ short-circuit khi chủ
+  đích trả cache/mock response và vẫn bảo đảm kiểu `HttpEvent` đúng.
+- **Mutate thay vì clone:** header hoặc params không đổi như mong đợi, hoặc làm
+  interceptor sau nhận dữ liệu sai. Luôn tạo request mới bằng `clone()`.
+- **Gắn token cho mọi URL:** có thể làm lộ bearer token cho domain ngoài. Chỉ
+  gắn cho origin/endpoint tin cậy và có đường bỏ qua rõ ràng.
+- **Một interceptor khổng lồ:** auth, retry, toast, cache và analytics bị buộc
+  chặt vào nhau. Tách theo trách nhiệm để dễ thay thứ tự và kiểm thử.
+- **Retry mù quáng:** tăng tải khi server đang lỗi, làm chậm thông báo lỗi và có
+  thể nhân đôi thao tác ghi. Giới hạn số lần, chỉ retry lỗi tạm thời và dùng
+  backoff.
+- **Đổi mọi lỗi thành một lỗi chung:** mất `status`, payload validation và ngữ
+  cảnh xử lý. Chuẩn hóa error model có chủ đích, nhưng giữ nguyên nguyên nhân
+  khi tầng gọi cần phân biệt.
+- **Điều hướng hoặc hiển thị toast trong interceptor:** tiện lúc đầu nhưng dễ
+  lặp thông báo khi nhiều request cùng lỗi. Interceptor nên thực hiện chính sách
+  phiên tối thiểu; UI quyết định trải nghiệm cụ thể.
+- **Đo thời gian nhưng log quá nhiều:** telemetry có chi phí và có rủi ro riêng
+  tư. Lấy mẫu, lọc trường dữ liệu và tuân theo chính sách retention của hệ thống.
+
+Thêm interceptor đồng nghĩa thêm một lớp “ma thuật” giữa code gọi API và mạng.
+Lợi ích là quy ước tập trung; cái giá là luồng khó nhìn hơn nếu thứ tự, điều kiện
+áp dụng và ngoại lệ không được ghi rõ. Giữ mỗi interceptor nhỏ, có tên theo mục
+đích và có test cho các nhánh quan trọng.
+
+## Kiểm thử interceptor
+
+Kiểm thử ở cấp `HttpClient` để xác nhận request sau interceptor thực sự có
+header, context và retry đúng. Khi dùng Angular testing hiện đại, cung cấp
+`provideHttpClient()` trước rồi mới ghi đè backend bằng
+`provideHttpClientTesting()`.
+
+```ts
+import { TestBed } from "@angular/core/testing";
+import {
+  HttpClient,
+  provideHttpClient,
+  withInterceptors,
+} from "@angular/common/http";
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from "@angular/common/http/testing";
+
+TestBed.configureTestingModule({
+  providers: [
+    provideHttpClient(withInterceptors([authInterceptor])),
+    provideHttpClientTesting(),
+  ],
+});
+
+const http = TestBed.inject(HttpClient);
+const controller = TestBed.inject(HttpTestingController);
+
+http.get("https://api.example.test/tasks").subscribe();
+
+const request = controller.expectOne("https://api.example.test/tasks");
+expect(request.request.headers.get("Authorization")).toBe("Bearer demo-token");
+request.flush([]);
+controller.verify();
+```
+
+Các ca kiểm thử tối thiểu:
+
+1. token được gắn cho API tin cậy và không gắn khi `SKIP_AUTH` là `true`;
+2. `401` xóa phiên một lần, còn `403` không xóa phiên;
+3. `GET` lỗi mạng được retry đúng số lần, còn `POST` không retry;
+4. request giữ được header/params có sẵn sau `clone()`;
+5. telemetry không ghi token, password hoặc body nhạy cảm.
+
+Với retry, dùng test scheduler hoặc fake timer nếu cần kiểm soát `timer()`. Đừng
+chỉ kiểm tra hàm interceptor được gọi; hãy kiểm tra request mà testing backend
+nhận được và hành vi observable mà service gọi API nhận lại.
+
+## Tóm tắt
+
+- Functional interceptor được đăng ký bằng
+  `provideHttpClient(withInterceptors([...]))`; request đi theo thứ tự khai báo,
+  còn response/error quay lại qua các lớp đã bọc `next()`.
+- `HttpRequest` là bất biến. Dùng `request.clone()` khi thêm header, params,
+  context hoặc body mới; không sửa trực tiếp body object.
+- Auth cần giới hạn origin, có ngoại lệ tường minh bằng `HttpContext`, và không
+  bao giờ thay thế xác thực/phân quyền ở backend.
+- Retry là chính sách có rủi ro: chỉ áp dụng cho lỗi tạm thời và request an toàn
+  để lặp lại, với backoff và giới hạn rõ ràng.
+- Telemetry hữu ích khi tối thiểu hóa dữ liệu log. Không ghi bí mật hoặc payload
+  nhạy cảm chỉ để debug.
+- Nếu hành vi thuộc endpoint, nghiệp vụ hay UI cụ thể, đặt nó ở API service,
+  facade hoặc component thay vì biến interceptor thành tầng toàn năng.
+
+<Cards>
+  <Card
+    title="HttpClient"
+    href="/docs/http-api-auth/http-client"
+    description="Quay lại nền tảng gửi request và đọc response có kiểu."
+  />
+  <Card
+    title="Xử lý lỗi API"
+    href="/docs/http-api-auth/xu-ly-loi-api"
+    description="Đi sâu vào phân loại, chuẩn hóa và trình bày lỗi từ API."
+  />
+  <Card
+    title="Authentication"
+    href="/docs/http-api-auth/authentication"
+    description="Thiết kế login, phiên và bảo vệ request ở phạm vi ứng dụng."
+  />
+</Cards>

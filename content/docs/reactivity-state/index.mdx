@@ -1,24 +1,164 @@
 ---
 title: Reactivity & State
-description: Quản lý dữ liệu phản ứng và trạng thái trong ứng dụng Angular.
+description: Lộ trình học cách mô hình hóa dữ liệu thay đổi, chọn Signals hoặc RxJS, và tổ chức state Angular từ cục bộ đến NgRx.
 ---
 
-Đây là trang khung cho nhóm **Reactivity & State**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+<Callout type="info" title="Bạn sẽ học gì ở nhóm này?">
+  Bạn sẽ đi từ một component có vài giá trị thay đổi đến cách thiết kế luồng dữ liệu cho một feature. Mục tiêu không phải dùng nhiều công cụ, mà là biết dữ liệu nào là **state**, giá trị nào chỉ là **dữ liệu dẫn xuất**, và thay đổi nào là **side effect**.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Mục tiêu của nhóm bài](#mục-tiêu-của-nhóm-bài)
+- [Kiến thức đầu vào](#kiến-thức-đầu-vào)
+- [Mô hình tinh thần: reactivity và state](#mô-hình-tinh-thần-reactivity-và-state)
+  - [Ba vai trò của dữ liệu](#ba-vai-trò-của-dữ-liệu)
+  - [Từ thay đổi đến giao diện](#từ-thay-đổi-đến-giao-diện)
+- [Bản đồ chọn công cụ](#bản-đồ-chọn-công-cụ)
+- [Thứ tự học các bài con](#thứ-tự-học-các-bài-con)
+- [Lộ trình thực hành](#lộ-trình-thực-hành)
+- [Dấu hiệu bạn đã sẵn sàng](#dấu-hiệu-bạn-đã-sẵn-sàng)
+- [Bắt đầu học](#bắt-đầu-học)
 
-## Phạm vi dự kiến
+## Mục tiêu của nhóm bài
 
-Quản lý dữ liệu phản ứng và trạng thái trong ứng dụng Angular. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+**Reactivity** là khả năng để giao diện và các phần phụ thuộc phản ứng lại khi dữ liệu thay đổi. **State** là dữ liệu hiện tại mà ứng dụng cần ghi nhớ để quyết định phải hiển thị hay xử lý điều gì. Ví dụ, nội dung ô tìm kiếm, danh sách sản phẩm đã tải và trạng thái `loading` đều là state.
 
-## Các bài trong nhóm
+Sau nhóm bài này, bạn có thể:
 
-- **[Signals](/docs/reactivity-state/signals)** — Tạo, đọc và cập nhật signal trong Angular.
-- **[Computed và effect](/docs/reactivity-state/computed-effect)** — Dẫn xuất dữ liệu và thực hiện side effect an toàn.
-- **[RxJS căn bản](/docs/reactivity-state/rxjs-can-ban)** — Observable, operator, subscription và các mẫu sử dụng phổ biến.
-- **[Signals và RxJS](/docs/reactivity-state/signals-rxjs)** — Chọn công cụ phù hợp và chuyển đổi giữa signal với observable.
-- **[State cục bộ](/docs/reactivity-state/state-cuc-bo)** — Tổ chức trạng thái ở component và feature mà không cần thư viện lớn.
-- **[NgRx](/docs/reactivity-state/ngrx)** — Khi nào cần store tập trung và các khái niệm cốt lõi của NgRx.
+- Nhận diện state gốc, dữ liệu dẫn xuất và side effect thay vì đưa mọi thứ vào một biến mutable.
+- Dùng **Signals** cho state đồng bộ, cục bộ và các giá trị UI phụ thuộc lẫn nhau.
+- Dùng **RxJS** khi làm việc với luồng bất đồng bộ hoặc nhiều sự kiện theo thời gian, như HTTP, nhập liệu, route và WebSocket.
+- Kết hợp Signals với Observable mà không biến đổi qua lại một cách tùy tiện.
+- Chọn phạm vi state phù hợp: component, feature/service, hoặc store tập trung với NgRx.
+- Giảm các lỗi quen thuộc: state trùng lặp, `subscribe()` lồng nhau, effect ghi ngược vào state và state toàn cục quá sớm.
+
+<Callout type="idea" title="Nguyên tắc xuyên suốt">
+  Hãy giữ **một nguồn sự thật** cho mỗi dữ liệu. Nếu một giá trị có thể tính từ state khác, hãy dẫn xuất nó thay vì lưu thêm một bản sao.
+</Callout>
+
+## Kiến thức đầu vào
+
+Bạn nên nắm các phần Angular cơ bản trước khi bắt đầu:
+
+- Component, template, binding và event binding như `(click)` hoặc `(input)`.
+- Dependency injection và service; bạn cần biết vì state feature thường được đặt trong service.
+- Lifecycle cơ bản và HTTP client; không cần thuộc mọi hook.
+- TypeScript: kiểu dữ liệu, `interface`, hàm, mảng và object bất biến ở mức cơ bản.
+
+Bạn **không cần** biết NgRx hoặc RxJS trước. Bài [RxJS căn bản](/docs/reactivity-state/rxjs-can-ban) xây nền tảng Observable trước khi bạn dùng chúng trong state thực tế.
+
+<Callout type="warn" title="Đừng nhảy thẳng vào NgRx">
+  Store tập trung giải quyết một số vấn đề phối hợp state ở quy mô lớn, nhưng thêm khái niệm và quy ước. Hãy thành thạo state cục bộ trước để biết lúc nào một store thật sự cần thiết.
+</Callout>
+
+## Mô hình tinh thần: reactivity và state
+
+Đừng xem reactivity là một thư viện hay một cú pháp đặc biệt. Hãy xem nó như một đồ thị phụ thuộc: khi dữ liệu nguồn đổi, Angular biết các giá trị và phần giao diện nào cần được cập nhật.
+
+### Ba vai trò của dữ liệu
+
+Một feature danh sách sản phẩm thường có ba vai trò dữ liệu khác nhau:
+
+| Vai trò | Ví dụ | Cách xử lý phù hợp |
+| --- | --- | --- |
+| **State gốc** | `query`, `products`, `isLoading` | Lưu và cập nhật tại một nguồn sự thật. |
+| **Dữ liệu dẫn xuất** | `filteredProducts`, `total`, `isEmpty` | Tính từ state gốc; không lưu bản sao nếu không cần. |
+| **Side effect** | gọi API, ghi `localStorage`, cập nhật tiêu đề trang | Chạy để tương tác với bên ngoài, không phải để thay thế phép tính dữ liệu. |
+
+Ví dụ, `filteredProducts` được tính từ `products` và `query`. Nếu vừa lưu `filteredProducts` vừa lưu hai giá trị nguồn, bạn phải tự đồng bộ ba biến. Khi người dùng đổi `query`, bản sao rất dễ cũ. Một `computed` hoặc phép biến đổi Observable cho phép giá trị dẫn xuất tự thay đổi theo nguồn.
+
+### Từ thay đổi đến giao diện
+
+Luồng lành mạnh bắt đầu từ một sự kiện hoặc nguồn dữ liệu, đi qua state gốc, rồi mới đến giá trị dẫn xuất và template:
+
+```text
+Người dùng gõ "angular" / HTTP trả kết quả
+                  │
+                  ▼
+          State gốc thay đổi
+    query, products, isLoading, error
+                  │
+                  ▼
+          Dữ liệu dẫn xuất
+     filteredProducts, resultCount
+                  │
+                  ▼
+        Template đọc và hiển thị
+                  │
+                  ▼
+  Side effect có chủ đích (nếu cần)
+  cập nhật URL, lưu lựa chọn, analytics
+```
+
+Mũi tên nên chủ yếu đi theo một chiều. Template đọc state và phát sự kiện; method hoặc service xử lý sự kiện rồi cập nhật state. Cách này giúp bạn trả lời nhanh câu hỏi: “giá trị trên màn hình này được sinh ra từ đâu?”
+
+<Callout type="warn" title="Phân biệt derived state và effect">
+  Không dùng `effect` để đặt `total` từ `items`. `total` là dữ liệu dẫn xuất, nên dùng `computed`. Chỉ dùng effect khi cần chạm vào thế giới bên ngoài, chẳng hạn đồng bộ một lựa chọn vào `localStorage`.
+</Callout>
+
+## Bản đồ chọn công cụ
+
+Signals và RxJS không loại trừ nhau. Chúng giải quyết hai dạng bài toán gần nhau nhưng khác trọng tâm.
+
+| Khi bạn gặp tình huống | Điểm khởi đầu nên chọn | Lý do |
+| --- | --- | --- |
+| Toggle mở/đóng, tab đang chọn, bộ lọc, state của một màn hình | Signal | Giá trị hiện tại được đọc đồng bộ và template dùng trực tiếp. |
+| Tính tổng, lọc danh sách, bật/tắt nút từ state khác | `computed` | Diễn tả rõ quan hệ dẫn xuất, tránh state trùng lặp. |
+| Ghi log, đồng bộ trình duyệt hoặc gọi API theo thay đổi | `effect` hoặc pipeline RxJS | Đây là tác động ra bên ngoài luồng tính toán. |
+| HTTP, debounce input, route params, WebSocket, retry | Observable/RxJS | Dữ liệu đến theo thời gian và cần hủy, ghép hoặc biến đổi luồng. |
+| State được nhiều component trong một feature dùng chung | Service có Signals hoặc Observable | Chia sẻ vừa đủ trong phạm vi feature. |
+| State dùng rộng rãi, có workflow phức tạp, cần DevTools/quy ước chung | NgRx | Store tập trung tạo tính nhất quán khi chi phí vận hành là xứng đáng. |
+
+Điểm quyết định không phải “công cụ nào mới hơn”, mà là **dữ liệu đến như một giá trị hiện tại hay một chuỗi sự kiện theo thời gian**. Một kết quả HTTP có thể được xử lý bằng RxJS rồi được đưa thành Signal để template đọc thuận tiện.
+
+## Thứ tự học các bài con
+
+Học theo thứ tự dưới đây. Mỗi bài giải quyết một câu hỏi, và bài sau dựa trên mô hình của bài trước.
+
+1. **[Signals](/docs/reactivity-state/signals)** — Bắt đầu với `signal`, cách đọc trong template và các cách cập nhật state. Đây là nền tảng để mô hình hóa giá trị hiện tại của UI.
+2. **[Computed và effect](/docs/reactivity-state/computed-effect)** — Phân tách giá trị được tính lại (`computed`) với tác động bên ngoài (`effect`). Sau bài này, bạn có thể tránh phần lớn derived state dư thừa.
+3. **[RxJS căn bản](/docs/reactivity-state/rxjs-can-ban)** — Học Observable, operator và vòng đời subscription. Đây là ngôn ngữ để xử lý dữ liệu bất đồng bộ theo thời gian.
+4. **[Signals và RxJS](/docs/reactivity-state/signals-rxjs)** — Chọn đúng công cụ cho từng đoạn của luồng, đồng thời chuyển đổi giữa chúng có chủ đích.
+5. **[State cục bộ](/docs/reactivity-state/state-cuc-bo)** — Đặt state vào component hoặc service của feature, thiết kế API đọc/cập nhật rõ ràng mà chưa cần global store.
+6. **[NgRx](/docs/reactivity-state/ngrx)** — Đánh giá nhu cầu store tập trung và nắm các khái niệm cốt lõi khi ứng dụng cần một quy ước state chung.
+
+<Callout type="info" title="Cách đọc hiệu quả">
+  Mỗi bài hãy tự viết lại một ví dụ nhỏ. Đọc xong nhưng không thay đổi một state thật hoặc không quan sát luồng dữ liệu chạy sẽ khó hình thành trực giác.
+</Callout>
+
+## Lộ trình thực hành
+
+Dùng một feature duy nhất để thấy các quyết định state tiến triển tự nhiên: **danh sách công việc có tìm kiếm**. Không cần tạo ứng dụng lớn; một component và một service là đủ để bắt đầu.
+
+1. **State UI bằng Signals.** Tạo `tasks`, `query` và `selectedFilter`. Hiển thị chúng trong template, sau đó thêm/xóa một công việc bằng event handler.
+2. **Dẫn xuất thay vì sao chép.** Tạo `visibleTasks` và `remainingCount` từ các state trên. Thử đổi bộ lọc và kiểm tra bạn không phải cập nhật các giá trị này bằng tay.
+3. **Thêm dữ liệu bất đồng bộ.** Lấy công việc từ API giả lập. Dùng Observable để biểu diễn lúc tải, lỗi và kết quả; thử debounce ô tìm kiếm.
+4. **Nối hai mô hình.** Đưa kết quả phù hợp về Signal cho template hoặc giữ Observable khi bạn cần tiếp tục ghép luồng. Giải thích được lý do chọn của mình.
+5. **Tách state theo feature.** Di chuyển logic ra service. Component chỉ gửi ý định của người dùng và đọc view model mà service cung cấp.
+6. **Đánh giá NgRx, không mặc định áp dụng.** Chỉ chuyển sang NgRx nếu nhiều khu vực độc lập cùng cập nhật/đọc state, workflow phức tạp hoặc nhóm cần truy vết thay đổi nhất quán.
+
+Khi hoàn thành, hãy tự kiểm tra bằng một thay đổi cụ thể: nhập từ khóa, đổi filter, tải lại dữ liệu và xóa một phần tử. Với mỗi thay đổi, bạn phải chỉ được state gốc nào đổi, giá trị nào dẫn xuất lại và side effect nào chạy.
+
+## Dấu hiệu bạn đã sẵn sàng
+
+Bạn đã nắm được nền tảng của nhóm này khi có thể trả lời các câu hỏi sau mà không dựa vào công thức có sẵn:
+
+- Giá trị này có phải state gốc không, hay có thể tính từ dữ liệu khác?
+- Khi dùng `computed`, dependency nào khiến nó tính lại?
+- Luồng Observable này bắt đầu, kết thúc và bị hủy ở đâu?
+- Tại sao phần này nên ở component, service feature hay store tập trung?
+- Side effect có đang ghi ngược vào state dẫn xuất, tạo vòng lặp hoặc làm khó kiểm thử không?
+
+Nếu chưa trả lời được, quay về ví dụ nhỏ nhất và vẽ lại mũi tên dữ liệu. Mô hình đơn giản, một chiều thường dễ sửa hơn việc thêm state mới.
+
+## Bắt đầu học
+
+<Cards>
+  <Card title="1. Signals" href="/docs/reactivity-state/signals" description="Tạo và cập nhật state đồng bộ cho giao diện Angular." />
+  <Card title="2. Computed và effect" href="/docs/reactivity-state/computed-effect" description="Phân biệt dữ liệu dẫn xuất với side effect." />
+  <Card title="3. RxJS căn bản" href="/docs/reactivity-state/rxjs-can-ban" description="Nắm Observable và các thao tác với luồng bất đồng bộ." />
+  <Card title="4. Signals và RxJS" href="/docs/reactivity-state/signals-rxjs" description="Kết hợp hai mô hình phản ứng một cách có chủ đích." />
+  <Card title="5. State cục bộ" href="/docs/reactivity-state/state-cuc-bo" description="Tổ chức state theo component và feature." />
+  <Card title="6. NgRx" href="/docs/reactivity-state/ngrx" description="Chọn store tập trung đúng thời điểm." />
+</Cards>

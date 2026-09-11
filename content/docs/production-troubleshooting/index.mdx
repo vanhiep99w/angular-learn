@@ -1,24 +1,238 @@
 ---
 title: Production & Troubleshooting
-description: Vận hành an toàn, nâng cấp và xử lý sự cố Angular.
+description: Lộ trình vận hành Angular production an toàn, quan sát được và xử lý sự cố có phương pháp.
 ---
 
-Đây là trang khung cho nhóm **Production & Troubleshooting**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+<Callout type="info" title="Đích đến của nhóm bài này">
+  Bạn sẽ biến một ứng dụng Angular đã deploy thành một hệ thống có thể vận hành: biết tín hiệu nào cần xem, cách khoanh vùng một sự cố, cách giảm tác động đến người dùng và cách đưa bài học trở lại test, cấu hình hoặc quy trình phát hành.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Mục tiêu, phạm vi và đầu vào](#mục-tiêu-phạm-vi-và-đầu-vào)
+  - [Đích đến](#đích-đến)
+  - [Chuẩn bị trước khi học](#chuẩn-bị-trước-khi-học)
+- [Bức tranh vận hành Angular](#bức-tranh-vận-hành-angular)
+  - [Vòng phản hồi production](#vòng-phản-hồi-production)
+  - [Tín hiệu, triệu chứng và nguyên nhân](#tín-hiệu-triệu-chứng-và-nguyên-nhân)
+- [Flow xử lý sự cố từ cảnh báo đến phục hồi](#flow-xử-lý-sự-cố-từ-cảnh-báo-đến-phục-hồi)
+  - [Phát hiện và xác nhận tác động](#phát-hiện-và-xác-nhận-tác-động)
+  - [Khoanh vùng và tái hiện](#khoanh-vùng-và-tái-hiện)
+  - [Giảm tác động và sửa lỗi](#giảm-tác-động-và-sửa-lỗi)
+  - [Xác minh, theo dõi và học lại](#xác-minh-theo-dõi-và-học-lại)
+- [Thứ tự học các bài con](#thứ-tự-học-các-bài-con)
+- [Lộ trình thực hành](#lộ-trình-thực-hành)
+  - [Giai đoạn 1: dựng nền production](#giai-đoạn-1-dựng-nền-production)
+  - [Giai đoạn 2: tạo khả năng quan sát](#giai-đoạn-2-tạo-khả-năng-quan-sát)
+  - [Giai đoạn 3: diễn tập debug và ứng phó](#giai-đoạn-3-diễn-tập-debug-và-ứng-phó)
+  - [Giai đoạn 4: nâng cấp bền vững](#giai-đoạn-4-nâng-cấp-bền-vững)
+- [Checklist vận hành trước và sau phát hành](#checklist-vận-hành-trước-và-sau-phát-hành)
+- [Đi tiếp theo mục tiêu](#đi-tiếp-theo-mục-tiêu)
 
-## Phạm vi dự kiến
+## Mục tiêu, phạm vi và đầu vào
 
-Vận hành an toàn, nâng cấp và xử lý sự cố Angular. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+Nhóm bài này nối giai đoạn [kiểm thử, hiệu năng và triển khai](/docs/testing-performance-deploy) với vận hành thực tế. Một production release không kết thúc khi CI báo xanh. Từ thời điểm người dùng dùng bản mới, ứng dụng cần cung cấp đủ bằng chứng để đội ngũ trả lời nhanh: **ai bị ảnh hưởng, lỗi ở đâu, bản nào gây ra lỗi và cách phục hồi an toàn là gì**.
 
-## Các bài trong nhóm
+### Đích đến
 
-- **[Bảo mật](/docs/production-troubleshooting/security)** — Phòng tránh XSS, xử lý dữ liệu không tin cậy và bảo vệ cấu hình.
-- **[Accessibility và i18n](/docs/production-troubleshooting/accessibility-i18n)** — Xây dựng trải nghiệm truy cập được và hỗ trợ nhiều ngôn ngữ.
-- **[Monitoring](/docs/production-troubleshooting/monitoring)** — Theo dõi lỗi, hiệu năng phía người dùng và chỉ số vận hành.
-- **[Nâng cấp Angular](/docs/production-troubleshooting/upgrade-angular)** — Lập kế hoạch và thực hiện nâng cấp phiên bản an toàn.
-- **[Lỗi thường gặp](/docs/production-troubleshooting/loi-thuong-gap)** — Nhận diện và xử lý các lỗi cấu hình, DI, template và router.
-- **[Kỹ thuật debugging](/docs/production-troubleshooting/debugging)** — Quy trình khoanh vùng lỗi bằng DevTools, source map và logging.
+Sau khi hoàn thành, bạn có thể:
+
+- Thiết lập ranh giới bảo mật cho dữ liệu không tin cậy, cấu hình runtime và phiên làm việc của người dùng.
+- Đảm bảo thao tác quan trọng dùng được bằng bàn phím, công nghệ hỗ trợ và trong nhiều ngôn ngữ.
+- Thu thập lỗi frontend, lỗi HTTP, phiên bản phát hành và chỉ số trải nghiệm mà không ghi lộ dữ liệu nhạy cảm.
+- Dùng DevTools, source map và log có ngữ cảnh để đi từ triệu chứng đến nguyên nhân có thể kiểm chứng.
+- Phân biệt hành động **giảm tác động** (rollback, tắt feature, giảm lưu lượng) với hành động **sửa gốc** trong mã nguồn.
+- Nâng cấp Angular theo từng bước nhỏ, có baseline và đường quay lui thay vì nâng cấp trực tiếp trên production.
+
+Mục tiêu không phải loại bỏ mọi lỗi. Mục tiêu là làm cho lỗi được phát hiện sớm, có phạm vi rõ ràng và không lặp lại vô ích.
+
+### Chuẩn bị trước khi học
+
+Bạn nên đã có một ứng dụng build và deploy được, cùng một feature có gọi API và form hoặc route để thực hành. Các kiến thức sau là đầu vào hữu ích:
+
+- [Angular CLI](/docs/bat-dau/angular-cli) và [cấu trúc workspace](/docs/bat-dau/cau-truc-workspace), để nhận biết cấu hình build, environment và scripts.
+- [HttpClient](/docs/http-api-auth/http-client), [interceptors](/docs/http-api-auth/interceptors) và [xử lý lỗi API](/docs/http-api-auth/xu-ly-loi-api), vì request là điểm giao nhau giữa UI, mạng và backend.
+- [Angular Router](/docs/routing-forms/angular-router) cùng [guards và resolvers](/docs/routing-forms/guards-resolvers), để debug điều hướng, phân quyền và tải dữ liệu.
+- [Build và tối ưu bundle](/docs/testing-performance-deploy/build-optimization) và [triển khai](/docs/testing-performance-deploy/deployment), để phân biệt lỗi mã nguồn với lỗi artefact hoặc môi trường.
+
+<Callout type="idea" title="Chọn một luồng mẫu xuyên suốt">
+  Hãy dùng một luồng nhỏ nhưng thật, chẳng hạn đăng nhập rồi tạo đơn hàng hoặc tìm kiếm rồi mở trang chi tiết. Ghi URL, thao tác, API liên quan và kết quả mong đợi. Luồng này sẽ là dữ liệu chung cho kiểm thử accessibility, monitoring, debugging và smoke test sau deploy.
+</Callout>
+
+## Bức tranh vận hành Angular
+
+Ứng dụng Angular chạy trong trình duyệt người dùng. Vì vậy một sự cố có thể nằm ở bundle vừa phát hành, cấu hình runtime, cache/CDN, trình duyệt, mạng, API hoặc dữ liệu trả về. Không nên kết luận chỉ từ một stack trace. Cần nối tín hiệu frontend với thời điểm deploy, phiên bản ứng dụng, request và hành vi người dùng.
+
+### Vòng phản hồi production
+
+```text
+Thay đổi đã kiểm thử
+         │
+         ▼
+┌───────────────────┐     release/version     ┌────────────────────┐
+│ Build + deploy     │ ──────────────────────► │ Người dùng dùng app │
+│ artifact bất biến  │                         │ trên browser thật   │
+└─────────┬─────────┘                         └─────────┬──────────┘
+          │                                             │
+          │                                             │ error, latency,
+          │                                             │ web vitals, feedback
+          ▼                                             ▼
+┌───────────────────┐     đối chiếu          ┌────────────────────┐
+│ Dashboard, logs,   │ ◄───────────────────── │ Alert hoặc ticket   │
+│ traces, release ID │                         │ có triệu chứng      │
+└─────────┬─────────┘                         └─────────┬──────────┘
+          │
+          ▼
+┌───────────────────┐     test, guardrail     ┌────────────────────┐
+│ Điều tra và sửa    │ ──────────────────────► │ Release an toàn hơn │
+│ hoặc rollback      │                         │ ở vòng tiếp theo    │
+└───────────────────┘                         └────────────────────┘
+```
+
+Một **artefact bất biến** là bundle đã build được gắn version hoặc commit rõ ràng; cùng artefact đó được đưa qua các môi trường thay vì build lại khác nhau. Một **release ID** là nhãn để nối lỗi quan sát được với artefact cụ thể. Hai thông tin này làm việc rollback và so sánh trước/sau có căn cứ.
+
+### Tín hiệu, triệu chứng và nguyên nhân
+
+Hãy tách ba lớp sau khi đọc một cảnh báo:
+
+| Lớp | Câu hỏi cần trả lời | Ví dụ | Hành động đầu tiên |
+| --- | --- | --- | --- |
+| Tín hiệu | Hệ thống đang nói điều gì? | Tỷ lệ lỗi `5xx` tăng sau release. | Kiểm tra thời điểm, version và phạm vi người dùng. |
+| Triệu chứng | Người dùng thấy gì? | Nút thanh toán quay mãi hoặc màn hình trắng. | Tái hiện với URL, tài khoản và thao tác cụ thể. |
+| Nguyên nhân | Điều gì tạo ra triệu chứng? | Interceptor gắn token hết hạn, API trả `401`, UI không xử lý nhánh này. | Kiểm chứng bằng request, log và test tối thiểu. |
+
+Ví dụ, Largest Contentful Paint tăng không tự nó chứng minh Angular render chậm. Nó có thể đến từ ảnh lớn, font bị chặn, response API chậm hoặc JavaScript nặng. Nói ngắn gọn: dùng chỉ số để chọn giả thuyết, rồi dùng bằng chứng để loại trừ giả thuyết.
+
+<Callout type="warn" title="Không biến telemetry thành nguồn rò rỉ">
+  Log lỗi chỉ nên có dữ liệu cần cho điều tra: release ID, route, loại lỗi, thời lượng và mã phản hồi đã được lọc. Không gửi access token, mật khẩu, nội dung form, header `Authorization` hoặc dữ liệu định danh không cần thiết vào console hay hệ thống monitoring.
+</Callout>
+
+## Flow xử lý sự cố từ cảnh báo đến phục hồi
+
+Flow này áp dụng cho lỗi người dùng báo, cảnh báo monitoring hoặc regression được phát hiện sau deploy. Mỗi bước tạo ra một đầu ra rõ ràng; nhờ vậy ca trực có thể bàn giao mà không phải suy đoán lại từ đầu.
+
+### Phát hiện và xác nhận tác động
+
+1. Ghi nhận tín hiệu gốc: URL hoặc route, thời gian bắt đầu, thông báo lỗi, release ID, trình duyệt và vùng người dùng nếu có.
+2. Xác nhận đây có phải sự cố thật hay không. So sánh tỷ lệ lỗi hoặc latency với baseline trước release, đồng thời kiểm tra dashboard backend để loại trừ cảnh báo nhiễu.
+3. Ước lượng tác động: bao nhiêu người dùng, hành trình nào bị chặn, có mất dữ liệu hay rủi ro bảo mật không.
+4. Chỉ định mức ưu tiên theo tác động, không chỉ theo độ dài stack trace. Luồng thanh toán hỏng cho nhiều người dùng cần phản ứng trước lỗi hiển thị nhỏ ở trang ít dùng.
+
+**Đầu ra:** một mô tả sự cố ngắn gồm triệu chứng, mốc thời gian, phạm vi, release nghi ngờ và mức tác động hiện tại.
+
+### Khoanh vùng và tái hiện
+
+Bắt đầu từ lần tái hiện nhỏ nhất. Mở Network để xem request nào thất bại, trạng thái HTTP, payload đã được che dữ liệu nhạy cảm và thứ tự request. Sau đó dùng Console, breakpoints và source map để nối lỗi bundle production về mã TypeScript có ý nghĩa. Chi tiết thao tác nằm trong [Kỹ thuật debugging](/docs/production-troubleshooting/debugging).
+
+Khi điều tra, ghi giả thuyết theo mẫu: “Nếu người dùng mở route `X` với dữ liệu `Y`, request `Z` trả `401` và component không chuyển sang trạng thái đăng nhập lại.” Một giả thuyết tốt có cách bác bỏ. Đừng sửa nhiều vị trí chỉ vì chúng “có vẻ liên quan”.
+
+**Đầu ra:** bước tái hiện, bằng chứng ủng hộ hoặc bác bỏ từng giả thuyết, cùng phạm vi nhỏ nhất của lỗi.
+
+### Giảm tác động và sửa lỗi
+
+Nếu người dùng đang bị chặn, ưu tiên hành động an toàn nhất có thể đảo ngược: rollback về release trước, tắt feature qua cấu hình đã chuẩn bị, hoặc chuyển người dùng sang luồng thay thế. Không chờ phân tích hoàn hảo mới giảm tác động.
+
+Sau khi ổn định, sửa nguyên nhân tại lớp phù hợp. Một lỗi template cần test component; lỗi xử lý HTTP cần test service hoặc interceptor; lỗi cấu hình deploy cần kiểm tra pipeline và smoke test. Tham khảo [Lỗi thường gặp](/docs/production-troubleshooting/loi-thuong-gap) để nhận diện các nhóm lỗi Angular hay gặp.
+
+<Callout type="error" title="Sự cố bảo mật cần ranh giới riêng">
+  Nếu nghi ngờ XSS, lộ token, quyền truy cập sai hoặc dữ liệu nhạy cảm đã bị ghi log, hãy coi đây là sự cố bảo mật: ngừng phát tán dữ liệu, thu hồi/luân chuyển secret theo quy trình hạ tầng và đánh giá phạm vi trước khi chỉ sửa giao diện. Xem [Bảo mật](/docs/production-troubleshooting/security).
+</Callout>
+
+**Đầu ra:** biện pháp giảm tác động đã thực hiện, thay đổi sửa lỗi có review, test bảo vệ regression và kế hoạch release/rollback.
+
+### Xác minh, theo dõi và học lại
+
+Deploy bản sửa qua pipeline thông thường. Sau deploy, chạy smoke test đúng bước tái hiện cũ, xác nhận release ID đang phục vụ và theo dõi tín hiệu trong một khoảng thời gian phù hợp với lưu lượng. “Không còn thấy lỗi” chỉ đáng tin khi có phạm vi quan sát và baseline để so sánh.
+
+Cuối cùng, ghi ngắn gọn: điều gì xảy ra, tác động, cách phát hiện, cách giảm tác động, nguyên nhân đã xác nhận và guardrail mới. Guardrail có thể là test, alert, dashboard, checklist, feature flag hoặc hướng dẫn nâng cấp. Bài [Monitoring](/docs/production-troubleshooting/monitoring) giúp chọn tín hiệu cho vòng theo dõi này.
+
+**Đầu ra:** xác minh sau release, liên kết bằng chứng, và một thay đổi cụ thể giúp lỗi khó tái diễn hơn.
+
+## Thứ tự học các bài con
+
+Học theo thứ tự này để mỗi bài bổ sung một lớp bảo vệ cho bài sau:
+
+1. **[Bảo mật](/docs/production-troubleshooting/security)** — bắt đầu bằng dữ liệu không tin cậy, XSS, secrets và ranh giới quyền truy cập. Một hệ thống quan sát tốt nhưng gửi token vào log vẫn không an toàn.
+2. **[Accessibility và i18n](/docs/production-troubleshooting/accessibility-i18n)** — xác nhận ứng dụng dùng được cho nhiều nhóm người dùng và nhiều ngôn ngữ trước khi coi một release là hoàn chỉnh.
+3. **[Monitoring](/docs/production-troubleshooting/monitoring)** — thiết kế error reporting, chỉ số trải nghiệm, correlation với release và alert có thể hành động.
+4. **[Kỹ thuật debugging](/docs/production-troubleshooting/debugging)** — dùng tín hiệu đã có để tái hiện, đọc request, source map và khoanh vùng nguyên nhân.
+5. **[Lỗi thường gặp](/docs/production-troubleshooting/loi-thuong-gap)** — xây dựng thư viện tình huống cho lỗi DI, template, router, build và cấu hình.
+6. **[Nâng cấp Angular](/docs/production-troubleshooting/upgrade-angular)** — áp dụng toàn bộ test, monitoring và rollback vào thay đổi framework có rủi ro cao hơn.
+
+Thứ tự này không cấm bạn mở bài đang cần để xử lý incident. Khi đó, dùng bài debugging để phục hồi trước, rồi quay lại bài security và monitoring để lấp khoảng trống đã bộc lộ.
+
+## Lộ trình thực hành
+
+Lộ trình bốn giai đoạn dưới đây biến kiến thức thành artefact có thể review. Dùng luồng mẫu đã chọn ở phần chuẩn bị và giữ lại mọi bằng chứng trong nơi làm việc của đội: issue, dashboard, runbook hoặc pull request.
+
+### Giai đoạn 1: dựng nền production
+
+1. Chạy production build và deploy môi trường thử nghiệm theo [hướng dẫn triển khai](/docs/testing-performance-deploy/deployment).
+2. Gắn version/commit vào giao diện hoặc telemetry để nhận biết bundle đang chạy. Ghi URL, thời gian deploy và người chịu trách nhiệm phát hành.
+3. Lập checklist smoke test cho luồng mẫu: mở route, đăng nhập nếu cần, thực hiện thao tác chính và xác nhận request thành công.
+4. Rà soát dữ liệu không tin cậy, secrets và API endpoint với bài [Bảo mật](/docs/production-troubleshooting/security).
+
+**Đầu ra cần có:** artefact có version, môi trường thử nghiệm, checklist smoke test và phương án rollback được đội xác nhận.
+
+### Giai đoạn 2: tạo khả năng quan sát
+
+1. Chọn một số tín hiệu tối thiểu: lỗi JavaScript chưa xử lý, lỗi request theo route, thời gian thao tác quan trọng và release ID.
+2. Đặt ngưỡng cảnh báo dựa trên baseline, không chỉ đặt một con số tùy ý. Alert phải chứa liên kết đến dashboard hoặc truy vấn giúp người trực ca bắt đầu điều tra.
+3. Thử tạo một lỗi vô hại trong môi trường thử nghiệm, ví dụ gọi endpoint test trả `500`, để kiểm tra sự kiện có đến hệ thống monitoring và đã được lọc dữ liệu nhạy cảm.
+4. Kiểm tra thao tác mẫu bằng bàn phím, tên truy cập được và chuỗi dịch với [Accessibility và i18n](/docs/production-troubleshooting/accessibility-i18n).
+
+**Đầu ra cần có:** dashboard hoặc truy vấn có thể truy cập, một alert đã thử, quy ước trường log và danh sách dữ liệu cấm thu thập.
+
+### Giai đoạn 3: diễn tập debug và ứng phó
+
+1. Tạo một lỗi có chủ đích chỉ trong môi trường thử nghiệm, như API chậm, `404` route hoặc response không đúng shape.
+2. Ghi nhận sự cố theo flow: tín hiệu, triệu chứng, release, bước tái hiện, giả thuyết và bằng chứng Network/Console.
+3. Thực hiện một biện pháp giảm tác động an toàn, chẳng hạn rollback release thử nghiệm hoặc tắt feature được thiết kế sẵn.
+4. Sửa lỗi, thêm test ở lớp thấp nhất chứng minh được regression, deploy lại và chạy smoke test.
+
+**Đầu ra cần có:** một incident note ngắn, link dashboard/log, regression test và xác minh sau deploy. Đây là diễn tập để tìm chỗ thiếu trước khi sự cố thật xảy ra.
+
+### Giai đoạn 4: nâng cấp bền vững
+
+1. Đọc [Nâng cấp Angular](/docs/production-troubleshooting/upgrade-angular), kiểm tra compatibility và chia nâng cấp thành thay đổi nhỏ có thể rollback.
+2. Ghi baseline test, build, bundle và tín hiệu runtime trước khi đổi version.
+3. Nâng cấp ở branch hoặc môi trường thử nghiệm, xử lý deprecation theo từng nhóm và không gộp refactor không liên quan.
+4. So sánh lại smoke test, accessibility, error rate và hiệu năng sau nâng cấp. Chỉ đưa production khi có bằng chứng không tạo regression đáng kể.
+
+**Đầu ra cần có:** kế hoạch nâng cấp, baseline trước/sau, danh sách breaking changes áp dụng cho dự án và đường quay lui rõ ràng.
+
+## Checklist vận hành trước và sau phát hành
+
+Dùng checklist này như cổng thảo luận, không thay thế cho review kỹ thuật theo ngữ cảnh thay đổi.
+
+**Trước phát hành:**
+
+- [ ] Production build, test liên quan và [kiểm tra E2E](/docs/testing-performance-deploy/e2e-testing) của luồng rủi ro cao đã chạy.
+- [ ] Artefact có version/commit; cấu hình môi trường, endpoint và cache được kiểm tra.
+- [ ] Không có secrets, token hoặc dữ liệu người dùng trong bundle, log client hay telemetry.
+- [ ] Luồng chính dùng được bằng bàn phím; thông báo lỗi và loading có thể hiểu được.
+- [ ] Có dashboard/alert cho lỗi quan trọng, cùng người hoặc kênh nhận cảnh báo.
+- [ ] Có bước smoke test và cách rollback đã được xác định.
+
+**Sau phát hành:**
+
+- [ ] Xác nhận release ID, route chính và request quan trọng đang chạy đúng ở môi trường đích.
+- [ ] Chạy smoke test theo hành trình người dùng thay vì chỉ kiểm tra trang trả về `200`.
+- [ ] So sánh error rate, latency và chỉ số trải nghiệm với baseline trước release.
+- [ ] Theo dõi alert trong khoảng thời gian phù hợp, đặc biệt sau thay đổi auth, router, cache hoặc framework.
+- [ ] Ghi lại sự cố hoặc tín hiệu bất thường; thêm test, alert hay runbook khi phát hiện khoảng trống.
+
+<Callout type="idea" title="Quy tắc dừng khi debug">
+  Nếu chưa thể chứng minh nguyên nhân, đừng mở rộng bản sửa. Hãy giảm tác động, lưu bằng chứng đã có và nêu rõ phép đo hoặc quyền truy cập còn thiếu. Một rollback có kiểm soát tốt hơn một hotfix dựa trên phỏng đoán.
+</Callout>
+
+## Đi tiếp theo mục tiêu
+
+<Cards>
+  <Card title="Bảo mật Angular" href="/docs/production-troubleshooting/security" description="Bảo vệ dữ liệu không tin cậy, secrets và ranh giới phía client." />
+  <Card title="Accessibility và i18n" href="/docs/production-troubleshooting/accessibility-i18n" description="Đảm bảo release có thể dùng được cho nhiều người dùng và ngôn ngữ." />
+  <Card title="Thiết lập monitoring" href="/docs/production-troubleshooting/monitoring" description="Thu thập tín hiệu có ngữ cảnh để phát hiện regression sau deploy." />
+  <Card title="Debug có phương pháp" href="/docs/production-troubleshooting/debugging" description="Đi từ triệu chứng qua bằng chứng đến nguyên nhân có thể kiểm chứng." />
+  <Card title="Tra cứu lỗi thường gặp" href="/docs/production-troubleshooting/loi-thuong-gap" description="Nhận diện nhanh lỗi Angular phổ biến trong template, DI, router và build." />
+  <Card title="Nâng cấp Angular an toàn" href="/docs/production-troubleshooting/upgrade-angular" description="Chia nhỏ thay đổi framework và bảo vệ bằng baseline, test và rollback." />
+</Cards>

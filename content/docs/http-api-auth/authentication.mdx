@@ -1,10 +1,473 @@
 ---
 title: Authentication
-description: Thiết kế luồng đăng nhập, token và bảo vệ phiên người dùng.
+description: Thiết kế đăng nhập, phiên, token và ranh giới bảo mật đúng chỗ cho Angular client.
 ---
 
-Trang này sẽ trình bày **Authentication** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi của trang">
+  Trang này nói về cách Angular client phối hợp với một hệ thống xác thực đã được
+  backend hoặc nhà cung cấp danh tính thiết kế. Client quản lý trải nghiệm phiên;
+  API/server mới là nơi xác minh danh tính và thực thi quyền truy cập.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Authentication khác authorization thế nào?](#authentication-khác-authorization-thế-nào)
+  - [Ranh giới trách nhiệm](#ranh-giới-trách-nhiệm)
+- [Chọn mô hình phiên](#chọn-mô-hình-phiên)
+  - [Cookie phiên](#cookie-phiên)
+  - [Bearer access token](#bearer-access-token)
+  - [OIDC và Authorization Code với PKCE](#oidc-và-authorization-code-với-pkce)
+- [Luồng đăng nhập và khôi phục phiên](#luồng-đăng-nhập-và-khôi-phục-phiên)
+  - [Luồng cookie phiên](#luồng-cookie-phiên)
+  - [Ý nghĩa của 401 và 403](#ý-nghĩa-của-401-và-403)
+- [Tổ chức authentication trong Angular](#tổ-chức-authentication-trong-angular)
+  - [Mô hình trạng thái phiên](#mô-hình-trạng-thái-phiên)
+  - [Đăng nhập và đăng xuất](#đăng-nhập-và-đăng-xuất)
+  - [Interceptor cho API đáng tin cậy](#interceptor-cho-api-đáng-tin-cậy)
+  - [Guard là ranh giới UX](#guard-là-ranh-giới-ux)
+- [Lưu trữ và làm mới thông tin xác thực](#lưu-trữ-và-làm-mới-thông-tin-xác-thực)
+  - [Nơi đặt từng loại dữ liệu](#nơi-đặt-từng-loại-dữ-liệu)
+  - [Refresh không tạo vòng lặp](#refresh-không-tạo-vòng-lặp)
+  - [CSRF, CORS và XSS](#csrf-cors-và-xss)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist trước production](#checklist-trước-production)
+- [Tóm tắt](#tóm-tắt)
+- [Đọc tiếp](#đọc-tiếp)
+
+## Tổng quan
+
+Authentication (xác thực) trả lời **ai đang gửi request**. Ví dụ, sau khi xác
+minh mật khẩu hoặc đăng nhập qua nhà cung cấp danh tính, API biết request thuộc
+về người dùng `linh@example.com`. Authorization (phân quyền) trả lời **danh tính
+đó được làm gì**. Cùng người dùng ấy có thể đọc công việc của mình, nhưng không
+được xóa tài khoản của người khác.
+
+### Authentication khác authorization thế nào?
+
+| Câu hỏi | Cơ chế | Ví dụ kết quả |
+| --- | --- | --- |
+| “Bạn là ai?” | Authentication | API liên kết request với user ID `u_123`. |
+| “Bạn được làm gì?” | Authorization | Chỉ role `admin` được gọi `DELETE /api/users/:id`. |
+| “Dữ liệu này có thuộc về bạn không?” | Authorization theo tài nguyên | User `u_123` chỉ đọc được hóa đơn của chính họ. |
+
+Angular có thể dùng trạng thái đăng nhập để hiện avatar, ẩn nút quản trị hoặc
+đưa người chưa đăng nhập về `/login`. Đây là trải nghiệm tốt, nhưng mã JavaScript
+trên trình duyệt có thể bị sửa hoặc bị bỏ qua. Vì vậy, mọi endpoint nhạy cảm vẫn
+phải xác thực credential và kiểm tra role, scope hoặc quyền sở hữu tài nguyên ở
+server.
+
+### Ranh giới trách nhiệm
+
+```text
+┌────────────────────────── Angular client ──────────────────────────┐
+│ Form login · trạng thái UI · interceptor · guard · thông báo lỗi   │
+└──────────────────────────────────┬─────────────────────────────────┘
+                                   │ request kèm cookie hoặc token
+                                   ▼
+┌──────────────────────── API / authorization server ────────────────┐
+│ Xác minh credential · kiểm tra hết hạn · kiểm tra quyền · audit log│
+└──────────────────────────────────┬─────────────────────────────────┘
+                                   │ 200 / 401 / 403 / dữ liệu
+                                   ▼
+                            Angular cập nhật UI
+```
+
+<Callout type="warn" title="Client không phải điểm thực thi bảo mật">
+  Không coi route guard, interceptor, role trong `localStorage`, hoặc việc ẩn
+  một nút là bằng chứng người dùng có quyền. Kẻ tấn công vẫn có thể gọi API trực
+  tiếp. Server phải kiểm tra lại trên từng request cần bảo vệ.
+</Callout>
+
+## Chọn mô hình phiên
+
+Không có một cách đúng cho mọi kiến trúc. Hãy chọn một hợp đồng rõ ràng với
+backend, sau đó để Angular tuân theo hợp đồng đó thay vì tự phát minh cơ chế token.
+Ba mô hình dưới đây là những mô hình thường gặp.
+
+### Cookie phiên
+
+Server tạo session và gửi cookie. Các request sau mang cookie tự động khi phạm vi
+cookie cho phép. Cookie chứa session ID mờ nghĩa, hoặc một credential mà JavaScript
+không cần đọc.
+
+- Đặt cookie nhạy cảm là `HttpOnly`, `Secure` và giới hạn `Path`/`Domain` tối thiểu.
+- Với API khác origin, Angular cần `withCredentials: true`; server phải trả đúng
+  CORS origin cụ thể và `Access-Control-Allow-Credentials: true`.
+- Vì cookie là credential “tự đi kèm” request, server cần chiến lược chống CSRF
+  (Cross-Site Request Forgery), chẳng hạn `SameSite` phù hợp cùng CSRF token được
+  xác minh cho thao tác thay đổi dữ liệu.
+
+Mô hình này tốt khi ứng dụng cùng hệ sinh thái với backend và muốn JavaScript
+không chạm vào refresh token hoặc session secret. Đổi lại, cấu hình cookie, CORS
+và CSRF cần được phối hợp chặt giữa frontend và backend.
+
+### Bearer access token
+
+Client gắn access token vào header `Authorization: Bearer <token>`. API xác minh
+chữ ký, issuer, audience, thời hạn và quyền mà token đại diện. Access token nên
+ngắn hạn và chỉ được gửi tới API origin đã tin cậy.
+
+- Giữ access token trong bộ nhớ khi có thể; mất token khi reload là đánh đổi hợp
+  lý để giảm hậu quả nếu xảy ra XSS.
+- Không đưa refresh token dài hạn vào `localStorage`, `sessionStorage` hoặc nơi
+  mã JavaScript đọc được, trừ khi kiến trúc và mô hình đe dọa đã được đánh giá kỹ.
+- Không suy ra quyền tin cậy chỉ bằng cách tự decode JWT ở client. Decode chỉ hữu
+  ích để hiển thị UI; API vẫn phải xác minh token thực sự.
+
+Token cho phép tách API khỏi cookie session, nhưng tăng trách nhiệm về hết hạn,
+refresh, retry và ngăn token bị gắn nhầm sang domain khác.
+
+### OIDC và Authorization Code với PKCE
+
+OpenID Connect (OIDC) là lớp nhận dạng xây trên OAuth 2.0. Khi đăng nhập với
+Google, Microsoft, Keycloak hoặc một identity provider, Angular thường không gửi
+mật khẩu đến ứng dụng. Thay vào đó, trình duyệt chuyển đến identity provider và
+trở về ứng dụng sau khi xác thực.
+
+Với single-page application, dùng **Authorization Code flow với PKCE**
+(_Proof Key for Code Exchange_). Client tạo `code_verifier`, gửi giá trị băm
+`code_challenge` lúc bắt đầu, rồi dùng verifier để đổi authorization code sau
+redirect. Kèm `state` để liên kết đúng request/response và `nonce` khi ứng dụng
+xác minh ID token. Tránh Implicit flow cũ cho ứng dụng mới.
+
+```text
+Angular                Identity provider                   API
+   │ tạo state, nonce, PKCE verifier                         │
+   ├──── redirect /authorize + code_challenge ──────────────►│
+   │◄──────────── redirect về callback?code=... ─────────────┤
+   │ đổi code bằng verifier / nhận phiên theo thiết kế       │
+   ├────────────────────────────────────────────────────────►│
+   │ gọi API với credential hợp lệ                           │
+   ├─────────────────────────────────────────────────────────►
+```
+
+Nên dùng thư viện OIDC đã được bảo trì hoặc một BFF (Backend for Frontend) thay
+vì tự viết parser token và callback. Đăng ký redirect URI chính xác, không dùng
+wildcard, và chỉ chấp nhận callback khớp với `state` đã khởi tạo.
+
+## Luồng đăng nhập và khôi phục phiên
+
+Dù dùng cookie hay token, hãy làm rõ từng trạng thái: ứng dụng đang kiểm tra
+phiên, đã đăng nhập, hay là khách. Nếu không phân biệt trạng thái “đang kiểm tra”,
+guard có thể redirect nhầm về login ngay khi ứng dụng vừa khởi động.
+
+### Luồng cookie phiên
+
+Ví dụ này giả định backend quản lý session bằng cookie `HttpOnly`; Angular không
+đọc cookie và không nhận session secret trong JSON.
+
+```text
+Người dùng          Angular                    Auth API                    API
+    │                  │                           │                         │
+    │ email/mật khẩu   │                           │                         │
+    ├─────────────────►│ POST /auth/login          │                         │
+    │                  ├──────────────────────────►│                         │
+    │                  │ Set-Cookie (HttpOnly)     │                         │
+    │                  │◄──────────────────────────┤                         │
+    │ mở /tasks        │                           │                         │
+    ├─────────────────►│ GET /auth/session         │                         │
+    │                  ├──────────────────────────►│                         │
+    │                  │ user tóm tắt hoặc 401     │                         │
+    │                  │◄──────────────────────────┤                         │
+    │                  ├──── GET /api/tasks, cookie tự gửi ─────────────────►│
+    │                  │◄────────────────────────── dữ liệu / 401 ───────────┤
+```
+
+Ở lúc khởi động, gọi endpoint như `GET /auth/session` hoặc `GET /me` để server
+xác nhận phiên hiện tại. Không kết luận “đã đăng nhập” chỉ vì client còn một cờ
+cũ trong storage. Khi login thất bại, hiển thị thông báo chung như “Thông tin đăng
+nhập không hợp lệ”; không tiết lộ email nào đang tồn tại nếu backend không chủ
+đích cho phép điều đó.
+
+### Ý nghĩa của 401 và 403
+
+| Status | Ý nghĩa điển hình | Hành động của Angular |
+| --- | --- | --- |
+| `401 Unauthorized` | Credential thiếu, không hợp lệ hoặc đã hết hạn. | Có thể thử refresh **một lần** theo hợp đồng; nếu không được, xóa state và về login. |
+| `403 Forbidden` | Danh tính hợp lệ nhưng không có quyền. | Giữ phiên, hiển thị trang/quyền bị từ chối; không lặp refresh hoặc login. |
+| `419` hoặc mã riêng | Một số backend dùng cho CSRF/session hết hạn. | Đọc hợp đồng API; không tự xem mọi lỗi là lỗi token. |
+
+Tên HTTP của `401` có chữ “Unauthorized”, nhưng về mặt thực hành nó thường biểu
+thị **chưa xác thực hợp lệ**. `403` mới là tín hiệu quan trọng để phân biệt “đã
+biết bạn là ai nhưng không cho phép hành động này”.
+
+## Tổ chức authentication trong Angular
+
+Tách lớp giao tiếp auth khỏi component. Component chỉ gọi `login()` hoặc
+`logout()` và render state. Service là nơi giữ session tóm tắt; interceptor thêm
+credential theo quy tắc chung; guard quyết định điều hướng.
+
+### Mô hình trạng thái phiên
+
+Ví dụ dưới đây dùng signal để mô tả session cookie. `SessionUser` là dữ liệu an
+toàn để hiển thị, không phải token.
+
+```ts
+import { Injectable, computed, signal } from '@angular/core';
+
+export interface SessionUser {
+  id: string;
+  displayName: string;
+  roles: string[];
+}
+
+type SessionState =
+  | { kind: 'checking' }
+  | { kind: 'anonymous' }
+  | { kind: 'authenticated'; user: SessionUser };
+
+@Injectable({ providedIn: 'root' })
+export class AuthSession {
+  private readonly state = signal<SessionState>({ kind: 'checking' });
+
+  readonly session = this.state.asReadonly();
+  readonly isAuthenticated = computed(() => this.state().kind === 'authenticated');
+
+  setAuthenticated(user: SessionUser): void {
+    this.state.set({ kind: 'authenticated', user });
+  }
+
+  setAnonymous(): void {
+    this.state.set({ kind: 'anonymous' });
+  }
+}
+```
+
+Khởi tạo ứng dụng nên gọi endpoint kiểm tra phiên, rồi gọi `setAuthenticated()`
+hoặc `setAnonymous()` theo response thật. Trong khi state là `checking`, hiển thị
+loading nhỏ hoặc để guard chờ kiểm tra hoàn tất. Đừng sử dụng role trong state này
+làm nguồn quyết định bảo mật; đó chỉ là bản sao phục vụ giao diện.
+
+### Đăng nhập và đăng xuất
+
+`AuthApi` dưới đây gửi credential chỉ qua HTTPS tới endpoint xác thực. Tùy chọn
+`withCredentials` cần thiết khi API đặt cookie ở origin khác. URL API nên lấy từ
+cấu hình môi trường đã được kiểm soát, không ghép từ dữ liệu người dùng nhập.
+
+```ts
+import { Injectable, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { tap } from 'rxjs';
+
+interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+interface LoginResponse {
+  user: SessionUser;
+}
+
+@Injectable({ providedIn: 'root' })
+export class AuthApi {
+  private readonly http = inject(HttpClient);
+  private readonly session = inject(AuthSession);
+  private readonly baseUrl = 'https://api.example.com';
+
+  login(body: LoginRequest) {
+    return this.http
+      .post<LoginResponse>(`${this.baseUrl}/auth/login`, body, { withCredentials: true })
+      .pipe(tap(({ user }) => this.session.setAuthenticated(user)));
+  }
+
+  logout() {
+    return this.http
+      .post<void>(`${this.baseUrl}/auth/logout`, {}, { withCredentials: true })
+      .pipe(tap(() => this.session.setAnonymous()));
+  }
+}
+```
+
+Gọi `logout` ở server trước khi xóa UI state để server vô hiệu hóa session/cookie.
+Dù request logout lỗi do mạng, client vẫn có thể chuyển về trạng thái anonymous để
+không tiếp tục hiển thị dữ liệu cũ; đồng thời ghi nhận lỗi theo chính sách quan sát
+không chứa thông tin nhạy cảm.
+
+### Interceptor cho API đáng tin cậy
+
+Với cookie session, interceptor chỉ cần bật `withCredentials` cho **đúng API base
+URL**. Đừng áp dụng tùy chọn này cho mọi URL và đừng gắn Bearer token vào request
+tới CDN, analytics hoặc một origin do người dùng kiểm soát.
+
+```ts
+import { HttpInterceptorFn } from '@angular/common/http';
+
+// Hai giá trị này là cấu hình build đáng tin cậy, không lấy từ URL người dùng.
+const applicationOrigin = 'https://app.example.com';
+const trustedApiBase = new URL('https://api.example.com/api/');
+
+function isTrustedApi(url: string): boolean {
+  const requestUrl = new URL(url, applicationOrigin);
+  return (
+    requestUrl.origin === trustedApiBase.origin &&
+    requestUrl.pathname.startsWith(trustedApiBase.pathname)
+  );
+}
+
+export const credentialsInterceptor: HttpInterceptorFn = (request, next) => {
+  if (!isTrustedApi(request.url)) {
+    return next(request);
+  }
+
+  return next(request.clone({ withCredentials: true }));
+};
+```
+
+Đăng ký interceptor một lần trong bootstrap:
+
+```ts
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
+
+bootstrapApplication(AppComponent, {
+  providers: [provideHttpClient(withInterceptors([credentialsInterceptor]))],
+});
+```
+
+Nếu backend dùng Bearer token, thay việc clone `withCredentials` bằng cách lấy
+**access token ngắn hạn trong bộ nhớ**, sau đó thêm `Authorization` chỉ sau kiểm
+tra `isTrustedApi()`. Không trộn hai cơ chế chỉ để “cho chắc”: chọn cơ chế backend
+đã định nghĩa, rồi kiểm thử chính xác request nào mang credential.
+
+<Callout type="warn" title="Không ghi secret vào log">
+  Interceptor logging không được in `Authorization`, body đăng nhập, cookie, access
+  token, refresh token hoặc response chứa dữ liệu nhạy cảm. Che (redact) trường
+  nhạy cảm trước khi gửi telemetry.
+</Callout>
+
+### Guard là ranh giới UX
+
+Guard cải thiện luồng điều hướng. Khi session là anonymous, guard trả `UrlTree`
+về login và giữ đường dẫn nội bộ cần quay lại. Kiểm tra `returnUrl` trước khi điều
+hướng sau login để tránh open redirect sang domain bên ngoài.
+
+```ts
+import { inject } from '@angular/core';
+import { CanActivateFn, Router } from '@angular/router';
+
+export const authenticatedGuard: CanActivateFn = (_route, state) => {
+  const auth = inject(AuthSession);
+  const router = inject(Router);
+
+  if (auth.isAuthenticated()) {
+    return true;
+  }
+
+  return router.createUrlTree(['/login'], {
+    queryParams: { returnUrl: state.url },
+  });
+};
+```
+
+Guard này không thay API authorization. Ví dụ, dù UI đã chặn `/admin`,
+`DELETE /api/users/42` vẫn phải bị server từ chối cho người không phải admin.
+Xem thêm [Guard và resolver](/docs/routing-forms/guards-resolvers) để xử lý guard
+bất đồng bộ khi session còn ở trạng thái `checking`.
+
+## Lưu trữ và làm mới thông tin xác thực
+
+### Nơi đặt từng loại dữ liệu
+
+| Dữ liệu | Vị trí ưu tiên | Lý do |
+| --- | --- | --- |
+| Session ID hoặc refresh token | Cookie `HttpOnly`, `Secure`, phạm vi hẹp | JavaScript không đọc được; giảm thiệt hại trực tiếp khi XSS. |
+| Access token ngắn hạn | Bộ nhớ của ứng dụng | Mất khi reload nhưng không tồn tại bền trong JS-readable storage. |
+| Hồ sơ hiển thị, theme, return URL nội bộ | State hoặc storage có kiểm tra | Không phải credential; vẫn không tin dữ liệu này để cấp quyền. |
+| Mật khẩu | Chỉ trong form/request login qua HTTPS | Không lưu lại, không log, không cache. |
+
+`HttpOnly` không chữa được XSS: mã độc chạy trong origin vẫn có thể gửi request với
+cookie của nạn nhân. Nó chỉ ngăn mã đó đọc và exfiltrate trực tiếp giá trị cookie.
+Vì vậy vẫn cần Content Security Policy phù hợp, escape/sanitize dữ liệu, dependency
+an toàn và tránh API nguy hiểm như chèn HTML không tin cậy.
+
+### Refresh không tạo vòng lặp
+
+Thiết kế refresh ở backend trước: access token ngắn hạn; refresh token hoặc session
+cookie được server bảo vệ; endpoint refresh có thể xoay vòng token và phát hiện
+replay. Client chỉ phản ứng theo hợp đồng đó.
+
+Khi nhiều request cùng nhận `401`, không để từng request gọi refresh độc lập. Một
+thiết kế đúng có các bước sau:
+
+1. Interceptor nhận `401` từ một endpoint được bảo vệ, trừ login/refresh/logout.
+2. Một refresh đang chạy được dùng chung; request khác chờ cùng kết quả.
+3. Khi refresh thành công, retry **một lần** với credential mới.
+4. Nếu refresh thất bại hoặc retry vẫn `401`, xóa session state và điều hướng login.
+5. Đánh dấu request đã retry để refresh endpoint hoặc request lỗi không tạo vòng lặp.
+
+Không retry `403`: token mới không làm người dùng có thêm quyền. Cũng không tự retry
+các request ghi không idempotent như `POST /payments` nếu backend không có idempotency
+key; retry mù có thể tạo thao tác hai lần.
+
+<Callout type="idea" title="Đơn giản hóa bằng BFF khi phù hợp">
+  Với ứng dụng có OIDC phức tạp, BFF có thể giữ token phía server và cung cấp cookie
+  phiên cho browser. Angular chỉ làm việc với session và API cùng origin, giảm số
+  token mà JavaScript phải quản lý. Đánh đổi là thêm một thành phần backend cần vận hành.
+</Callout>
+
+### CSRF, CORS và XSS
+
+Ba khái niệm này giải quyết các rủi ro khác nhau:
+
+- **CSRF** lợi dụng việc browser tự gửi cookie. Server cần xác minh nguồn request
+  và/hoặc CSRF token cho request thay đổi trạng thái; `SameSite` là lớp giảm thiểu,
+  không phải lý do bỏ qua mọi kiểm tra.
+- **CORS** quyết định JavaScript của origin nào được đọc response cross-origin. Nó
+  không xác thực người dùng và không thay thế CSRF defense. Không dùng `*` cùng
+  credentials; allowlist chính xác các origin của ứng dụng.
+- **XSS** cho phép script không tin cậy chạy trong origin của ứng dụng. Bảo vệ bằng
+  output escaping mặc định của Angular, không tùy tiện bypass sanitizer, CSP và kiểm
+  soát dependency. XSS có thể thực hiện hành động dưới phiên nạn nhân ngay cả khi
+  cookie là `HttpOnly`.
+
+## Lỗi thường gặp và trade-off
+
+| Sai lầm hoặc lựa chọn | Hậu quả | Cách xử lý |
+| --- | --- | --- |
+| Lưu refresh token trong `localStorage` | XSS có thể đọc và gửi token ra ngoài. | Ưu tiên cookie `HttpOnly` hoặc BFF; đánh giá mô hình đe dọa nếu bắt buộc khác. |
+| Gắn Bearer token cho mọi request | Rò token sang origin ngoài ý muốn. | Allowlist API base URL chính xác trong interceptor. |
+| Dùng role ở client làm kiểm tra cuối | Người dùng sửa state hoặc gọi API trực tiếp. | Server kiểm tra authentication và authorization cho mọi endpoint. |
+| Refresh mọi `401` và retry không giới hạn | Storm request, vòng lặp hoặc thao tác ghi lặp. | Một refresh dùng chung, một retry, loại trừ endpoint auth. |
+| Đối xử `403` như hết phiên | Ép login lại dù quyền không thay đổi. | Hiển thị “không có quyền”; giữ session đang hợp lệ. |
+| Tin `localStorage` để khôi phục session | UI coi session cũ là hợp lệ khi server đã revoke. | Gọi `/auth/session` hoặc `/me` khi khởi động. |
+| CORS `*` với cookie | Không tương thích credentials và mở sai ranh giới. | Chỉ định origin cụ thể, headers/methods cần thiết tại server. |
+
+Cookie session giảm khả năng JavaScript đọc credential, nhưng buộc phải xử lý CSRF
+và CORS nếu cross-origin. Bearer token cho phép API linh hoạt hơn, nhưng đòi hỏi
+kiểm soát storage và đích gửi token nghiêm hơn. OIDC giảm việc ứng dụng tự quản lý
+mật khẩu, nhưng callback, PKCE và redirect URI phải được cấu hình chuẩn. Hãy chọn
+dựa trên kiến trúc và mô hình đe dọa, không chỉ dựa trên tiện lợi của code mẫu.
+
+## Checklist trước production
+
+- Dùng HTTPS cho login, callback OIDC và mọi API có credential.
+- Thống nhất rõ với backend cơ chế cookie, Bearer hoặc OIDC/BFF; không trộn tùy tiện.
+- Server xác minh credential, expiration, issuer/audience khi áp dụng và quyền trên
+  từng endpoint nhạy cảm.
+- Cookie nhạy cảm có `HttpOnly`, `Secure`, phạm vi tối thiểu và CSRF defense phù hợp.
+- Access token có thời hạn ngắn; refresh token không nằm trong JS-readable storage.
+- Interceptor chỉ gửi credential đến API allowlist; telemetry đã redact dữ liệu nhạy cảm.
+- Phân biệt `401` và `403`; refresh được điều phối một lần và retry có giới hạn.
+- Guard trả `UrlTree` khi redirect, kiểm tra `returnUrl` nội bộ và không được xem là
+  authorization.
+- Kiểm thử login thất bại, logout, reload, session hết hạn, `401`, `403`, refresh
+  lỗi, nhiều request đồng thời và một request ghi không idempotent.
+
+## Tóm tắt
+
+Authentication cho Angular là sự phối hợp giữa UI state và một hợp đồng bảo mật do
+server thực thi. Authentication xác định người gửi request; authorization quyết định
+hành động và tài nguyên họ được phép dùng. Cookie session, Bearer token và OIDC đều
+có thể phù hợp, miễn là credential được đặt đúng chỗ và chỉ được gửi đến đúng nơi.
+
+Nói ngắn gọn: giữ client nhỏ và có chủ đích—trạng thái phiên rõ ràng, interceptor
+có allowlist, guard phục vụ UX, refresh một lần. Giữ quyết định bảo mật ở server—xác
+minh credential, chống CSRF khi dùng cookie và kiểm tra quyền cho từng API.
+
+## Đọc tiếp
+
+<Cards>
+  <Card title="Interceptors" href="/docs/http-api-auth/interceptors" description="Tìm hiểu chuỗi interceptor và cách chuẩn hóa request/response." />
+  <Card title="Xử lý lỗi API" href="/docs/http-api-auth/xu-ly-loi-api" description="Phân loại lỗi HTTP, timeout và retry có kiểm soát." />
+  <Card title="Guard và resolver" href="/docs/routing-forms/guards-resolvers" description="Kiểm soát navigation mà không nhầm nó với ranh giới bảo mật." />
+</Cards>

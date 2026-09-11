@@ -1,10 +1,345 @@
 ---
-title: Nâng cấp Angular
-description: Lập kế hoạch và thực hiện nâng cấp phiên bản an toàn.
+title: Nâng cấp Angular an toàn
+description: Lập kế hoạch, chạy migration và phát hành Angular theo từng chặng có baseline, kiểm thử, quan sát và rollback.
 ---
 
-Trang này sẽ trình bày **Nâng cấp Angular** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang này">
+  Nâng cấp Angular là thay đổi nền tảng, không chỉ là đổi số version trong `package.json`. Mục tiêu là đưa ứng dụng qua từng major version với phạm vi nhỏ, bằng chứng trước/sau và một đường quay lui đã được diễn tập.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan: nâng cấp là một thay đổi vận hành](#tổng-quan-nâng-cấp-là-một-thay-đổi-vận-hành)
+  - [Ba loại thay đổi cần tách riêng](#ba-loại-thay-đổi-cần-tách-riêng)
+  - [Khi nào nên nâng cấp](#khi-nào-nên-nâng-cấp)
+- [Đánh giá compatibility trước khi đổi mã](#đánh-giá-compatibility-trước-khi-đổi-mã)
+  - [Ma trận cần kiểm tra](#ma-trận-cần-kiểm-tra)
+  - [Đọc dependency tree và peer dependency](#đọc-dependency-tree-và-peer-dependency)
+- [Flow nâng cấp có điểm dừng](#flow-nâng-cấp-có-điểm-dừng)
+- [Chuẩn bị: biến giả định thành baseline](#chuẩn-bị-biến-giả-định-thành-baseline)
+  - [Chốt phạm vi và artefact quay lui](#chốt-phạm-vi-và-artefact-quay-lui)
+  - [Ghi baseline kỹ thuật và runtime](#ghi-baseline-kỹ-thuật-và-runtime)
+- [Thực hiện bằng ng update](#thực-hiện-bằng-ng-update)
+  - [Chọn CLI cục bộ và target version](#chọn-cli-cục-bộ-và-target-version)
+  - [Nâng từng major version](#nâng-từng-major-version)
+  - [Đọc thay đổi trước khi chấp nhận](#đọc-thay-đổi-trước-khi-chấp-nhận)
+- [Migrations: để công cụ làm việc lặp lại được](#migrations-để-công-cụ-làm-việc-lặp-lại-được)
+  - [Migration tự động giải quyết và không giải quyết gì](#migration-tự-động-giải-quyết-và-không-giải-quyết-gì)
+  - [Chạy lại migration có kiểm soát](#chạy-lại-migration-có-kiểm-soát)
+- [Ví dụ: nâng ứng dụng từ Angular 16 lên 18](#ví-dụ-nâng-ứng-dụng-từ-angular-16-lên-18)
+  - [Chặng 16 sang 17](#chặng-16-sang-17)
+  - [Chặng 17 sang 18](#chặng-17-sang-18)
+- [Kiểm thử, rollout từng chặng và rollback](#kiểm-thử-rollout-từng-chặng-và-rollback)
+  - [Tháp kiểm chứng sau mỗi chặng](#tháp-kiểm-chứng-sau-mỗi-chặng)
+  - [Phát hành theo phạm vi người dùng](#phát-hành-theo-phạm-vi-người-dùng)
+  - [Rollback là thao tác phục hồi, không phải xóa lịch sử](#rollback-là-thao-tác-phục-hồi-không-phải-xóa-lịch-sử)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist sau nâng cấp](#checklist-sau-nâng-cấp)
+- [Tóm tắt](#tóm-tắt)
+
+## Tổng quan: nâng cấp là một thay đổi vận hành
+
+Một **major version** là version có số đầu tiên thay đổi, ví dụ từ Angular `17.x` sang `18.x`. Major version có thể bỏ API cũ hoặc đổi hành vi mặc định. Vì vậy một lệnh cài package thành công chỉ chứng minh dependency resolver đã tìm được tập version; nó chưa chứng minh template, SSR, build hay hành trình người dùng còn đúng.
+
+Nâng cấp tốt tạo được chuỗi bằng chứng: version cũ có baseline, mỗi chặng major có diff và test riêng, release mới được quan sát trong runtime thật, và release cũ vẫn có thể phục vụ lại nếu tín hiệu xấu đi. Chuỗi này đặc biệt quan trọng với ứng dụng có SSR/hydration, Angular Material, thư viện UI, custom builder hoặc pipeline deploy phức tạp.
+
+### Ba loại thay đổi cần tách riêng
+
+| Loại | Mục đích | Ví dụ | Cách xử lý |
+| --- | --- | --- | --- |
+| Cập nhật package | Đưa Angular CLI, core và dependency lên version mục tiêu. | `@angular/core` từ `17` lên `18`. | Để `ng update` đề xuất và cập nhật lockfile. |
+| Migration | Biến đổi mã/cấu hình theo quy tắc của framework hoặc thư viện. | Thay API deprecated, đổi cấu hình builder. | Review diff, chạy test và sửa phần công cụ không hiểu ngữ cảnh. |
+| Refactor sản phẩm | Cải thiện kiến trúc hay UI không bắt buộc cho compatibility. | Chuyển toàn bộ component sang signals. | Tách sang PR/chặng khác sau khi framework ổn định. |
+
+Gộp cả ba làm diff lớn và che mất nguyên nhân khi có regression. Ví dụ, nếu vừa nâng Angular vừa viết lại state management, một lỗi màn hình trống không còn cho biết do migration, package thứ ba hay refactor. Quy tắc thực dụng là: **một chặng nâng cấp chỉ giải quyết compatibility cần thiết cho chặng đó**.
+
+### Khi nào nên nâng cấp
+
+Nâng cấp theo chu kỳ dự kiến thường rẻ hơn đợi nhiều major version. Động lực hợp lý gồm bản Angular đang hết hỗ trợ, yêu cầu Node.js của môi trường đã đổi, dependency quan trọng yêu cầu Angular mới hơn, hoặc cần một capability mới đã được đánh giá có giá trị.
+
+Không nên bắt đầu trong lúc production đang có incident chưa được kiểm soát, ngay trước kỳ kinh doanh quan trọng, hoặc khi chưa có người chịu trách nhiệm rollback. Nếu lý do chỉ là “lên bản mới nhất”, hãy chốt lợi ích, target version và cửa sổ phát hành trước. Kết luận cần hành động là: nâng cấp khi đội có thời gian kiểm chứng và đường phục hồi, không chỉ khi có version mới.
+
+## Đánh giá compatibility trước khi đổi mã
+
+Compatibility là tập ràng buộc giữa Angular, Angular CLI, Node.js, TypeScript, RxJS, thư viện và runtime deploy. Không có một số version “đúng cho mọi dự án”: ràng buộc chính xác phụ thuộc vào **target Angular version**. Bắt đầu bằng bảng compatibility chính thức của Angular tại [Angular version compatibility](https://angular.dev/reference/versions) và hướng dẫn tương tác tại [Angular Update Guide](https://update.angular.dev/), rồi đối chiếu với repository thật.
+
+### Ma trận cần kiểm tra
+
+| Bề mặt | Câu hỏi cần trả lời | Bằng chứng nên lưu |
+| --- | --- | --- |
+| Angular framework và CLI | `@angular/core`, `@angular/cli`, compiler và builder có target major tương thích không? | `package.json`, lockfile, đầu ra `npx ng version`. |
+| Node.js | Node chạy ở máy dev, CI và production có nằm trong dải được target Angular hỗ trợ không? | `.nvmrc`, Dockerfile, CI config, runtime host. |
+| TypeScript và RxJS | Version hiện có có thỏa peer dependency của target Angular không? | dependency tree và compatibility table. |
+| Angular packages | Material/CDK, service worker, SSR, localize và ESLint có version cùng major hoặc migration tương ứng không? | Danh sách `@angular/*` và tài liệu package. |
+| Thư viện bên thứ ba | UI kit, charts, editor, auth, testing, builder có peer dependency Angular/TypeScript nào? | `npm ls`, release notes, issue tracker của thư viện. |
+| Runtime và deploy | SSR adapter, CDN/cache, browser support, service worker và environment config có hành vi khác sau build mới không? | Preview deployment và smoke test production-like. |
+
+Lệnh thu thập nhanh không thay thế cho việc đọc ma trận chính thức, nhưng cho biết repository hiện đứng ở đâu:
+
+```bash
+node --version
+npx ng version
+npm ls @angular/core @angular/cli typescript rxjs --depth=0
+npm outdated
+```
+
+Nếu dùng pnpm hoặc yarn, thay lệnh `npm` bằng package manager đang sở hữu lockfile. Không đổi package manager giữa chặng nâng cấp: khác biệt hoisting và cách giải peer dependency có thể tạo thêm biến số không liên quan đến Angular.
+
+### Đọc dependency tree và peer dependency
+
+**Peer dependency** là ràng buộc mà package yêu cầu ứng dụng cung cấp, thay vì tự mang một bản dependency riêng. Chẳng hạn một thư viện UI có thể yêu cầu `@angular/core` trong một dải major cụ thể. Cài bằng `--force` có thể làm lệnh qua được ràng buộc, nhưng không làm package đó tương thích ở runtime.
+
+Hãy phân loại mỗi cảnh báo peer dependency thành một quyết định cụ thể:
+
+1. Package đã có bản tương thích: lên bản đó trong cùng chặng và đọc migration/release note.
+2. Package không còn được duy trì: thay thế hoặc cô lập nó trước khi nâng major bị chặn.
+3. Package có peer range rộng nhưng chưa được kiểm chứng: tạo test cho bề mặt nó dùng, rồi thử ở branch nâng cấp.
+4. Cảnh báo không rõ nguồn: dùng `npm explain <package>` hoặc `npm ls <package>` để tìm package nào đưa ràng buộc vào.
+
+<Callout type="warn" title="Không coi --force là cách giải compatibility">
+  `ng update --force` hoặc cờ bỏ qua peer dependency chỉ hữu ích để thăm dò một giả thuyết trong branch tạm thời. Không merge hay phát hành từ trạng thái đó cho đến khi từng ràng buộc được giải quyết hoặc có quyết định rủi ro được ghi nhận.
+</Callout>
+
+## Flow nâng cấp có điểm dừng
+
+Flow dưới đây có các cổng dừng. Một cổng đỏ không có nghĩa dự án thất bại; nó nói rằng cần sửa hoặc thu thập thêm bằng chứng trước khi mở rộng phạm vi.
+
+```text
+Chọn current version, target version và cửa sổ release
+                         │
+                         ▼
+Đọc compatibility matrix + kiểm dependency/peer dependency
+                         │
+             không tương thích ──► nâng/thay/cô lập dependency trước
+                         │
+                         ▼
+Tạo branch, artefact rollback, baseline test/build/runtime
+                         │
+                         ▼
+Nâng MỘT major bằng ng update và review migration diff
+                         │
+                build/test đỏ ──► sửa đúng compatibility hoặc dừng
+                         │
+                         ▼
+Smoke + E2E + SSR/accessibility/performance so với baseline
+                         │
+                 regression ──► sửa, rollback chặng hoặc thu hẹp scope
+                         │
+                         ▼
+Deploy preview/canary, quan sát release ID và các tín hiệu
+                         │
+              tín hiệu xấu ──► rollback artefact/cấu hình đã định sẵn
+                         │
+                         ▼
+Mở rộng rollout, chốt checklist và ghi nợ kỹ thuật còn lại
+```
+
+Một baseline là số đo hoặc kết quả trước thay đổi để so sánh sau đó. Ví dụ, “production build thành công” là baseline tối thiểu; hữu ích hơn là thêm thời gian build, kích thước initial bundle, kết quả smoke test luồng thanh toán, error rate và Web Vitals của release hiện tại. Không có baseline, đội chỉ có cảm giác rằng bản mới “có vẻ chậm”.
+
+## Chuẩn bị: biến giả định thành baseline
+
+### Chốt phạm vi và artefact quay lui
+
+Tạo một branch hoặc pull request chỉ cho chặng target. Khóa đầu vào bằng cách ghi current version, target version, package manager, Node version, commit/release đang chạy và các dependency có rủi ro. Không gộp thay đổi feature, format toàn repository hay đổi CI ngoài phần bắt buộc cho compatibility.
+
+Trước khi chạy lệnh update, phải trả lời được bốn câu hỏi vận hành:
+
+- **Rollback về cái gì?** Xác định commit/release ID và artefact production đã được chứng minh tốt gần nhất.
+- **Rollback bằng cách nào?** Ví dụ: promote lại artefact cũ, đổi deployment pointer, hoặc revert release; tránh “build lại nhánh cũ” vì dependency hoặc environment có thể đã trôi.
+- **Ai có quyền và thời gian thực hiện?** Kiểm tra quyền deploy, cache purge và feature flag trước cửa sổ release.
+- **Khi nào quyết định rollback?** Đặt tín hiệu và ngưỡng: lỗi JavaScript tăng, route quan trọng lỗi, conversion giảm, SSR `5xx` tăng hoặc smoke test thất bại.
+
+<Callout type="idea" title="Artefact bất biến giúp rollback đáng tin">
+  Cùng một bundle đã qua kiểm thử phải được promotion qua các môi trường. Nếu rollback bằng một build mới từ mã cũ, bạn đang đưa vào biến số Node, lockfile, registry và cấu hình build hiện tại đúng lúc cần phục hồi nhanh.
+</Callout>
+
+### Ghi baseline kỹ thuật và runtime
+
+Chạy các lệnh và luồng đang có trước khi chạm vào dependency. Lưu kết quả vào PR, issue hoặc hệ thống CI để reviewer so sánh được; không cần theo đuổi một con số hoàn hảo.
+
+- Chạy formatter/linter/type check/test mà repository đã quy định.
+- Chạy production build và lưu warnings, đặc biệt là budget, CommonJS, CSS hoặc SSR warning.
+- Chạy unit test cho service/component đã sửa ở các lần gần đây và E2E cho hành trình rủi ro cao: đăng nhập, phân quyền, thanh toán hoặc lưu form.
+- Chụp kích thước bundle, route đầu tiên, lazy route nặng và thời gian build trong điều kiện tương đương.
+- Deploy preview nếu có SSR, hydration, service worker, runtime config hoặc CDN cache. Các bề mặt này không được chứng minh đầy đủ bằng `ng test`.
+- Ghi dashboard baseline: release ID, client error rate, request failure rate và chỉ số trải nghiệm liên quan.
+
+## Thực hiện bằng ng update
+
+### Chọn CLI cục bộ và target version
+
+Ưu tiên Angular CLI cục bộ để command chạy đúng version mà workspace khai báo. `npx ng` tìm binary trong project trước; điều này tránh global CLI cũ hoặc mới hơn diễn giải workspace khác với CI.
+
+Xem các update mà CLI nhận diện trước:
+
+```bash
+npx ng update
+```
+
+Sau đó đọc hướng dẫn update cho **điểm xuất phát và điểm đích**. Nếu current và target cách nhiều major version, chọn từng major liên tiếp. Ví dụ `16 → 17 → 18`, không nhảy thẳng `16 → 18`. Mỗi major có migrations theo giả định của version ngay trước nó; bỏ qua chặng có thể khiến migration không thấy cấu hình hoặc API trung gian cần chuyển đổi.
+
+### Nâng từng major version
+
+Ở một working tree sạch và sau khi baseline đã đạt, cập nhật core và CLI cùng major target. Ví dụ đây là chặng đến Angular 17:
+
+```bash
+npx ng update @angular/core@17 @angular/cli@17
+```
+
+Khi workspace dùng các package Angular đi kèm, kiểm tra đầu ra `ng update` và tài liệu package để chạy update tương ứng. Ví dụ Angular Material/CDK thường cần được nâng theo major phù hợp:
+
+```bash
+npx ng update @angular/material@17
+```
+
+Không sao chép mù quáng số `17` này vào dự án khác. Thay nó bằng target đã qua bảng compatibility. Sau lệnh, review ít nhất các thay đổi ở `package.json`, lockfile, `angular.json`, cấu hình TypeScript, mã nguồn và template. Lệnh có thể thay đổi chúng để migration chạy, nhưng ownership của tính đúng đắn vẫn thuộc về đội ứng dụng.
+
+Sau khi một chặng xanh, tạo checkpoint review/commit theo quy trình của đội rồi mới bắt đầu major kế tiếp. Checkpoint cho phép revert chặng `17 → 18` mà không xóa bằng chứng đã kiểm chứng của `16 → 17`.
+
+### Đọc thay đổi trước khi chấp nhận
+
+Đừng chấp nhận diff chỉ vì tool ghi “success”. Đọc changelog và migration output với các câu hỏi:
+
+- API nào bị deprecated, đổi default hoặc bị loại bỏ? Mã của dự án có dùng trực tiếp hay gián tiếp qua thư viện không?
+- Builder, `angular.json`, TypeScript config, SSR entry point hay test runner có thay đổi không?
+- Có package nào bị bỏ lại major cũ, duplicate trong lockfile hoặc vừa bị thêm qua dependency không?
+- Thay đổi template có làm ảnh hưởng accessibility, query selector E2E, CSS encapsulation hay visual regression không?
+- Có warning mới nào chưa chặn build nhưng báo trước một breaking change ở chặng tiếp theo không?
+
+Nếu command dừng ở xung đột, không sửa `package.json` theo kiểu đoán version. Quay lại ma trận, tìm peer dependency gây xung đột, rồi chọn bản package tương thích hoặc tách việc thay thế package ra khỏi chặng hiện tại.
+
+## Migrations: để công cụ làm việc lặp lại được
+
+Migration là mã chuyển đổi do Angular hoặc một thư viện cung cấp. Nó có thể sửa import, config, template hoặc dependency để đưa source về dạng mà target version hiểu được. Migration mạnh ở thay đổi có quy luật; nó không thể biết quy tắc nghiệp vụ, visual expectation hay contract với backend của ứng dụng.
+
+### Migration tự động giải quyết và không giải quyết gì
+
+| Migration thường xử lý tốt | Vẫn cần con người xác minh |
+| --- | --- |
+| Đổi import, rename API có quy tắc, cập nhật config schema và thêm dependency bắt buộc. | Logic condition trong template, hành vi UI, accessibility, performance và dữ liệu runtime. |
+| Chuyển những pattern đã được tooling nhận diện. | Wrapper nội bộ, code generation, dynamic import, patch package và code chưa được compiler đi qua. |
+| Báo những TODO/deprecation mà framework biết. | Tương thích của backend, CDN/service worker, browser cũ và thư viện bên thứ ba. |
+
+Khi migration để lại TODO, đừng xóa comment để làm diff sạch. Truy đến API cũ, đọc tài liệu đúng target version, thêm test mô tả hành vi mong muốn rồi thay thế có chủ đích. Ví dụ, một migration có thể đổi cú pháp import nhưng không thể kết luận màn hình loading của sản phẩm nên hiển thị skeleton, spinner hay lỗi có thể retry.
+
+### Chạy lại migration có kiểm soát
+
+Thông thường `ng update` chọn migration phù hợp khi version thay đổi. Chỉ dùng chế độ migration-only khi cần chạy migration cho một dependency đã ở version yêu cầu, hoặc khi khôi phục một chặng bị gián đoạn. Xem chính xác option của CLI cục bộ trước vì option và tên migration thay đổi theo version:
+
+```bash
+npx ng update --help
+npx ng update @angular/core --migrate-only --from 16.0.0 --to 17.0.0
+```
+
+Dùng `--from` và `--to` khớp trạng thái thực tế của workspace, không phải version mong muốn. Chạy migration-only trên branch sạch, review diff ngay sau mỗi lần chạy và không chạy lặp nhiều lần để “thử xem”. Một migration có thể không idempotent hoàn toàn khi dự án có custom code hoặc khi diff trước đó chưa được review.
+
+## Ví dụ: nâng ứng dụng từ Angular 16 lên 18
+
+Ví dụ này minh họa cách chia nhỏ, không khẳng định Angular `16`, Node hay mọi thư viện hiện tại còn phù hợp với target ở thời điểm bạn đọc. Đội phải thay số version bằng target đã xác nhận trong compatibility table.
+
+Giả sử ứng dụng có SPA, một lazy route `/orders`, Angular Material và một API thanh toán. Baseline trước upgrade gồm production build, unit test `OrderService`, E2E tạo đơn hàng, smoke test route `/orders`, initial/lazy bundle sizes và dashboard error rate của release `web-2024.10.3`.
+
+### Chặng 16 sang 17
+
+1. Kiểm tra Node, TypeScript, RxJS, Material/CDK và CI có thỏa dải Angular 17 không. Nếu Material thiếu version tương thích, giải quyết việc đó trước thay vì ép peer dependency.
+2. Trên branch sạch, chạy update core/CLI rồi update Material khi tool yêu cầu.
+
+```bash
+npx ng update @angular/core@17 @angular/cli@17
+npx ng update @angular/material@17
+```
+
+3. Review migration diff. Chú ý `angular.json`, TypeScript config, custom builder và test setup. Sửa TODO theo từng nguyên nhân; không tiện tay chuyển kiến trúc component trong cùng diff.
+4. Chạy type check, test, production build và E2E `/orders`. Deploy preview, rồi mở route lazy, tạo đơn hàng test và kiểm tra request/payment error đã được lọc dữ liệu nhạy cảm.
+5. Nếu kết quả đạt baseline hoặc chênh lệch đã giải thích được, lưu release candidate và checkpoint chặng 17. Nếu E2E lỗi vì selector UI thay đổi, sửa test hoặc UI dựa trên hành vi người dùng mong muốn, không chỉ đổi selector để CI xanh.
+
+### Chặng 17 sang 18
+
+Lặp lại cùng kỷ luật thay vì giả định chặng trước bảo đảm chặng sau:
+
+```bash
+npx ng update @angular/core@18 @angular/cli@18
+npx ng update @angular/material@18
+```
+
+Chạy lại toàn bộ gates. Lần này cần so với **cả baseline gốc lẫn checkpoint 17**: lỗi chỉ xuất hiện ở 18 là dữ liệu khoanh vùng hữu ích hơn lỗi được phát hiện sau một diff 16→18 lớn. Trước khi rollout, kiểm tra một browser/thiết bị đại diện và một session người dùng mới lẫn session đã có cache. Những trường hợp này thường lộ lỗi service worker, chunk cache hoặc token refresh mà unit test không nhìn thấy.
+
+## Kiểm thử, rollout từng chặng và rollback
+
+### Tháp kiểm chứng sau mỗi chặng
+
+Không phải mọi thay đổi cần toàn bộ test của tổ chức, nhưng mỗi tầng trả lời một câu hỏi khác. Bắt đầu ở tầng rẻ, rồi tăng độ giống production khi bằng chứng cần thiết hơn.
+
+| Tầng | Câu hỏi nó trả lời | Ví dụ tối thiểu |
+| --- | --- | --- |
+| Cài đặt và compile | Dependency/config có nhất quán để mã được biên dịch không? | Cài từ lockfile, type check, production build. |
+| Unit/component | Logic và template ở bề mặt đã đổi còn đúng không? | Test interceptor, form validation, component có migration. |
+| Integration/E2E | Hành trình người dùng đi qua router, HTTP và UI còn hoạt động không? | Đăng nhập, mở lazy route, tạo/sửa dữ liệu, xử lý lỗi. |
+| Preview/runtime | SSR, hydration, config, cache và host có tương thích không? | Preview deploy, refresh deep link, cold/warm cache. |
+| Observability | Bản mới có tạo regression theo traffic thật không? | Release ID, JS error, HTTP error, Web Vitals, conversion. |
+
+Đặt **cổng chấp nhận** trước rollout, ví dụ: không có build warning mới chưa được chấp thuận; smoke test pass; E2E luồng thanh toán pass; client error rate không vượt baseline đã định; bundle initial không tăng quá ngân sách; và không có SSR `5xx` mới. Ngưỡng cụ thể phải dựa trên baseline của ứng dụng, không sao chép một phần trăm chung.
+
+### Phát hành theo phạm vi người dùng
+
+Nếu hạ tầng cho phép, rollout theo nhiều phạm vi: preview nội bộ, canary cho lưu lượng nhỏ, rồi mở rộng dần. Canary không thay thế test; nó kiểm tra những biến chỉ có trong production như CDN, extension trình duyệt, dữ liệu đa dạng và tải thật.
+
+Ở mỗi phạm vi, gắn release ID vào telemetry và quan sát trong khoảng thời gian có đủ traffic. So sánh cùng route và nhóm người dùng với baseline hoặc phiên bản đối chứng. Một lỗi tăng sau deploy nhưng chỉ ở Safari, route lazy hoặc tài khoản cũ vẫn là lý do dừng rollout, dù dashboard tổng chưa đổi nhiều.
+
+<Callout type="warn" title="Feature flag không làm framework cũ và mới cùng chạy">
+  Feature flag hữu ích để tắt một capability hoặc đổi route sau khi release. Nó không cô lập được thay đổi compiler/runtime của Angular trong cùng bundle. Với lỗi framework-wide, rollback artefact vẫn là phương án phục hồi đáng tin cậy hơn.
+</Callout>
+
+### Rollback là thao tác phục hồi, không phải xóa lịch sử
+
+Khi tín hiệu đã chạm ngưỡng rollback, ưu tiên phục vụ lại release tốt gần nhất. Ghi rõ thời điểm, release ID, người thực hiện, triệu chứng, phạm vi bị ảnh hưởng và tín hiệu kích hoạt. Sau đó xác nhận artefact cũ thực sự đang được CDN/browser nhận, chạy smoke test và theo dõi error rate; không dừng ở trạng thái “đã bấm rollback”.
+
+Không `git reset` nhánh chung để xử lý sự cố production. Git history là bằng chứng điều tra; deployment rollback là thao tác thay artefact phục vụ. Sau khi ổn định, tạo chặng sửa mới từ checkpoint phù hợp, thêm regression test cho nguyên nhân đã xác nhận và thử lại qua preview/canary.
+
+## Lỗi thường gặp và trade-off
+
+| Tình huống | Vì sao rủi ro | Cách xử lý có căn cứ |
+| --- | --- | --- |
+| Nhảy qua nhiều major version | Migrations và breaking changes trung gian bị bỏ qua; diff khó khoanh vùng. | Đi từng major, checkpoint xanh sau mỗi chặng. |
+| Global CLI và local CLI khác nhau | Máy dev, CI và người review có thể chạy migration khác nhau. | Dùng `npx ng`, khóa Node/package manager và ghi version trong CI. |
+| Cài bằng `--force` | Resolver im lặng nhưng code package có thể gọi API không còn tồn tại. | Tìm peer dependency gốc; nâng, thay hoặc cô lập package. |
+| Gộp upgrade với refactor | Khi test hỏng, nguyên nhân không còn rõ. | Tách PR/chặng; chỉ xử lý compatibility bắt buộc. |
+| Chỉ chạy `ng test` | Không thấy lỗi SSR, cache, chunk lazy, browser hay config deploy. | Thêm build, E2E, preview và smoke test runtime. |
+| Đổi budgets để build xanh | Che performance regression thay vì giải quyết nó. | So bundle với baseline; giải thích hoặc giảm dependency/chunk. |
+| Rollback bằng build lại mã cũ | Build mới có thể lấy dependency/config khác. | Promote artefact bất biến đã biết tốt. |
+
+Trade-off chính là tốc độ ban đầu so với khả năng chẩn đoán. Một upgrade lớn trong một PR có vẻ nhanh vì ít ceremony, nhưng chi phí điều tra và rollback khi lỗi thường cao hơn nhiều. Nâng từng major tạo thêm checkpoint và test time, đổi lại có diff nhỏ, người review hiểu được nguyên nhân và đường quay lui ngắn. Với hệ thống rủi ro cao, trade-off này gần như luôn có lợi.
+
+## Checklist sau nâng cấp
+
+Dùng checklist này sau khi target version đã qua mọi chặng. Nó không thay thế release review theo đặc thù sản phẩm, nhưng ngăn các việc dễ quên.
+
+**Compatibility và mã nguồn:**
+
+- [ ] `@angular/core`, CLI và các package `@angular/*` liên quan đang ở target version tương thích.
+- [ ] Node.js, TypeScript, RxJS, package manager và lockfile thỏa ma trận của target Angular.
+- [ ] Peer dependency warning đã được giải quyết hoặc có quyết định rủi ro được ghi rõ; không phát hành từ trạng thái ép `--force`.
+- [ ] Migration diff, TODO và deprecation áp dụng cho dự án đã được review; refactor không liên quan đã tách riêng.
+- [ ] Custom builder, SSR/hydration, service worker, runtime config và tooling test đã được kiểm tra nếu dự án sử dụng.
+
+**Kiểm chứng và rollout:**
+
+- [ ] Type check, test liên quan và production build đã pass; warning mới đã được đánh giá.
+- [ ] E2E/smoke test của hành trình rủi ro cao pass ở môi trường gần production.
+- [ ] Bundle size, performance, accessibility và lỗi runtime được so với baseline cùng điều kiện.
+- [ ] Preview/canary dùng đúng release ID; dashboard error/HTTP/performance được theo dõi theo route và browser quan trọng.
+- [ ] Artefact tốt trước upgrade, quyền rollback, thao tác phục hồi và ngưỡng rollback đã được xác nhận.
+- [ ] Sau rollout, release ID đang phục vụ được xác nhận; cache/CDN và session cũ đã được kiểm tra theo phạm vi cần thiết.
+
+## Tóm tắt
+
+Nâng cấp Angular an toàn là vòng lặp **đánh giá compatibility → ghi baseline → nâng một major → review migration → kiểm chứng nhiều tầng → rollout hẹp → quan sát hoặc rollback**. `ng update` là công cụ quan trọng để cập nhật dependency và migration, nhưng nó không thay đội ứng dụng quyết định target version, đọc diff, kiểm thử hành vi hay điều hành release.
+
+Giữ chặng nhỏ, dùng CLI cục bộ, tách refactor, so sánh với baseline và rollback artefact bất biến. Khi một bước chưa có bằng chứng, dừng ở bước đó thay vì mở rộng diff. Cách làm này khiến upgrade chậm hơn trên lịch, nhưng nhanh hơn và ít rủi ro hơn khi vận hành thực tế.
+
+<Cards>
+  <Card title="Build và tối ưu bundle" href="/docs/testing-performance-deploy/build-optimization" description="So sánh output build, budgets và chi phí tải sau khi nâng cấp." />
+  <Card title="Triển khai Angular" href="/docs/testing-performance-deploy/deployment" description="Chuẩn bị artefact, runtime, cache và rollback cho production." />
+  <Card title="Thiết lập monitoring" href="/docs/production-troubleshooting/monitoring" description="Quan sát release ID, lỗi và performance trong rollout." />
+  <Card title="Kỹ thuật debugging" href="/docs/production-troubleshooting/debugging" description="Khoanh vùng regression bằng bằng chứng từ browser và runtime." />
+</Cards>

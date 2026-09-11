@@ -1,10 +1,728 @@
 ---
 title: Content projection
-description: Thiết kế component linh hoạt với ng-content và nhiều slot.
+description: Thiết kế component linh hoạt với ng-content, slot, fallback content và ranh giới rõ ràng giữa projection, input và template outlet.
 ---
 
-Trang này sẽ trình bày **Content projection** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu">
+  Sau bài này, bạn có thể giải thích nội dung nào thuộc về component dùng nó, tạo component một hoặc nhiều slot bằng `<ng-content>`, đặt fallback hợp lý và chọn giữa projection, input hoặc `NgTemplateOutlet` dựa trên API cần công bố.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan: component có khung, nơi dùng có nội dung](#tổng-quan-component-có-khung-nơi-dùng-có-nội-dung)
+  - [Ví dụ trước khi có projection](#ví-dụ-trước-khi-có-projection)
+- [ng-content hoạt động như thế nào](#ng-content-hoạt-động-như-thế-nào)
+  - [Nội dung giữ context của nơi dùng](#nội-dung-giữ-context-của-nơi-dùng)
+  - [Projection là quyết định khi biên dịch](#projection-là-quyết-định-khi-biên-dịch)
+- [Single-slot projection](#single-slot-projection)
+  - [Tạo component vỏ đơn giản](#tạo-component-vỏ-đơn-giản)
+  - [Khi single slot là đủ](#khi-single-slot-là-đủ)
+- [Multi-slot projection với select](#multi-slot-projection-với-select)
+  - [Một panel có header, nội dung và footer](#một-panel-có-header-nội-dung-và-footer)
+  - [Quy tắc khớp selector](#quy-tắc-khớp-selector)
+  - [Đặt tên slot bằng directive](#đặt-tên-slot-bằng-directive)
+- [Fallback content](#fallback-content)
+- [Thiết kế API component](#thiết-kế-api-component)
+  - [Chọn đúng loại API](#chọn-đúng-loại-api)
+  - [Thiết kế component card thực tế](#thiết-kế-component-card-thực-tế)
+  - [Style projected content có chủ đích](#style-projected-content-có-chủ-đích)
+- [Projection, input và template outlet](#projection-input-và-template-outlet)
+  - [Input: component nhận dữ liệu](#input-component-nhận-dữ-liệu)
+  - [Projection: nơi dùng cung cấp markup](#projection-nơi-dùng-cung-cấp-markup)
+  - [Template outlet: component chọn nơi render template](#template-outlet-component-chọn-nơi-render-template)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Tổng quan: component có khung, nơi dùng có nội dung
+
+**Content projection** là cơ chế để một component nhận các node HTML hoặc component con được viết giữa thẻ mở và thẻ đóng của nó. Trong template của component nhận, `<ng-content>` đánh dấu vị trí Angular sẽ đặt các node đó.
+
+Nói ngắn gọn, component sở hữu **khung và hành vi chung**; nơi sử dụng sở hữu **nội dung cụ thể**. Điều này đặc biệt hữu ích khi một phần giao diện có cùng layout, viền, khả năng đóng hoặc accessibility, nhưng phần bên trong không thể gói vào một chuỗi đơn giản.
+
+```text
+Nơi sử dụng                              Component Alert
+
+<app-alert>                              <section role="alert">
+  <strong>Lưu ý</strong>      ─────►      <ng-content></ng-content>
+  <a href="/help">Xem thêm</a>             </section>
+</app-alert>
+
+Nơi dùng quyết định node con; Alert quyết định node ấy xuất hiện ở đâu.
+```
+
+Không có projection, `AlertComponent` thường phải công bố quá nhiều input như `title`, `message`, `linkLabel`, `linkHref`, `icon` và nhiều cờ biến thể. Với projection, consumer có thể truyền một đoạn markup hoàn chỉnh, bao gồm link, component khác hoặc điều kiện `@if`, mà `AlertComponent` không cần biết chi tiết đó.
+
+### Ví dụ trước khi có projection
+
+Component sau phù hợp nếu mọi alert luôn có đúng một tiêu đề và một đoạn text:
+
+```ts
+import { Component, input } from '@angular/core';
+
+@Component({
+  selector: 'app-alert',
+  standalone: true,
+  template: `
+    <section class="alert" role="alert">
+      <strong>{{ title() }}</strong>
+      <p>{{ message() }}</p>
+    </section>
+  `,
+})
+export class AlertComponent {
+  readonly title = input.required<string>();
+  readonly message = input.required<string>();
+}
+```
+
+```html
+<app-alert title="Không thể lưu" message="Thử lại sau ít phút." />
+```
+
+Nhưng API này bắt đầu gượng khi một alert cần link, một alert khác cần danh sách lỗi, và alert thứ ba cần một nút. Thêm input cho từng cấu trúc làm component trở thành một “ngôn ngữ template” nhỏ khó học:
+
+```html
+<!-- Dấu hiệu API input đang phải mô tả markup của consumer. -->
+<app-alert
+  title="Không thể lưu"
+  message="Kiểm tra lại các trường sau"
+  link-label="Xem hướng dẫn"
+  link-href="/help"
+  [errors]="formErrors"
+/>
+```
+
+Trong trường hợp đó, để consumer viết nội dung là hợp đồng đơn giản hơn:
+
+```html
+<app-alert>
+  <strong>Không thể lưu</strong>
+  <p>Kiểm tra lại các trường sau.</p>
+  <ul>
+    @for (error of formErrors; track error) {
+      <li>{{ error }}</li>
+    }
+  </ul>
+  <a href="/help">Xem hướng dẫn</a>
+</app-alert>
+```
+
+<Callout type="idea" title="Câu hỏi quyết định">
+  Nếu component cần biết **giá trị nào** để tự render một giao diện ổn định, dùng input. Nếu consumer cần quyết định **markup nào** nằm trong một khung ổn định, dùng content projection.
+</Callout>
+
+## ng-content hoạt động như thế nào
+
+`<ng-content>` không phải một phần tử HTML thật được giữ lại trong DOM. Nó là placeholder đặc biệt mà Angular xử lý khi tạo view. Khi gặp:
+
+```html
+<app-alert>
+  <p>Có bản cập nhật mới.</p>
+</app-alert>
+```
+
+Angular tạo `AlertComponent`, lấy node `<p>` do nơi dùng cung cấp, rồi chiếu node đó vào placeholder trong template của `AlertComponent`:
+
+```ts
+@Component({
+  selector: 'app-alert',
+  standalone: true,
+  template: `
+    <section class="alert" role="status">
+      <span aria-hidden="true">ℹ</span>
+      <div class="alert__body">
+        <ng-content></ng-content>
+      </div>
+    </section>
+  `,
+})
+export class AlertComponent {}
+```
+
+DOM kết quả có thể được hình dung như sau. `<ng-content>` không xuất hiện như một element; `<p>` nằm trong vị trí của nó:
+
+```html
+<app-alert>
+  <section class="alert" role="status">
+    <span aria-hidden="true">ℹ</span>
+    <div class="alert__body">
+      <p>Có bản cập nhật mới.</p>
+    </div>
+  </section>
+</app-alert>
+```
+
+### Nội dung giữ context của nơi dùng
+
+Node được chiếu vẫn thuộc **view của nơi sử dụng**, không trở thành view nội bộ của `AlertComponent`. Vì vậy binding trong projected content đọc biến, signal và method của component viết ra nó.
+
+```ts
+import { Component, signal } from '@angular/core';
+import { AlertComponent } from './alert.component';
+
+@Component({
+  selector: 'app-settings-page',
+  standalone: true,
+  imports: [AlertComponent],
+  template: `
+    <app-alert>
+      <p>Còn {{ remainingAttempts() }} lần thử.</p>
+      <button type="button" (click)="resetPassword()">Đặt lại mật khẩu</button>
+    </app-alert>
+  `,
+})
+export class SettingsPageComponent {
+  readonly remainingAttempts = signal(2);
+
+  resetPassword(): void {
+    // Logic của trang, không phải logic của AlertComponent.
+  }
+}
+```
+
+`remainingAttempts()` và `resetPassword()` được tìm trên `SettingsPageComponent`. `AlertComponent` chỉ cung cấp viền, icon và `role`; nó không phải khai báo input cho hai giá trị này.
+
+Đây là một lợi thế lớn về tính linh hoạt, đồng thời là một ranh giới cần nhớ: component vỏ không nên âm thầm giả định cấu trúc hoặc state bên trong nội dung được chiếu. Nếu nó cần biết một khả năng cụ thể, hãy công bố một directive cho slot hoặc một input rõ ràng thay vì đọc/chỉnh DOM tùy tiện.
+
+### Projection là quyết định khi biên dịch
+
+Angular xác định các `<ng-content>` và selector slot từ template component. Vì vậy không thể tạo một placeholder động bằng binding, cũng không nên bọc `<ng-content>` trong `@if`, `@for` hoặc `ng-template` để mong muốn “chỉ chiếu khi điều kiện đúng”.
+
+```html
+<!-- Tránh: ng-content không phải node có thể tạo/hủy theo @if. -->
+@if (expanded()) {
+  <ng-content></ng-content>
+}
+```
+
+Nội dung chiếu vẫn được Angular tạo ngay cả khi placeholder bị ẩn bởi điều kiện. Điều này vừa gây hiểu nhầm về hiệu năng, vừa không cho kết quả điều kiện như mong đợi.
+
+Nếu cần bật/tắt **phần khung do component sở hữu**, đặt điều kiện quanh node thông thường và giữ placeholder ở cấu trúc tĩnh theo thiết kế. Nếu cần trì hoãn chính nội dung do consumer cung cấp, consumer nên dùng `@if` hoặc truyền `TemplateRef` để component render template vào thời điểm phù hợp.
+
+<Callout type="warn" title="Không nhân bản cùng một slot">
+  Đừng đặt hai `<ng-content>` có cùng selector chỉ để hiển thị một nội dung ở hai nơi. Một node DOM chỉ có một vị trí; hãy chọn một vị trí, tạo hai slot riêng, hoặc để consumer cung cấp hai node riêng biệt.
+</Callout>
+
+## Single-slot projection
+
+**Single-slot projection** dùng một `<ng-content>` không có thuộc tính `select`. Mọi node con không được một slot có selector khác bắt sẽ được đưa vào placeholder này. Đây là API nhẹ nhất cho component chỉ cần một vùng nội dung tự do.
+
+### Tạo component vỏ đơn giản
+
+`app-card` dưới đây sở hữu cấu trúc `article`, padding và border. Nó không quyết định phần thân là đoạn văn, form, ảnh hay một component biểu đồ.
+
+```ts
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+
+@Component({
+  selector: 'app-card',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <article class="card">
+      <ng-content></ng-content>
+    </article>
+  `,
+  styles: [`
+    :host { display: block; }
+    .card {
+      border: 1px solid #d4d4d8;
+      border-radius: 0.75rem;
+      padding: 1rem;
+      background: white;
+    }
+  `],
+})
+export class CardComponent {}
+```
+
+Nơi dùng có toàn quyền với markup bên trong:
+
+```html
+<app-card>
+  <h2>Doanh thu tháng này</h2>
+  <p>12.500.000 đ</p>
+  <app-revenue-chart />
+</app-card>
+```
+
+Projection không thay thế change detection. Khi `app-revenue-chart` hoặc binding của consumer có thay đổi, Angular vẫn cập nhật view tương ứng. `OnPush` trên `CardComponent` là hợp lý vì card không sở hữu state render cho nội dung được chiếu; nó không làm projected content ngừng phản ứng.
+
+### Khi single slot là đủ
+
+Dùng single slot khi các node con có cùng vai trò và thứ tự hoàn toàn do consumer quyết định. Ví dụ tốt gồm:
+
+- khung card hoặc panel đơn giản;
+- wrapper tạo spacing, viền hoặc vùng scroll;
+- component bố cục như `app-stack` hoặc `app-sidebar`;
+- alert có một vùng thông báo không chia thành phần ngữ nghĩa.
+
+Đừng tạo slot chỉ vì có thể. Nếu component luôn phải có tiêu đề, phần thân và action ở các vị trí cố định, single slot trao quá nhiều tự do: consumer có thể đặt action trước tiêu đề hoặc quên tiêu đề. Multi-slot sẽ biến các vai trò đó thành một API rõ ràng hơn.
+
+## Multi-slot projection với select
+
+**Multi-slot projection** chia nội dung thành các vùng có vai trò khác nhau. Mỗi `<ng-content select="...">` nhận những node khớp một CSS selector tĩnh. Một `<ng-content>` không có `select` là slot mặc định, nhận các node chưa khớp slot có selector.
+
+### Một panel có header, nội dung và footer
+
+Ví dụ này dùng attribute selector để đặt title vào header, các action vào footer, còn đoạn văn hoặc form không đánh dấu nằm ở phần thân:
+
+```ts
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-panel',
+  standalone: true,
+  template: `
+    <section class="panel">
+      <header class="panel__header">
+        <ng-content select="[panel-title]"></ng-content>
+      </header>
+
+      <div class="panel__body">
+        <ng-content></ng-content>
+      </div>
+
+      <footer class="panel__footer">
+        <ng-content select="[panel-actions]"></ng-content>
+      </footer>
+    </section>
+  `,
+})
+export class PanelComponent {}
+```
+
+Consumer chỉ cần đánh dấu vai trò của từng node:
+
+```html
+<app-panel>
+  <h2 panel-title>Cập nhật hồ sơ</h2>
+
+  <form>
+    <label>
+      Tên hiển thị
+      <input name="displayName" />
+    </label>
+  </form>
+
+  <div panel-actions>
+    <button type="button">Hủy</button>
+    <button type="submit">Lưu</button>
+  </div>
+</app-panel>
+```
+
+Kết quả trực quan:
+
+```text
+app-panel
+└── section.panel
+    ├── header.panel__header  ← h2[panel-title]
+    ├── div.panel__body      ← form
+    └── footer.panel__footer ← div[panel-actions]
+```
+
+Ở đây `form` không khớp `[panel-title]` hay `[panel-actions]`, nên vào slot mặc định. Header và footer có thể rỗng nếu consumer không truyền node phù hợp; phần [Fallback content](#fallback-content) trình bày cách xử lý UI mặc định khi điều đó hợp lý.
+
+### Quy tắc khớp selector
+
+`select` hỗ trợ selector CSS dùng để phân loại node, chẳng hạn tên element, class hoặc attribute:
+
+```html
+<ng-content select="app-panel-title"></ng-content>
+<ng-content select=".panel-title"></ng-content>
+<ng-content select="[panel-title]"></ng-content>
+<ng-content select="button[panel-action]"></ng-content>
+```
+
+Một vài quy tắc quan trọng:
+
+| Quy tắc | Ý nghĩa thực tế |
+| --- | --- |
+| Selector phải tĩnh | Không dùng binding như `[select]="slotSelector"`. Cấu trúc projection là API compile-time của component. |
+| Node được xét theo selector | `<h2 panel-title>` khớp `[panel-title]`; `<h2>` không tự trở thành title vì nội dung chữ của nó. |
+| Slot mặc định bắt phần còn lại | Node không khớp bất kỳ slot có `select` nào đi vào `<ng-content>` không `select`. Nếu không có slot mặc định, chúng không được render. |
+| Thứ tự selector có ý nghĩa | Khi một node có thể khớp nhiều slot, Angular gán theo slot phù hợp đầu tiên trong template. Hãy làm selector cụ thể để tránh mơ hồ. |
+| Slot không đổi thứ tự bên trong | Các node cùng một slot giữ thứ tự mà consumer đã viết. Component chỉ quyết định vùng chứa slot đó. |
+
+Ví dụ dưới đây dễ gây nhầm lẫn vì title cũng khớp selector rộng `.panel-item`:
+
+```html
+<!-- Tránh: title có thể bị bắt bởi slot rộng đặt trước. -->
+<ng-content select=".panel-item"></ng-content>
+<ng-content select="[panel-title]"></ng-content>
+```
+
+Thay vào đó, dùng các marker loại trừ nhau hoặc đặt selector đặc hiệu hơn theo hợp đồng API:
+
+```html
+<ng-content select="[panel-title]"></ng-content>
+<ng-content select="[panel-item]"></ng-content>
+```
+
+### Đặt tên slot bằng directive
+
+Attribute thuần như `[panel-title]` rất gọn. Khi component cần type-safe marker, content query, host binding hoặc kiểm tra bắt buộc, một directive đánh dấu là API tốt hơn. Directive cũng giúp tránh string attribute vô tình trùng tên trong một thư viện lớn.
+
+```ts
+import { Directive } from '@angular/core';
+
+@Directive({
+  selector: '[appPanelTitle]',
+  standalone: true,
+})
+export class PanelTitleDirective {}
+
+@Directive({
+  selector: '[appPanelActions]',
+  standalone: true,
+})
+export class PanelActionsDirective {}
+```
+
+Component vẫn chọn bằng selector directive, và có thể query title để biết nó có tồn tại hay không:
+
+```ts
+import { Component, contentChild } from '@angular/core';
+import { PanelTitleDirective } from './panel-slots.directive';
+
+@Component({
+  selector: 'app-panel',
+  standalone: true,
+  template: `
+    <header class="panel__header">
+      <ng-content select="[appPanelTitle]"></ng-content>
+    </header>
+    <div class="panel__body"><ng-content></ng-content></div>
+    <footer class="panel__footer">
+      <ng-content select="[appPanelActions]"></ng-content>
+    </footer>
+  `,
+})
+export class PanelComponent {
+  readonly title = contentChild(PanelTitleDirective);
+}
+```
+
+Nơi dùng import directive marker cùng component rồi viết:
+
+```html
+<app-panel>
+  <h2 appPanelTitle>Chỉnh sửa hồ sơ</h2>
+  <app-profile-form />
+  <div appPanelActions>
+    <button type="submit">Lưu</button>
+  </div>
+</app-panel>
+```
+
+`contentChild()` tìm projected content, trái với `viewChild()` chỉ tìm node trong template của chính `PanelComponent`. Tuy nhiên, query không tự biến title thành bắt buộc và không thay thế thiết kế API. Nếu panel không có ý nghĩa khi thiếu title, hãy cung cấp fallback, hiển thị lỗi phát triển có chủ đích hoặc chọn một API `title` input đơn giản hơn.
+
+## Fallback content
+
+Fallback content (có từ Angular 18) là markup đặt **bên trong** thẻ `<ng-content>`. Angular render nó khi slot không nhận được node nào từ consumer. Nó phù hợp cho một giá trị mặc định hữu ích mà consumer vẫn có quyền ghi đè. Với phiên bản Angular cũ hơn, cần tạo trạng thái mặc định bằng cấu trúc template hoặc API component khác.
+
+```ts
+@Component({
+  selector: 'app-empty-state',
+  standalone: true,
+  template: `
+    <section class="empty-state">
+      <ng-content>
+        <p>Chưa có dữ liệu để hiển thị.</p>
+      </ng-content>
+    </section>
+  `,
+})
+export class EmptyStateComponent {}
+```
+
+Hai cách dùng tạo kết quả khác nhau:
+
+```html
+<!-- Render fallback. -->
+<app-empty-state />
+
+<!-- Render nội dung do consumer cung cấp, không render fallback. -->
+<app-empty-state>
+  <p>Chưa có đơn hàng. <a routerLink="/products">Mua sắm ngay</a>.</p>
+</app-empty-state>
+```
+
+Fallback cũng áp dụng cho slot có selector. Một dialog có thể có nút đóng mặc định nếu consumer không chiếu action riêng:
+
+```html
+<footer class="dialog__footer">
+  <ng-content select="[dialog-actions]">
+    <button type="button">Đóng</button>
+  </ng-content>
+</footer>
+```
+
+<Callout type="warn" title="Fallback không phải điều kiện runtime">
+  Fallback phụ thuộc việc slot có node được chiếu hay không, không phụ thuộc một signal như `loading()`. Với trạng thái runtime, render node bình thường bằng `@if` trong template component hoặc để consumer tự điều khiển nội dung projected.
+</Callout>
+
+Đừng dùng fallback để che một API không rõ. Nếu title là yêu cầu accessibility bắt buộc cho dialog, một title mặc định chung chung có thể tốt hơn vùng header trống; nhưng nếu người dùng phải biết ngữ cảnh dialog, bắt consumer truyền `title` input hoặc một title slot có quy ước rõ ràng thường an toàn hơn.
+
+## Thiết kế API component
+
+Projection là một quyết định thiết kế public API, không chỉ là kỹ thuật template. Mỗi slot mở ra một phần markup mà consumer được quyền kiểm soát. Quá ít slot ép consumer vào input phức tạp; quá nhiều slot làm component khó đọc, khó style và khó bảo đảm accessibility.
+
+### Chọn đúng loại API
+
+Bắt đầu bằng ý nghĩa của dữ liệu và cấu trúc:
+
+| Nhu cầu | API nên ưu tiên | Ví dụ |
+| --- | --- | --- |
+| Giá trị đơn, kiểu rõ, component tự quyết markup | `input()` | `variant`, `disabled`, `title`, `loading` |
+| Sự kiện hoặc ý định từ component | `output()` | `closed`, `confirmed`, `selected` |
+| Một vùng markup tự do do consumer sở hữu | single-slot projection | thân card, nội dung alert |
+| Vài vùng có vai trò cố định | multi-slot projection | title, body, action của dialog |
+| Component cần quyết định thời điểm/vị trí render UI do consumer định nghĩa | `TemplateRef` + `NgTemplateOutlet` | row của data table, item của list |
+
+Một component tốt thường kết hợp các API này thay vì buộc tất cả qua projection. Chẳng hạn dialog nhận `[open]`, phát `(closed)`, có slot title và body, đồng thời sở hữu focus trap và `aria-modal`. Projection không nên khiến consumer phải tự tạo những phần cấu trúc hoặc hành vi mà dialog phải kiểm soát để an toàn.
+
+### Thiết kế component card thực tế
+
+Một card sản phẩm thường có layout cố định, nhưng ảnh, title, mô tả và action khác nhau giữa nơi dùng. API dưới đây cho các phần có vai trò layout; `appearance` vẫn là input vì nó là cấu hình của khung card.
+
+```ts
+import { Component, input } from '@angular/core';
+
+@Component({
+  selector: 'app-product-card',
+  standalone: true,
+  template: `
+    <article class="card" [class.card--compact]="appearance() === 'compact'">
+      <div class="card__media">
+        <ng-content select="[card-media]"></ng-content>
+      </div>
+
+      <div class="card__content">
+        <ng-content select="[card-title]"></ng-content>
+        <ng-content select="[card-description]"></ng-content>
+        <ng-content></ng-content>
+      </div>
+
+      <div class="card__actions">
+        <ng-content select="[card-actions]"></ng-content>
+      </div>
+    </article>
+  `,
+})
+export class ProductCardComponent {
+  readonly appearance = input<'default' | 'compact'>('default');
+}
+```
+
+```html
+<app-product-card appearance="compact">
+  <img card-media src="/keyboard.jpg" alt="Bàn phím cơ màu trắng" />
+  <h2 card-title>Bàn phím cơ</h2>
+  <p card-description>Switch tactile, kết nối không dây.</p>
+  <p>1.290.000 đ</p>
+
+  <div card-actions>
+    <button type="button">Thêm vào giỏ</button>
+  </div>
+</app-product-card>
+```
+
+Trước khi công bố slot, hãy ghi rõ các quy ước sau trong tài liệu component:
+
+1. **Vai trò và số lượng.** Slot `card-title` có cần đúng một heading không? `card-actions` có thể chứa nhiều button không?
+2. **Phần tử hợp lệ.** Với `card-media`, consumer có thể truyền `img`, video hay component ảnh? Nếu ảnh là bắt buộc cho accessibility, alt text thuộc trách nhiệm ai?
+3. **Thứ tự thị giác và DOM.** Component quyết định slot xuất hiện trong DOM, không phải thứ tự consumer viết. Bảo đảm thứ tự đọc bằng bàn phím và screen reader vẫn hợp lý.
+4. **Vùng tùy biến ổn định.** Chỉ công bố slot thật sự muốn hỗ trợ lâu dài. Đừng để consumer phụ thuộc class nội bộ như `.card__content`.
+5. **Trạng thái vắng mặt.** Header/footer rỗng có nên bị ẩn? Có fallback không? Nếu cần biết slot có tồn tại, dùng content query hoặc thiết kế markup để vùng rỗng không gây khoảng trống.
+
+<Callout type="idea" title="Ưu tiên semantic HTML">
+  Slot title không tự tạo ngữ nghĩa heading. Khi card cần heading để hỗ trợ điều hướng, hãy nêu rõ consumer dùng `<h2 card-title>` hoặc cung cấp một component/directive title có hợp đồng accessibility tương ứng.
+</Callout>
+
+### Style projected content có chủ đích
+
+Với encapsulation mặc định (`ViewEncapsulation.Emulated`), CSS của component vỏ được scope cho node do template của vỏ tạo. Node projected được tạo trong view của consumer, nên selector nội bộ như `.card__content h2` không phải là một API styling đáng tin cậy để ép style lên title được chiếu.
+
+Thay vì xuyên ranh giới bằng `::ng-deep`, hãy chọn một trong các cách sau:
+
+- Consumer tự style node mà họ sở hữu.
+- Công bố class/attribute marker có ý nghĩa (`card-title`, `card-actions`) để stylesheet global hoặc design system hỗ trợ có chủ đích.
+- Công bố CSS custom properties trên host cho các token mà vỏ thực sự sở hữu.
+- Cung cấp component con như `app-card-title` nếu cần markup và style nhất quán tuyệt đối.
+
+```css
+/* product-card.component.css: token mà consumer có thể ghi đè trên host. */
+:host {
+  --card-padding: 1rem;
+  --card-border: #d4d4d8;
+  display: block;
+}
+
+.card {
+  border: 1px solid var(--card-border);
+  padding: var(--card-padding);
+}
+```
+
+```html
+<app-product-card style="--card-padding: 1.5rem; --card-border: #7c3aed">
+  <!-- Consumer vẫn sở hữu markup và style của projected content. -->
+</app-product-card>
+```
+
+Cách này giữ ranh giới rõ: card kiểm soát surface của card; consumer kiểm soát chi tiết bên trong. Với `ShadowDom`, ranh giới style còn mạnh hơn, nên custom properties và `part` (nếu component công bố) càng quan trọng khi thiết kế khả năng theme.
+
+## Projection, input và template outlet
+
+Ba kỹ thuật này đều giúp tái sử dụng UI, nhưng trả lời các câu hỏi khác nhau. Chọn sai không nhất thiết làm ứng dụng lỗi ngay, nhưng thường tạo API khó đọc hoặc thiếu khả năng mở rộng.
+
+### Input: component nhận dữ liệu
+
+Dùng input khi component sở hữu markup và consumer chỉ cấu hình dữ liệu hoặc trạng thái. `UserAvatarComponent` biết phải render `<img>`, avatar fallback, `alt` và kích cỡ; nơi dùng chỉ truyền dữ liệu cần thiết.
+
+```ts
+import { Component, input } from '@angular/core';
+
+@Component({
+  selector: 'app-user-avatar',
+  standalone: true,
+  template: `
+    <img [src]="src()" [alt]="alt()" [width]="size()" [height]="size()" />
+  `,
+})
+export class UserAvatarComponent {
+  readonly src = input.required<string>();
+  readonly alt = input.required<string>();
+  readonly size = input(40);
+}
+```
+
+```html
+<app-user-avatar src="/users/ada.jpg" alt="Ada Lovelace" [size]="48" />
+```
+
+Input cho type checking tốt, giá trị mặc định rõ và tạo một API nhỏ. Đổi lại, nó không thích hợp để biểu diễn một cấu trúc tùy ý như “đoạn văn, link, danh sách và button”. Đừng nhét HTML chuỗi vào input rồi bind `[innerHTML]` chỉ để tránh projection: bạn mất type safety cho cấu trúc, dễ tạo rủi ro bảo mật và khó gắn component Angular vào nội dung đó.
+
+### Projection: nơi dùng cung cấp markup
+
+Dùng projection khi consumer sở hữu markup và context của markup đó. `app-modal` có thể sở hữu overlay, focus handling, close button và layout; consumer đưa tiêu đề, form và action vào các slot.
+
+```html
+<app-modal [open]="editing()" (closed)="closeEditor()">
+  <h2 modal-title>Sửa hồ sơ</h2>
+  <app-profile-form />
+  <div modal-actions>
+    <button type="button" (click)="closeEditor()">Hủy</button>
+    <button type="submit" form="profile-form">Lưu</button>
+  </div>
+</app-modal>
+```
+
+Điểm mạnh là markup được viết ngay tại nơi nó dùng state. Điểm đổi lại là component modal không dễ lặp hoặc đặt lại cùng content ở nhiều vị trí, và API slot cần được giữ ổn định. Projection tốt cho composition theo cấu trúc, không phải cho rendering lặp dữ liệu lớn.
+
+### Template outlet: component chọn nơi render template
+
+`NgTemplateOutlet` nhận một `TemplateRef`: một template do consumer định nghĩa nhưng chưa render ngay. Component nhận template có thể quyết định render nó bao nhiêu lần, ở vị trí nào và với context nào. Đây là khác biệt cơ bản với projection: projected node đã được đặt vào slot; template outlet là một “khuôn” có thể được instantiate theo yêu cầu.
+
+Ví dụ list tổng quát nhận template cho mỗi sản phẩm. `let-product` lấy giá trị từ context mà list cung cấp:
+
+```ts
+import { Component, TemplateRef, input } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+
+type Product = { id: number; name: string; price: number };
+
+@Component({
+  selector: 'app-product-list',
+  standalone: true,
+  imports: [NgTemplateOutlet],
+  template: `
+    <ul>
+      @for (product of products(); track product.id) {
+        <li>
+          <ng-container
+            [ngTemplateOutlet]="itemTemplate()"
+            [ngTemplateOutletContext]="{ $implicit: product }"
+          />
+        </li>
+      }
+    </ul>
+  `,
+})
+export class ProductListComponent {
+  readonly products = input.required<Product[]>();
+  readonly itemTemplate = input.required<TemplateRef<{ $implicit: Product }>>();
+}
+```
+
+Consumer định nghĩa template và truyền tham chiếu của nó:
+
+```html
+<ng-template #productItem let-product>
+  <strong>{{ product.name }}</strong>
+  <span>{{ product.price }} đ</span>
+</ng-template>
+
+<app-product-list [products]="products()" [itemTemplate]="productItem" />
+```
+
+So sánh nhanh:
+
+| Kỹ thuật | Ai sở hữu markup? | Ai quyết định vị trí/số lần render? | Phù hợp nhất cho |
+| --- | --- | --- | --- |
+| Input | Component | Component | dữ liệu, cấu hình, UI có cấu trúc cố định |
+| `<ng-content>` | Consumer | Component đặt một slot cố định | layout wrapper, header/body/actions, composition tĩnh |
+| `TemplateRef` + `NgTemplateOutlet` | Consumer định nghĩa template | Component nhận template | item lặp, empty/loading template, cell table, render theo điều kiện |
+
+Có thể kết hợp chúng. Một data table có `[data]` input, `rowTemplate` input để render từng hàng, và một single projected slot cho toolbar. Điều quan trọng là mỗi API trả lời một nhu cầu riêng, không trùng lặp vô cớ.
+
+<Callout type="warn" title="Đừng dùng TemplateRef cho mọi thứ">
+  `TemplateRef` mạnh nhưng khó đọc hơn projection. Nếu chỉ cần một vùng thân được render đúng một lần, `<ng-content>` đơn giản hơn. Chỉ nâng lên template outlet khi component thật sự cần kiểm soát lần render hoặc context của template.
+</Callout>
+
+## Lỗi thường gặp và trade-off
+
+| Lỗi hoặc lựa chọn | Hệ quả | Cách sửa |
+| --- | --- | --- |
+| Dùng input cho mọi mẩu markup | Component tích lũy `title`, `message`, `link`, `actions`, `html` và nhiều cờ; API khó mở rộng. | Dùng slot khi consumer phải sở hữu cấu trúc HTML. |
+| Dùng projection cho giá trị đơn giản | Consumer phải tự tạo markup lặp lại, nhất quán và accessibility khó giữ. | Đưa giá trị vào `input()` khi component nên tự render. |
+| Bọc `<ng-content>` trong `@if` | Nội dung vẫn được tạo; ý nghĩa điều kiện không như mong đợi. | Giữ slot tĩnh; dùng `@if` ở consumer hoặc `TemplateRef` cho lazy/dynamic rendering. |
+| Selector slot chồng chéo | Một node vào slot đầu tiên khớp, gây mất nội dung ở vùng mong đợi. | Dùng marker loại trừ nhau, selector đặc hiệu và kiểm thử ví dụ biên. |
+| Không có slot mặc định khi cần body | Node không khớp selector không được render, dễ tạo UI “mất nội dung”. | Thêm `<ng-content>` mặc định hoặc tài liệu hóa rõ chỉ các slot được chấp nhận. |
+| Dùng CSS nội bộ/`::ng-deep` để sửa projected node | Coupling với view consumer, style rò rỉ và khó nâng cấp. | Cung cấp token CSS, marker semantic hoặc component con có API rõ. |
+| Dùng `TemplateRef` cho một slot render một lần | Cú pháp và typing phức tạp hơn nhu cầu. | Dùng projection cho composition tĩnh. |
+| Bỏ qua accessibility của slot | Consumer có thể truyền cấu trúc không có heading, label hoặc thứ tự focus đúng. | Nêu semantic contract, cung cấp fallback hợp lý hoặc component con chuẩn hóa. |
+
+Trade-off cốt lõi của projection là **tự do đổi lấy kiểm soát**. Consumer có thể đưa gần như mọi markup vào slot, nên component vỏ ít có khả năng bảo đảm cấu trúc hơn input. Bù lại, consumer không phải chờ component vỏ thêm input mới cho mỗi biến thể nội dung.
+
+Để cân bằng, hãy giữ slot ở cấp độ ngữ nghĩa cao: `title`, `body`, `actions`, không phải `left-icon-line-2`. Một slot phải mô tả điều người dùng muốn truyền, không mô tả chi tiết DOM hiện tại. Khi layout nội bộ đổi, API theo vai trò có cơ hội giữ tương thích tốt hơn.
+
+## Checklist và tóm tắt
+
+Trước khi thêm `<ng-content>` vào một component, tự kiểm tra:
+
+- [ ] Component có một khung/hành vi dùng chung, còn consumer thật sự cần kiểm soát markup bên trong.
+- [ ] Single slot đủ đơn giản, hoặc mỗi multi-slot có một vai trò ngữ nghĩa rõ ràng.
+- [ ] Selector `select` tĩnh, đặc hiệu và không chồng chéo ngoài ý muốn.
+- [ ] Có slot mặc định hoặc tài liệu hóa rõ node không khớp sẽ không render.
+- [ ] Fallback chỉ dùng cho nội dung mặc định khi slot rỗng, không thay cho trạng thái runtime.
+- [ ] Không bọc `<ng-content>` trong flow control để trì hoãn việc tạo projected content.
+- [ ] Input, output, projection và `TemplateRef` mỗi cái có một trách nhiệm riêng trong API.
+- [ ] Contract slot nêu rõ semantic HTML, accessibility, trạng thái vắng mặt và cách style được hỗ trợ.
+
+Tóm lại:
+
+- `<ng-content>` là placeholder Angular đưa nội dung do nơi sử dụng viết vào template component.
+- Nội dung được chiếu giữ binding context của consumer; component nhận sở hữu vị trí và khung bao quanh nó.
+- Một slot không `select` nhận nội dung tự do. Nhiều slot với `select` tạo các vùng như title, body và actions.
+- Fallback nằm bên trong `<ng-content>` và chỉ xuất hiện khi slot không nhận node nào.
+- Dùng input cho dữ liệu và UI cố định; dùng projection cho composition tĩnh; dùng `TemplateRef` với `NgTemplateOutlet` khi component cần render template nhiều lần hoặc với context riêng.
+- API projection tốt dùng ít slot, tên theo vai trò, selector không mơ hồ và ranh giới styling/accessibility rõ ràng.
+
+<Cards>
+  <Card title="Giao tiếp giữa component" href="/docs/component-template/giao-tiep-component" description="Phân biệt input, output, model, query và shared state trong quan hệ component." />
+  <Card title="Data binding" href="/docs/component-template/data-binding" description="Ôn lại property binding, event binding và cách template đọc dữ liệu." />
+  <Card title="Styling component" href="/docs/component-template/styling-component" description="Hiểu encapsulation và cách style projected content mà không xuyên ranh giới tùy tiện." />
+</Cards>

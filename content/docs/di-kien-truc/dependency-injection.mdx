@@ -1,10 +1,482 @@
 ---
 title: Dependency Injection
-description: Cơ chế inject dependency và cây injector của Angular.
+description: Hiểu cách Angular cung cấp, phân giải, chia phạm vi và hủy dependency qua cây injector.
 ---
 
-Trang này sẽ trình bày **Dependency Injection** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu trang này">
+  Sau khi đọc, bạn có thể quyết định đặt provider ở đâu, dùng `inject()` đúng injection context và kiểm thử dependency mà không cần khởi tạo ứng dụng thật.
 </Callout>
+
+## Mục lục
+
+- [Dependency Injection là gì?](#dependency-injection-là-gì)
+  - [Bài toán khi không dùng DI](#bài-toán-khi-không-dùng-di)
+  - [Ba vai trò: token, provider và injector](#ba-vai-trò-token-provider-và-injector)
+- [Cơ chế phân giải: cây injector](#cơ-chế-phân-giải-cây-injector)
+  - [Thứ tự tìm provider](#thứ-tự-tìm-provider)
+  - [Vòng đời instance](#vòng-đời-instance)
+- [Yêu cầu dependency bằng constructor và `inject()`](#yêu-cầu-dependency-bằng-constructor-và-inject)
+  - [Injection context](#injection-context)
+  - [Các cờ phân giải](#các-cờ-phân-giải)
+- [Khai báo provider và token](#khai-báo-provider-và-token)
+  - [`providedIn` cho service mặc định](#providedin-cho-service-mặc-định)
+  - [Các chiến lược provider](#các-chiến-lược-provider)
+  - [Multi provider](#multi-provider)
+- [Scope: đặt provider ở đâu?](#scope-đặt-provider-ở-đâu)
+- [Ví dụ hoàn chỉnh: cấu hình và repository](#ví-dụ-hoàn-chỉnh-cấu-hình-và-repository)
+- [Kiểm thử dependency](#kiểm-thử-dependency)
+- [Lỗi thường gặp và cách chẩn đoán](#lỗi-thường-gặp-và-cách-chẩn-đoán)
+- [Trade-off và quy ước thiết kế](#trade-off-và-quy-ước-thiết-kế)
+- [Tóm tắt](#tóm-tắt)
+
+## Dependency Injection là gì?
+
+**Dependency Injection (DI)** là cơ chế để một đối tượng *khai báo thứ nó cần*, còn Angular tìm và đưa instance phù hợp vào đối tượng đó. Dependency có thể là service, cấu hình, hàm chiến lược, HTTP client hoặc một giá trị như URL API.
+
+Ví dụ, `OrderService` cần ghi log. Nó không nên biết cách tạo `ConsoleLogger` hay `RemoteLogger`; nó chỉ yêu cầu `Logger`. Quyết định dùng implementation nào nằm ở cấu hình provider.
+
+### Bài toán khi không dùng DI
+
+Không dùng DI, một class thường tự tạo dependency:
+
+```ts
+class OrderService {
+  private logger = new ConsoleLogger();
+}
+```
+
+Cách này ghép chặt `OrderService` với `ConsoleLogger`. Khi cần đổi sang logger gửi về server hoặc dùng fake logger trong test, code nghiệp vụ phải sửa hoặc phải tạo thêm nhánh điều kiện.
+
+Với DI, class chỉ phụ thuộc vào một hợp đồng:
+
+```ts
+class OrderService {
+  constructor(private readonly logger: Logger) {}
+}
+```
+
+Provider quyết định `Logger` thực tế là gì. Vì vậy dependency có thể thay thế tại ranh giới ứng dụng, route hoặc component mà không sửa `OrderService`.
+
+### Ba vai trò: token, provider và injector
+
+| Thành phần | Vai trò | Ví dụ |
+| --- | --- | --- |
+| **Token** | Khóa định danh dependency cần lấy. | `HttpClient`, `Logger`, `API_URL` |
+| **Provider** | Quy tắc tạo hoặc trả về giá trị cho token. | `{ provide: API_URL, useValue: '...' }` |
+| **Injector** | Kho lưu provider và bộ máy phân giải token. | root `EnvironmentInjector`, injector của component |
+
+Một token là **định danh theo object/reference**, không chỉ theo tên hiển thị. `InjectionToken` giúp biểu diễn dependency không có class runtime, chẳng hạn interface TypeScript hoặc chuỗi cấu hình.
+
+<Callout type="idea" title="Interface không phải token runtime">
+  Interface TypeScript bị xóa sau khi biên dịch. Không thể inject trực tiếp `Logger` nếu `Logger` chỉ là interface; hãy tạo `InjectionToken<Logger>` cho hợp đồng đó.
+</Callout>
+
+## Cơ chế phân giải: cây injector
+
+Angular tạo các injector theo cấu trúc ứng dụng. Hai nhánh quan trọng là:
+
+- **EnvironmentInjector** chứa provider ở cấp application, platform và route. `bootstrapApplication` tạo injector ứng dụng; route có `providers` có thể tạo phạm vi environment riêng.
+- **ElementInjector** gắn với phần tử/component/directive trong cây view. `providers` của component/directive được lưu ở đây.
+
+Khi code yêu cầu một token, Angular bắt đầu từ injector tại vị trí đang chạy, rồi đi lên các injector cha đến khi tìm được provider. Instance tìm được được cache trong injector sở hữu provider, nên các lần yêu cầu sau trong cùng scope thường nhận lại cùng instance.
+
+```text
+Component con yêu cầu SESSION
+
+┌─────────────────────────────────────────────────────────────────┐
+│ ElementInjector: <checkout-page>                                │
+│ providers: [CheckoutSession]  ──► trả instance CheckoutSession  │
+└─────────────────────────────────────────────────────────────────┘
+                               │ không có token thì đi lên
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ ElementInjector: <app-root>                                     │
+│ providers: [ThemeService]                                       │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ EnvironmentInjector: application                                │
+│ providers: [HttpClient, API_URL, AuthService]                   │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Platform injector                                               │
+│ provider dùng chung giữa nhiều Angular application (hiếm dùng)  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Thứ tự tìm provider
+
+Với dependency được inject từ một component/directive, Angular ưu tiên provider cục bộ trên element hiện tại. Nếu không có, nó tìm các `ElementInjector` tổ tiên rồi tiếp tục sang chuỗi `EnvironmentInjector` thích hợp. Provider gần nhất **che khuất** provider cùng token ở cấp cha.
+
+Ví dụ, `UserPreferences` ở root là singleton cho ứng dụng. Nếu `ProfileEditorComponent` có `providers: [UserPreferences]`, component này và các component con của nó dùng instance khác. Các nơi khác vẫn dùng instance root.
+
+Điều này cho phép cô lập state theo một nhánh UI, nhưng cũng có thể tạo ra lỗi khó thấy khi vô tình đăng ký cùng một stateful service ở component.
+
+### Vòng đời instance
+
+Injector thường tạo instance **khi token được yêu cầu lần đầu**, rồi giữ lại trong cache của scope đó. Không nên dựa vào thời điểm chính xác này để chạy nghiệp vụ; constructor nên chỉ thiết lập dependency và trạng thái nhẹ.
+
+Khi injector bị hủy, Angular hủy các service do injector đó tạo. Một service có `ngOnDestroy()` sẽ nhận lifecycle hook này. `DestroyRef` là lựa chọn thuận tiện để đăng ký cleanup ngay trong nơi inject service.
+
+```ts
+import { DestroyRef, Injectable, inject } from '@angular/core';
+
+@Injectable()
+export class LiveUpdatesService {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly socket = new WebSocket('wss://example.test/updates');
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.socket.close());
+  }
+}
+```
+
+Provider ở component bị hủy khi component đó bị hủy. Provider ở route-level injector sống trong thời gian route injector còn tồn tại. Provider ở root thường sống đến khi toàn bộ ứng dụng bị hủy.
+
+<Callout type="warn" title="Đừng xem root service là nơi tự động được dọn dẹp sớm">
+  Một subscription, timer hoặc WebSocket trong root service có thể tồn tại suốt phiên ứng dụng. Hãy chủ động dọn dẹp khi nghiệp vụ kết thúc, thay vì chỉ chờ ứng dụng bị destroy.
+</Callout>
+
+## Yêu cầu dependency bằng constructor và `inject()`
+
+Angular hỗ trợ hai cú pháp chính. Cả hai đều yêu cầu injector phân giải token, khác nhau ở vị trí khai báo dependency.
+
+```ts
+import { Component, inject } from '@angular/core';
+import { CartService } from './cart.service';
+
+@Component({
+  selector: 'app-cart-summary',
+  template: `{{ cart.total() }}`,
+})
+export class CartSummaryComponent {
+  // inject() phù hợp với field initializer và giữ kiểu không-null.
+  protected readonly cart = inject(CartService);
+
+  // Constructor injection vẫn hoàn toàn hợp lệ, nhất là với class cũ.
+  constructor() {
+    // Không cần tự tạo CartService.
+  }
+}
+```
+
+Cùng class trên có thể dùng constructor injection:
+
+```ts
+export class CartSummaryComponent {
+  constructor(protected readonly cart: CartService) {}
+}
+```
+
+Chọn một kiểu nhất quán trong một codebase. `inject()` thường gọn hơn với field private/protected, function provider và base class. Constructor injection biểu đạt dependency ngay trong chữ ký constructor và quen thuộc với code Angular trước đây.
+
+### Injection context
+
+`inject()` chỉ hoạt động trong **injection context**: lúc Angular tạo component, directive, pipe, service; trong field initializer/constructor của các class đó; hoặc trong factory provider. Angular biết injector hiện tại ở những thời điểm này.
+
+Ví dụ hợp lệ trong factory:
+
+```ts
+import { inject } from '@angular/core';
+
+export const authHeaderProvider = {
+  provide: AUTH_HEADER,
+  useFactory: () => {
+    const session = inject(SessionService);
+    return () => `Bearer ${session.token()}`;
+  },
+};
+```
+
+Ví dụ sau **không hợp lệ** vì `ngOnInit` chạy sau khi Angular đã rời injection context:
+
+```ts
+export class InvalidComponent {
+  ngOnInit() {
+    const api = inject(CatalogApi); // NG0203
+    api.load();
+  }
+}
+```
+
+Hãy inject vào field trước, rồi dùng field trong hook. Với hàm tiện ích thực sự cần context, truyền dependency vào hàm là cách rõ ràng nhất. `runInInjectionContext()` chỉ nên dùng khi bạn đang chủ động thiết lập context từ một `EnvironmentInjector` đã biết.
+
+### Các cờ phân giải
+
+`inject()` nhận options để thay đổi phạm vi tìm kiếm. Đây là công cụ cho các tình huống đặc biệt, không phải mặc định.
+
+| Cú pháp | Ý nghĩa | Tình huống phù hợp |
+| --- | --- | --- |
+| `inject(TOKEN)` | Tìm từ injector hiện tại lên tổ tiên. Thiếu provider thì ném lỗi. | Dependency bắt buộc thông thường. |
+| `inject(TOKEN, { optional: true })` | Trả `null` nếu không tìm thấy. | Tính năng tùy chọn có fallback rõ ràng. |
+| `inject(TOKEN, { self: true })` | Chỉ tìm injector hiện tại. | Bắt buộc provider phải là cục bộ. |
+| `inject(TOKEN, { skipSelf: true })` | Bỏ injector hiện tại, bắt đầu từ cha. | Decorator/wrapper cần implementation gốc ở cha. |
+| `inject(TOKEN, { host: true })` | Giới hạn tìm kiếm tại ranh giới host. | Directive cần phụ thuộc trong vùng host. |
+
+Dùng `optional` chỉ khi `null` là một trạng thái nghiệp vụ được xử lý. Dùng nó để “chữa” `NullInjectorError` sẽ chuyển lỗi cấu hình thành `null` khó truy vết hơn.
+
+## Khai báo provider và token
+
+### `providedIn` cho service mặc định
+
+Với service dùng toàn ứng dụng, khai báo provider ngay tại decorator:
+
+```ts
+import { Injectable } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class AuditService {
+  record(event: string): void {
+    console.log(event);
+  }
+}
+```
+
+`providedIn: 'root'` đăng ký service ở root environment injector và cho phép tree-shaking khi service không được dùng. Đây là mặc định tốt cho service stateless hoặc state dùng chung toàn ứng dụng.
+
+`providedIn: 'platform'` đưa service lên platform injector, nên có thể được chia sẻ giữa nhiều Angular application cùng trang. Phạm vi này hiếm dùng; shared state giữa micro-frontend có thể gây ghép nối và khó dọn dẹp.
+
+### Các chiến lược provider
+
+Provider có thể trả class, giá trị, kết quả factory hoặc alias cho token khác.
+
+```ts
+import { ApplicationConfig, InjectionToken, inject } from '@angular/core';
+
+export interface AppConfig {
+  apiUrl: string;
+  enableAudit: boolean;
+}
+
+export const APP_CONFIG = new InjectionToken<AppConfig>('app.config');
+export const API_BASE_URL = new InjectionToken<string>('api.base-url');
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    // useValue: giá trị đã có, thường là cấu hình hoặc fake test.
+    { provide: APP_CONFIG, useValue: { apiUrl: '/api', enableAudit: true } },
+
+    // useClass: một implementation cho một token/hợp đồng.
+    { provide: PaymentGateway, useClass: StripePaymentGateway },
+
+    // useExisting: alias; cả hai token trả cùng một instance.
+    { provide: LegacyAuditService, useExisting: AuditService },
+
+    // useFactory: tính giá trị từ các dependency khác.
+    {
+      provide: API_BASE_URL,
+      useFactory: () => `${inject(APP_CONFIG).apiUrl}/v1`,
+    },
+  ],
+};
+```
+
+`useExisting` khác `useClass`: `useClass` tạo một instance theo provider của nó, còn `useExisting` chỉ đặt thêm tên cho instance hiện có. Nếu cần giữ chung state, dùng `useExisting`.
+
+`useFactory` phù hợp khi cách tạo dependency phụ thuộc môi trường hoặc token khác. Factory nên ngắn, không có side effect khó kiểm soát và chỉ lấy dependency qua tham số `deps` hoặc `inject()` trong chính factory.
+
+### Multi provider
+
+Đặt `multi: true` để nhiều provider cùng đóng góp vào một token. Injector trả về mảng theo các provider đã đăng ký thay vì một giá trị đơn lẻ.
+
+```ts
+import { InjectionToken } from '@angular/core';
+
+export type ValidationRule = (value: string) => string | null;
+export const VALIDATION_RULES = new InjectionToken<ValidationRule[]>('validation.rules');
+
+export const validationProviders = [
+  {
+    provide: VALIDATION_RULES,
+    multi: true,
+    useValue: (value: string) => value ? null : 'Không được để trống',
+  },
+  {
+    provide: VALIDATION_RULES,
+    multi: true,
+    useValue: (value: string) => value.length >= 8 ? null : 'Tối thiểu 8 ký tự',
+  },
+];
+```
+
+Multi provider hợp với plugin, interceptor và rule mở rộng. Toàn bộ provider của một token phải nhất quán: không trộn provider `multi: true` với provider đơn cho cùng token trong cùng phạm vi.
+
+## Scope: đặt provider ở đâu?
+
+Scope quyết định ai chia sẻ instance và khi nào nó bị hủy. Chọn scope theo **quyền sở hữu state**, không chỉ theo sự tiện tay.
+
+| Vị trí provider | Ai dùng chung? | Thời gian sống | Dùng cho |
+| --- | --- | --- | --- |
+| `@Injectable({ providedIn: 'root' })` hoặc `ApplicationConfig.providers` | Toàn ứng dụng | Đến khi app bị hủy | API client, auth, telemetry, cache toàn cục |
+| `providers` của route | Route và cây route kích hoạt | Theo route injector | State/workflow riêng một vùng điều hướng |
+| `providers` của component | Component và cây con | Theo component | Form wizard, session editor, state UI cục bộ |
+| `providers` của directive | Directive và phạm vi phần tử/cây con | Theo directive/host element | Hành vi có state cần cô lập |
+
+Ví dụ tạo state mới cho mỗi editor:
+
+```ts
+import { Component } from '@angular/core';
+import { DraftStore } from './draft.store';
+
+@Component({
+  selector: 'app-article-editor',
+  providers: [DraftStore],
+  template: `<!-- mọi child của editor dùng cùng DraftStore này -->`,
+})
+export class ArticleEditorComponent {}
+```
+
+Mỗi `<app-article-editor>` có một `DraftStore` riêng. Đây là lý do đúng để đặt provider ở component. Ngược lại, đặt `HttpClient` hoặc `AuthService` ở đây thường là sai vì làm tách cache/session và tạo instance thừa.
+
+`viewProviders` cũng đặt provider ở component nhưng chỉ cho component và **view children** của template của nó; projected content không thấy provider này. Dùng nó khi implementation là chi tiết nội bộ của view component, còn lại ưu tiên `providers` vì dễ hiểu hơn.
+
+## Ví dụ hoàn chỉnh: cấu hình và repository
+
+Ví dụ dưới đây tách URL API (configuration) khỏi repository (logic truy cập dữ liệu). Repository chỉ biết token `CATALOG_API`; production và test có thể cung cấp giá trị khác nhau.
+
+```ts
+import { Injectable, InjectionToken, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+
+export interface Product {
+  id: string;
+  name: string;
+}
+
+export const CATALOG_API = new InjectionToken<string>('catalog.api');
+
+@Injectable({ providedIn: 'root' })
+export class CatalogRepository {
+  private readonly http = inject(HttpClient);
+  private readonly apiUrl = inject(CATALOG_API);
+
+  list(): Observable<Product[]> {
+    return this.http.get<Product[]>(`${this.apiUrl}/products`);
+  }
+}
+```
+
+Provider của ứng dụng có thể đặt endpoint thật:
+
+```ts
+import { ApplicationConfig } from '@angular/core';
+import { provideHttpClient } from '@angular/common/http';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(),
+    { provide: CATALOG_API, useValue: 'https://api.example.com/catalog' },
+  ],
+};
+```
+
+`CatalogRepository` không đọc `environment` trực tiếp. Ranh giới DI giúp cấu hình rõ ở bootstrap và cho phép test thay endpoint hoặc fake repository mà không sửa business code.
+
+## Kiểm thử dependency
+
+`TestBed` tạo injector độc lập cho test. Khai báo các provider cần thiết, rồi lấy class dưới test bằng `TestBed.inject()`.
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+
+describe('CatalogRepository', () => {
+  let repository: CatalogRepository;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        CatalogRepository,
+        { provide: CATALOG_API, useValue: 'http://test/catalog' },
+      ],
+    });
+
+    repository = TestBed.inject(CatalogRepository);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  it('gọi endpoint từ token', () => {
+    repository.list().subscribe();
+
+    const request = http.expectOne('http://test/catalog/products');
+    expect(request.request.method).toBe('GET');
+    request.flush([]);
+  });
+});
+```
+
+Nếu service đã có `providedIn: 'root'`, `TestBed` vẫn có thể thay provider trước khi inject:
+
+```ts
+TestBed.configureTestingModule({
+  providers: [{ provide: CATALOG_API, useValue: 'http://fake/catalog' }],
+});
+
+TestBed.overrideProvider(CATALOG_API, {
+  useValue: 'http://override/catalog',
+});
+```
+
+Gọi `overrideProvider` trong giai đoạn setup, trước khi dependency được tạo. Với provider đặt ở component, test component để lấy đúng `ElementInjector`; `TestBed.inject()` chỉ nhìn injector test/root nên có thể không phản ánh instance cục bộ của component.
+
+<Callout type="idea" title="Test hợp đồng, không test injector của Angular">
+  Test service nên xác nhận hành vi khi dependency trả dữ liệu/lỗi. Chỉ kiểm tra provider wiring khi đó là ranh giới cấu hình quan trọng, ví dụ endpoint theo môi trường hoặc interceptor bắt buộc.
+</Callout>
+
+## Lỗi thường gặp và cách chẩn đoán
+
+| Dấu hiệu | Nguyên nhân thường gặp | Cách xử lý |
+| --- | --- | --- |
+| `NullInjectorError: No provider for X` | Chưa đăng ký provider, token khác reference, hoặc provider nằm trong injector con không nhìn thấy từ vị trí yêu cầu. | Kiểm tra token được `provide`/`inject`, scope và chuỗi injector; thêm provider ở scope nhỏ nhất đúng. |
+| `NG0203: inject() must be called from an injection context` | Gọi `inject()` trong event handler, lifecycle hook hoặc hàm thông thường. | Inject ở field/constructor/factory, sau đó truyền hoặc dùng dependency đã giữ. |
+| `NG0200: Circular dependency in DI detected` | `A` cần `B` và `B` lại cần `A`, trực tiếp hoặc qua chuỗi service. | Tách trách nhiệm, đảo chiều phụ thuộc bằng token/port hoặc đưa phối hợp vào service thứ ba. |
+| State bị “reset” khi chuyển component | Service state bị cung cấp ở component nên mỗi component có instance riêng. | Đưa provider lên route/root nếu state cần chia sẻ; giữ cục bộ nếu reset là chủ đích. |
+| Mock không có tác dụng trong test | Đã tạo service trước khi override, hoặc component có provider che khuất provider của TestBed. | Override trước khi inject/create fixture; kiểm tra provider trên metadata component. |
+
+Một quy trình chẩn đoán ngắn:
+
+1. Xác định **token thực tế** tại điểm `inject`, không chỉ tên class/interface.
+2. Tìm provider gần nhất của token đó: decorator, application config, route, component hay directive.
+3. Xác định injector đang yêu cầu token có đi lên được scope chứa provider không.
+4. Kiểm tra xem provider gần hơn có che khuất provider bạn mong đợi không.
+5. Với test, xác minh thứ tự `configureTestingModule` → `overrideProvider` → `inject`/`createComponent`.
+
+## Trade-off và quy ước thiết kế
+
+DI làm giảm ghép nối trực tiếp, nhưng cũng làm dependency trở thành cấu hình gián tiếp. Một class có thể dễ test hơn, song quá nhiều token và factory khiến đường đi của dữ liệu khó đọc hơn.
+
+| Quyết định | Lợi ích | Chi phí/rủi ro | Quy ước đề xuất |
+| --- | --- | --- | --- |
+| `providedIn: 'root'` | Ít boilerplate, tree-shakable, chia sẻ thuận tiện | Dễ biến thành global mutable state | Dùng cho hạ tầng hoặc state thực sự toàn app. |
+| Provider ở component | Cô lập state, cleanup theo UI | Tạo nhiều instance, có thể che khuất root provider | Dùng cho workflow/state thuộc về từng instance UI. |
+| `InjectionToken` | Tách implementation và cấu hình | Thêm indirection, sai token gây `NullInjectorError` | Dùng cho interface, primitive/config hoặc extension point. |
+| `useFactory` | Tạo dependency theo môi trường/dependency khác | Side effect và thứ tự tạo khó đoán nếu factory phức tạp | Giữ factory thuần, nhỏ và dễ test. |
+| Multi provider | Mở rộng theo plugin | Thứ tự/nguồn rule có thể khó theo dõi | Dùng cho danh sách handler/rule, ghi rõ thứ tự kỳ vọng. |
+
+Một class nhận quá nhiều dependency thường là tín hiệu nó đang gánh nhiều trách nhiệm. Đừng che dấu vấn đề bằng `inject()` ở hàng loạt field; hãy cân nhắc tách use case hoặc gom một nhóm dependency có quan hệ chặt thành một facade có ý nghĩa.
+
+<Callout type="warn" title="Không dùng DI như service locator tùy tiện">
+  `inject()` tiện lợi, nhưng gọi nó trong quá nhiều helper làm dependency của hàm trở nên vô hình. Với hàm thuần hoặc utility, truyền tham số tường minh thường dễ đọc và dễ test hơn.
+</Callout>
+
+## Tóm tắt
+
+- Token định danh dependency; provider mô tả cách tạo nó; injector phân giải và lưu instance theo scope.
+- Injector gần nhất thắng. Đặt provider ở root, route hay component là quyết định về quyền sở hữu state và lifecycle.
+- Dùng constructor hoặc `inject()` trong injection context. Không gọi `inject()` trong lifecycle hook hay callback thông thường.
+- Dùng `InjectionToken` cho interface, cấu hình và primitive; chọn `useValue`, `useClass`, `useExisting`, `useFactory` hoặc `multi` theo mục đích.
+- Trong test, cấu hình/override provider trước khi tạo service hoặc component; chú ý provider cục bộ của component có thể che root provider.
+
+<Cards>
+  <Card title="Provider và token" href="/docs/di-kien-truc/provider-token" description="Đọc tiếp về token và các kiểu provider." />
+  <Card title="Thiết kế service" href="/docs/di-kien-truc/service" description="Áp dụng DI để phân tách nghiệp vụ và side effect." />
+</Cards>

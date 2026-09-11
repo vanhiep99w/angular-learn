@@ -1,10 +1,445 @@
 ---
 title: Guard và resolver
-description: Kiểm soát điều hướng và chuẩn bị dữ liệu trước khi mở trang.
+description: Kiểm soát điều hướng, chuẩn bị dữ liệu route và giữ ranh giới bảo mật đúng chỗ trong Angular.
 ---
 
-Trang này sẽ trình bày **Guard và resolver** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang">
+  Guard quyết định một navigation có thể tiếp tục hay phải đổi hướng. Resolver lấy dữ liệu trước khi component của route được tạo. Hai cơ chế này giúp luồng điều hướng dễ đoán hơn, nhưng không thay thế việc phân quyền ở server.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Khi nào dùng guard hoặc resolver](#khi-nào-dùng-guard-hoặc-resolver)
+- [Cơ chế điều hướng](#cơ-chế-điều-hướng)
+  - [Thứ tự cần nhớ](#thứ-tự-cần-nhớ)
+- [CanActivate](#canactivate)
+  - [Các kết quả hợp lệ](#các-kết-quả-hợp-lệ)
+- [CanDeactivate](#candeactivate)
+- [CanMatch](#canmatch)
+- [Resolver](#resolver)
+  - [Đăng ký và đọc dữ liệu](#đăng-ký-và-đọc-dữ-liệu)
+  - [Xử lý lỗi và redirect](#xử-lý-lỗi-và-redirect)
+- [Guard và resolver bất đồng bộ](#guard-và-resolver-bất-đồng-bộ)
+- [Redirect đúng cách](#redirect-đúng-cách)
+- [Ranh giới bảo mật](#ranh-giới-bảo-mật)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist áp dụng](#checklist-áp-dụng)
+- [Tóm tắt](#tóm-tắt)
+- [Đọc tiếp](#đọc-tiếp)
+
+## Tổng quan
+
+Mỗi lần người dùng đi đến một URL, Angular Router tìm route phù hợp rồi mới tạo component. **Route guard** là hàm được Router gọi trong quá trình đó để cho phép, chặn, hoặc chuyển navigation sang URL khác. **Resolver** là hàm lấy dữ liệu mà route cần trước khi route được kích hoạt.
+
+Ví dụ, trang `/admin` cần phiên đăng nhập hợp lệ; `CanActivate` phù hợp để quyết định có vào trang hay chuyển đến `/login`. Trang `/users/42` cần hồ sơ của người dùng `42`; resolver có thể nạp hồ sơ trước để `UserDetailComponent` nhận dữ liệu ngay khi xuất hiện.
+
+```text
+Người dùng mở /users/42
+          │
+          ▼
+Router khớp route ──► chạy guard ──► chạy resolver ──► tạo component
+                         │                 │
+                   chặn/redirect      dữ liệu sẵn sàng
+```
+
+### Khi nào dùng guard hoặc resolver
+
+| Nhu cầu | Cơ chế phù hợp | Ví dụ |
+| --- | --- | --- |
+| Chỉ cho người đã đăng nhập vào route | `CanActivate` | `/settings`, `/admin` |
+| Cảnh báo rời màn hình còn thay đổi chưa lưu | `CanDeactivate` | form soạn bài viết |
+| Chọn một route trong nhiều route cùng `path` hoặc ngăn tải lazy route | `CanMatch` | route premium và route bản miễn phí |
+| Chuẩn bị dữ liệu cốt lõi trước khi render | `resolve` | chi tiết đơn hàng, cấu hình khởi tạo |
+| Kiểm tra quyền truy cập dữ liệu thật | API/server | `GET /api/orders/42` phải tự xác thực và phân quyền |
+
+<Callout type="idea" title="Quy tắc chọn nhanh">
+  Nếu câu hỏi là “có được đi tới route này không?”, bắt đầu với guard. Nếu câu hỏi là “component cần dữ liệu nào ngay khi mở?”, cân nhắc resolver. Dữ liệu không chặn được trải nghiệm thì thường nên tải trong component để trang hiện sớm hơn.
+</Callout>
+
+## Cơ chế điều hướng
+
+Guard và resolver được khai báo trong cấu hình `Routes`. Angular hiện khuyến khích guard dạng hàm như `CanActivateFn` thay vì class guard. Hàm có thể dùng `inject()` để lấy service, vì Router chạy hàm trong injection context.
+
+Một cấu hình route có thể kết hợp nhiều cơ chế:
+
+```ts
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: 'admin',
+    canActivate: [authGuard, adminGuard],
+    loadComponent: () => import('./admin/admin.component').then((m) => m.AdminComponent),
+  },
+  {
+    path: 'editor/:id',
+    canDeactivate: [pendingChangesGuard],
+    loadComponent: () => import('./editor/editor.component').then((m) => m.EditorComponent),
+  },
+  {
+    path: 'users/:id',
+    resolve: { user: userResolver },
+    loadComponent: () => import('./users/user-detail.component').then((m) => m.UserDetailComponent),
+  },
+];
+```
+
+### Thứ tự cần nhớ
+
+Ở mức khái niệm, Router phải tìm route khớp trước, đánh giá các guard liên quan, giải quyết dữ liệu rồi mới kích hoạt component đích. Route cha và route con có thể đều có guard hoặc resolver; vì vậy đừng đặt các HTTP request chậm vào mọi tầng nếu chúng không thật sự cần thiết.
+
+Nếu một guard trả về kết quả chặn hoặc redirect, Router hủy navigation hiện tại. Resolver của route không được kích hoạt sẽ không chạy. Nếu resolver lỗi mà không được xử lý, navigation cũng có thể thất bại thay vì hiển thị component.
+
+<Callout type="warn" title="Đừng dựa vào thứ tự giữa các guard cùng mảng">
+  `canActivate: [a, b]` biểu diễn các điều kiện cùng phải thỏa. Hãy giữ mỗi guard độc lập và không để chúng phụ thuộc vào side effect của guard khác. Điều này tránh lỗi khó đoán khi cấu hình route thay đổi.
+</Callout>
+
+## CanActivate
+
+`CanActivate` quyết định có được kích hoạt route đã khớp hay không. Một guard xác thực điển hình đọc trạng thái phiên từ `AuthService`. Khi chưa đăng nhập, nó trả về một `UrlTree` thay vì tự gọi `navigate()`.
+
+```ts
+import { inject } from '@angular/core';
+import { CanActivateFn, Router } from '@angular/router';
+
+export const authGuard: CanActivateFn = (_route, state) => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  if (auth.isAuthenticated()) {
+    return true;
+  }
+
+  return router.createUrlTree(['/login'], {
+    queryParams: { returnUrl: state.url },
+  });
+};
+```
+
+`state.url` giữ URL người dùng muốn tới. Sau khi đăng nhập thành công, ứng dụng có thể đọc `returnUrl` và quay lại đúng nơi đó. Tuy nhiên, khi dùng giá trị này để điều hướng, chỉ chấp nhận URL nội bộ đã được kiểm tra; không chuyển thẳng tới một URL bên ngoài do người dùng cung cấp.
+
+### Các kết quả hợp lệ
+
+Guard có thể trả về đồng bộ hoặc bất đồng bộ. Giá trị cuối cùng phải là một trong các kết quả dưới đây.
+
+| Giá trị | Ý nghĩa |
+| --- | --- |
+| `true` | Cho navigation tiếp tục. |
+| `false` | Không cho route này được kích hoạt. Với `CanActivate`, navigation bị chặn. |
+| `UrlTree` | Hủy navigation hiện tại và Router điều hướng tới URL được mô tả. |
+| `RedirectCommand` | Redirect kèm tùy chọn navigation, ví dụ thay thế lịch sử. |
+| `Promise` hoặc `Observable` của các giá trị trên | Router chờ kết quả trước khi quyết định. |
+
+`UrlTree` là mô tả URL, không phải thao tác điều hướng ngay lập tức. Vì Router sở hữu toàn bộ navigation, cách trả về này tránh hai navigation cạnh tranh nhau.
+
+## CanDeactivate
+
+`CanDeactivate` chạy khi người dùng **rời** một route đang hoạt động. Nó thường bảo vệ form có thay đổi chưa lưu. Guard nhận instance component hiện tại, vì vậy component cần công khai một trạng thái hoặc phương thức nhỏ mà guard có thể hỏi.
+
+```ts
+import { CanDeactivateFn } from '@angular/router';
+
+export interface HasPendingChanges {
+  hasPendingChanges(): boolean;
+}
+
+export const pendingChangesGuard: CanDeactivateFn<HasPendingChanges> = (component) => {
+  if (!component.hasPendingChanges()) {
+    return true;
+  }
+
+  return window.confirm('Bạn có thay đổi chưa lưu. Rời trang?');
+};
+```
+
+```ts
+export class EditorComponent implements HasPendingChanges {
+  private savedValue = '';
+  draft = '';
+
+  hasPendingChanges(): boolean {
+    return this.draft !== this.savedValue;
+  }
+}
+```
+
+Ví dụ trên phù hợp cho ứng dụng trình duyệt đơn giản. Với dialog Angular bất đồng bộ, hãy trả về `Observable<boolean>` hoặc `Promise<boolean>` từ guard thay vì gọi `window.confirm`. Cũng nên có cơ chế tự lưu nháp: xác nhận rời trang chỉ là lớp bảo vệ cuối, không phải chiến lược lưu dữ liệu chính.
+
+<Callout type="warn" title="Không bắt được mọi cách đóng trang">
+  `CanDeactivate` quản lý navigation do Angular Router thực hiện. Nó không bảo đảm chặn việc đóng tab, reload trang hoặc điều hướng ra ngoài website. `beforeunload` có thể bổ sung cảnh báo trình duyệt, nhưng bị giới hạn và không thay thế việc lưu nháp.
+</Callout>
+
+## CanMatch
+
+`CanMatch` tham gia ở bước Router chọn cấu hình route. Nó hữu ích khi nhiều route dùng cùng `path`, hoặc khi muốn quyết định có nên khớp một lazy route trước khi tải mã của route đó.
+
+Ví dụ dưới đây mở dashboard trả phí cho người có entitlement, còn người khác sẽ khớp route dự phòng cùng `path`.
+
+```ts
+import { inject } from '@angular/core';
+import { CanMatchFn, Routes } from '@angular/router';
+
+export const hasPremiumAccess: CanMatchFn = () => {
+  return inject(EntitlementsService).has('premium-dashboard');
+};
+
+export const routes: Routes = [
+  {
+    path: 'dashboard',
+    canMatch: [hasPremiumAccess],
+    loadComponent: () => import('./premium-dashboard.component').then((m) => m.PremiumDashboardComponent),
+  },
+  {
+    path: 'dashboard',
+    loadComponent: () => import('./standard-dashboard.component').then((m) => m.StandardDashboardComponent),
+  },
+];
+```
+
+Điểm khác biệt quan trọng: `false` từ `CanMatch` không có nghĩa là “hủy toàn bộ navigation” như trường hợp `CanActivate`. Router có thể thử route phù hợp tiếp theo. Nếu không có route thay thế, người dùng sẽ nhận kết quả không khớp route, thường là route `**` nếu ứng dụng đã cấu hình.
+
+Dùng `CanMatch` khi điều kiện thật sự ảnh hưởng tới **việc chọn route**. Nếu chỉ cần ngăn người dùng vào một route đã được chọn, `CanActivate` rõ nghĩa hơn. Trong các ứng dụng mới, `CanMatch` cũng là lựa chọn hiện đại thay cho việc dùng `CanLoad` để kiểm soát lazy route.
+
+## Resolver
+
+Resolver chuẩn bị dữ liệu cho route trước khi component được tạo. Một resolver là `ResolveFn<T>`; `T` là kiểu dữ liệu component sẽ nhận. Ví dụ sau lấy người dùng theo tham số `:id`.
+
+```ts
+import { inject } from '@angular/core';
+import { ActivatedRouteSnapshot, ResolveFn } from '@angular/router';
+import { User } from './user.model';
+
+export const userResolver: ResolveFn<User> = (route: ActivatedRouteSnapshot) => {
+  const usersApi = inject(UsersApi);
+  const id = route.paramMap.get('id');
+
+  if (id === null) {
+    throw new Error('Route users phải có tham số id.');
+  }
+
+  return usersApi.getById(id);
+};
+```
+
+Khai báo resolver bằng khóa dữ liệu trong `resolve`. Khóa `user` là phần hợp đồng giữa route và component; đổi tên khóa mà không cập nhật component sẽ khiến component không nhận đúng dữ liệu.
+
+### Đăng ký và đọc dữ liệu
+
+Cấu hình route và cách đọc qua `ActivatedRoute` phù hợp với mọi ứng dụng Angular:
+
+```ts
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: 'users/:id',
+    resolve: { user: userResolver },
+    loadComponent: () => import('./user-detail.component').then((m) => m.UserDetailComponent),
+  },
+];
+```
+
+```ts
+import { Component, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { map } from 'rxjs';
+
+@Component({
+  selector: 'app-user-detail',
+  template: `{{ user$ | async | json }}`,
+})
+export class UserDetailComponent {
+  private route = inject(ActivatedRoute);
+  readonly user$ = this.route.data.pipe(map(({ user }) => user));
+}
+```
+
+Với ứng dụng dùng component input binding, có thể bật `withComponentInputBinding()` trong `provideRouter()` và nhận dữ liệu resolver trực tiếp thành input. Cách này làm phụ thuộc của component rõ hơn, đặc biệt khi component cần dữ liệu ngay lúc khởi tạo.
+
+```ts
+import { provideRouter, withComponentInputBinding } from '@angular/router';
+
+bootstrapApplication(AppComponent, {
+  providers: [provideRouter(routes, withComponentInputBinding())],
+});
+```
+
+```ts
+import { Component, input } from '@angular/core';
+
+@Component({
+  selector: 'app-user-detail',
+  template: `<h2>{{ user().name }}</h2>`,
+})
+export class UserDetailComponent {
+  user = input.required<User>();
+}
+```
+
+### Xử lý lỗi và redirect
+
+Resolver cũng có thể trả về `RedirectCommand`. Đây là lựa chọn phù hợp cho một lỗi có đường phục hồi rõ ràng, chẳng hạn bản ghi không còn tồn tại. Không nên đổi mọi lỗi HTTP thành redirect: lỗi mạng hoặc `500` cần được quan sát và xử lý như lỗi hệ thống.
+
+```ts
+import { inject } from '@angular/core';
+import { RedirectCommand, ResolveFn, Router } from '@angular/router';
+import { catchError, of, throwError } from 'rxjs';
+
+export const userOrRedirectResolver: ResolveFn<User | RedirectCommand> = (route) => {
+  const router = inject(Router);
+  const usersApi = inject(UsersApi);
+  const id = route.paramMap.get('id');
+
+  if (id === null) {
+    return new RedirectCommand(router.createUrlTree(['/users']), { replaceUrl: true });
+  }
+
+  return usersApi.getById(id).pipe(
+    catchError((error) => {
+      if (error.status === 404) {
+        return of(new RedirectCommand(router.createUrlTree(['/users']), { replaceUrl: true }));
+      }
+
+      return throwError(() => error);
+    }),
+  );
+};
+```
+
+<Callout type="info" title="Resolver nên trả về dữ liệu tối thiểu">
+  Chỉ resolve dữ liệu cần để màn hình có thể bắt đầu. Danh sách phụ, biểu đồ lớn hoặc dữ liệu bên dưới nếp gấp có thể tải sau trong component để không biến mỗi lần điều hướng thành màn hình chờ.
+</Callout>
+
+## Guard và resolver bất đồng bộ
+
+Guard và resolver có thể trả về `Promise` hoặc `Observable`. Router chờ promise hoàn thành hoặc observable phát giá trị phù hợp trước khi chuyển trang. Đây là điểm mạnh cho kiểm tra phiên làm việc từ storage bất đồng bộ hoặc HTTP request, nhưng cũng là nơi navigation dễ bị chậm.
+
+Ví dụ, guard chờ service làm mới trạng thái phiên:
+
+```ts
+import { inject } from '@angular/core';
+import { CanActivateFn, Router } from '@angular/router';
+import { map } from 'rxjs';
+
+export const sessionGuard: CanActivateFn = (_route, state) => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  return auth.checkSession().pipe(
+    map((session) =>
+      session.valid
+        ? true
+        : router.createUrlTree(['/login'], { queryParams: { returnUrl: state.url } }),
+    ),
+  );
+};
+```
+
+`checkSession()` phải phát một giá trị trong thời gian hữu hạn. Router dùng giá trị phát đầu tiên rồi hủy đăng ký; một observable không phát hoặc request treo vẫn có thể giữ navigation ở trạng thái chờ. Với HTTP, đặt timeout và chuyển lỗi thành một kết quả rõ ràng.
+
+```ts
+import { catchError, map, of, timeout } from 'rxjs';
+
+return usersApi.getById(id).pipe(
+  timeout(8_000),
+  map((user) => user),
+  catchError(() => of(null)),
+);
+```
+
+Đoạn trên chỉ đúng nếu route và component chấp nhận `User | null`. Nếu `user` là dữ liệu bắt buộc, thay vì âm thầm trả `null`, hãy redirect đến trang lỗi hoặc để tầng xử lý lỗi navigation hiển thị trạng thái phù hợp. Hợp đồng kiểu dữ liệu phải phản ánh đúng nhánh lỗi.
+
+## Redirect đúng cách
+
+Khi guard cần đổi hướng, **trả về** `UrlTree` hoặc `RedirectCommand`. Không làm cả hai việc `return false` và `router.navigate(...)`.
+
+```ts
+// Không nên: tạo side effect ngoài navigation hiện tại.
+export const badGuard: CanActivateFn = () => {
+  inject(Router).navigate(['/login']);
+  return false;
+};
+
+// Nên: để Router điều phối redirect.
+export const loginRedirectGuard: CanActivateFn = () => {
+  const router = inject(Router);
+  return router.createUrlTree(['/login']);
+};
+```
+
+Cách không nên có thể tạo navigation lồng nhau, làm lịch sử trình duyệt khó đoán và gây race condition khi nhiều guard cùng đổi hướng. `UrlTree` giữ quyết định redirect là kết quả thuần của guard, nên Router có thể hủy navigation ban đầu một cách nhất quán.
+
+`RedirectCommand` phù hợp khi cần `NavigationBehaviorOptions`, chẳng hạn không tạo thêm mục lịch sử:
+
+```ts
+import { inject } from '@angular/core';
+import { CanActivateFn, RedirectCommand, Router } from '@angular/router';
+
+export const expiredSessionGuard: CanActivateFn = () => {
+  const router = inject(Router);
+  const urlTree = router.createUrlTree(['/login'], {
+    queryParams: { reason: 'expired' },
+  });
+
+  return new RedirectCommand(urlTree, { replaceUrl: true });
+};
+```
+
+## Ranh giới bảo mật
+
+Guard chạy trong mã JavaScript tải về trình duyệt. Người dùng có thể sửa state phía client, gọi API trực tiếp hoặc bỏ qua giao diện. Vì vậy guard cải thiện trải nghiệm và ngăn truy cập vô tình; nó **không phải** cơ chế cấp quyền đáng tin cậy.
+
+Ví dụ, `adminGuard` có thể ẩn hoặc redirect khỏi `/admin`, nhưng endpoint `DELETE /api/users/42` vẫn phải xác thực token và kiểm tra quyền admin ở server. Tương tự, resolver gọi `GET /api/users/42` không được phép là nơi duy nhất kiểm tra quyền sở hữu người dùng.
+
+```text
+Client guard: quyết định UI/navigation
+        │
+        ▼
+HTTP request ───────────────► API/server: xác thực + phân quyền
+                                      │
+                                      ▼
+                              trả dữ liệu hoặc 401/403
+```
+
+<Callout type="error" title="Quy tắc bảo mật">
+  Mọi API nhạy cảm phải tự xác thực danh tính và kiểm tra quyền trên server, kể cả khi ứng dụng đã có `CanActivate`, `CanMatch`, interceptor hoặc menu bị ẩn ở client.
+</Callout>
+
+## Lỗi thường gặp và trade-off
+
+| Vấn đề | Hậu quả | Cách xử lý |
+| --- | --- | --- |
+| Guard chỉ trả `false` khi cần đưa người dùng đến nơi khác | Người dùng bị kẹt ở route hiện tại, luồng đăng nhập rời rạc | Trả `UrlTree` hoặc `RedirectCommand`. |
+| Gọi `navigate()` bên trong guard | Navigation cạnh tranh và lịch sử khó đoán | Trả kết quả redirect từ guard. |
+| Resolver tải toàn bộ dữ liệu của màn hình phức tạp | Lần chuyển trang đầu chậm, người dùng chỉ thấy chờ | Resolve dữ liệu cốt lõi; tải phần thứ cấp sau. |
+| Không xử lý timeout/lỗi resolver | Navigation thất bại mà không có trạng thái hữu ích | Xử lý lỗi thành fallback, redirect hoặc error route có chủ đích. |
+| `CanMatch` trả `false` nhưng không có route dự phòng | URL không khớp như mong đợi | Thêm route thay thế cùng `path` hoặc route `**`. |
+| Dùng guard làm phân quyền duy nhất | Người dùng gọi thẳng API vẫn có thể khai thác lỗ hổng server | Luôn xác thực và phân quyền lại ở API/server. |
+| `CanDeactivate` là biện pháp duy nhất bảo vệ bản nháp | Mất dữ liệu khi tab đóng hoặc trình duyệt bị dừng | Tự lưu nháp và lưu dữ liệu định kỳ. |
+
+Resolver tạo trải nghiệm “dữ liệu đã sẵn sàng”, nhưng đánh đổi bằng thời gian trước khi route hiện ra. Component tự tải dữ liệu cho phép render khung trang, skeleton và retry sớm hơn, nhưng component phải quản lý trạng thái loading/error. Không có lựa chọn luôn đúng: hãy dựa vào dữ liệu nào thật sự cần cho lần render đầu tiên.
+
+## Checklist áp dụng
+
+- Khai báo guard/resolver dạng hàm và lấy dependency bằng `inject()`.
+- Dùng `CanActivate` để chặn kích hoạt route, `CanDeactivate` để bảo vệ việc rời route, `CanMatch` để quyết định route nào được khớp.
+- Trả `UrlTree` hoặc `RedirectCommand` khi redirect; không gọi `navigate()` như side effect trong guard.
+- Giữ guard nhanh, không phụ thuộc side effect của guard khác và có timeout cho thao tác bất đồng bộ quan trọng.
+- Chỉ resolve dữ liệu cần thiết trước render; xác định rõ loading, empty và error state.
+- Xử lý lỗi resolver có chủ đích và bảo đảm kiểu dữ liệu của fallback khớp với component.
+- Xem guard là ranh giới UX, còn xác thực và phân quyền thật phải ở server.
+
+## Tóm tắt
+
+`CanActivate` kiểm soát quyền đi vào route, `CanDeactivate` bảo vệ trạng thái trước khi rời route, và `CanMatch` ảnh hưởng việc Router chọn route nào. Resolver nạp dữ liệu trước khi component đích xuất hiện. Khi dùng async, hãy bảo đảm mọi nhánh đều kết thúc bằng một kết quả rõ ràng.
+
+Nói ngắn gọn: guard nên nhỏ, thuần và trả về quyết định cho Router; resolver chỉ chặn cho dữ liệu thiết yếu; server mới là nơi thực thi chính sách bảo mật.
+
+## Đọc tiếp
+
+<Cards>
+  <Card title="Angular Router" href="/docs/routing-forms/angular-router" description="Định nghĩa route, outlet, link và tham số điều hướng." />
+  <Card title="Nested và lazy routes" href="/docs/routing-forms/nested-lazy-routes" description="Tổ chức route lồng nhau và tải feature theo nhu cầu." />
+  <Card title="Authentication" href="/docs/http-api-auth/authentication" description="Xây dựng trạng thái đăng nhập và luồng xác thực phía client." />
+</Cards>

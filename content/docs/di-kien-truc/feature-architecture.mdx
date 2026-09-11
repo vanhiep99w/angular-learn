@@ -1,10 +1,580 @@
 ---
 title: Kiến trúc theo feature
-description: Chia module nghiệp vụ, ranh giới phụ thuộc và quy ước thư mục.
+description: Tổ chức Angular theo khả năng nghiệp vụ với ranh giới, dependency và thư mục dễ mở rộng.
 ---
 
-Trang này sẽ trình bày **Kiến trúc theo feature** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi trang">
+  Bài này dùng Angular standalone và route lazy-loading để minh họa. Kiến trúc theo feature không đòi hỏi một thư viện state hay một mẫu Clean Architecture đầy đủ; mục tiêu là để thay đổi một nghiệp vụ chỉ chạm vào vùng mã thuộc nghiệp vụ đó.
 </Callout>
+
+## Mục lục
+
+- [Kiến trúc theo feature là gì?](#kiến-trúc-theo-feature-là-gì)
+  - [Vấn đề của cách chia theo loại tệp](#vấn-đề-của-cách-chia-theo-loại-tệp)
+  - [Feature boundary là ranh giới thay đổi](#feature-boundary-là-ranh-giới-thay-đổi)
+- [Xác định ranh giới feature](#xác-định-ranh-giới-feature)
+  - [Dấu hiệu một vùng là feature](#dấu-hiệu-một-vùng-là-feature)
+  - [Những thứ không tự động là feature](#những-thứ-không-tự-động-là-feature)
+  - [Kiểm tra ranh giới bằng thay đổi giả định](#kiểm-tra-ranh-giới-bằng-thay-đổi-giả-định)
+- [Folder topology thực dụng](#folder-topology-thực-dụng)
+  - [Cấu trúc ứng dụng mẫu](#cấu-trúc-ứng-dụng-mẫu)
+  - [Cấu trúc bên trong feature](#cấu-trúc-bên-trong-feature)
+  - [Public API của feature](#public-api-của-feature)
+- [Layers và hướng dependency](#layers-và-hướng-dependency)
+  - [Vai trò của từng layer](#vai-trò-của-từng-layer)
+  - [Luật dependency](#luật-dependency)
+  - [Luồng xử lý trong một feature](#luồng-xử-lý-trong-một-feature)
+- [Ví dụ hoàn chỉnh với Catalog](#ví-dụ-hoàn-chỉnh-với-catalog)
+  - [Khai báo route và scope state](#khai-báo-route-và-scope-state)
+  - [Data access và model](#data-access-và-model)
+  - [Facade điều phối use case](#facade-điều-phối-use-case)
+  - [Page và UI component](#page-và-ui-component)
+- [Shared và core: dùng chung nhưng không thành bãi tập kết](#shared-và-core-dùng-chung-nhưng-không-thành-bãi-tập-kết)
+  - [Shared nên chứa gì?](#shared-nên-chứa-gì)
+  - [Core nên chứa gì?](#core-nên-chứa-gì)
+  - [Quy trình đưa mã ra dùng chung](#quy-trình-đưa-mã-ra-dùng-chung)
+- [Mở rộng và refactor an toàn](#mở-rộng-và-refactor-an-toàn)
+  - [Bắt đầu nhỏ](#bắt-đầu-nhỏ)
+  - [Tách feature khi nó lớn lên](#tách-feature-khi-nó-lớn-lên)
+  - [Giao tiếp giữa hai feature](#giao-tiếp-giữa-hai-feature)
+  - [Đường đi refactor từ cấu trúc cũ](#đường-đi-refactor-từ-cấu-trúc-cũ)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-tradeoff)
+- [Checklist trước khi thêm mã](#checklist-trước-khi-thêm-mã)
+- [Tóm tắt](#tóm-tắt)
+
+## Kiến trúc theo feature là gì?
+
+**Feature** là một khả năng nghiệp vụ mà người dùng hoặc hệ thống có thể nhận biết, ví dụ `catalog`, `checkout`, `orders` hoặc `profile`. Kiến trúc theo feature đặt các phần phục vụ khả năng đó gần nhau: route, page, component nội bộ, state, quy tắc và mã lấy dữ liệu.
+
+Đây không phải chỉ là đổi tên thư mục. Feature là **ranh giới sở hữu**: team có thể thay đổi cách lọc danh mục mà không cần tìm qua một thư mục `components`, một thư mục `services` và một thư mục `models` dùng chung toàn ứng dụng.
+
+### Vấn đề của cách chia theo loại tệp
+
+Cấu trúc sau có vẻ gọn khi ứng dụng mới bắt đầu:
+
+```text
+app/
+├── components/
+│   ├── product-card.component.ts
+│   └── order-status.component.ts
+├── models/
+│   ├── product.ts
+│   └── order.ts
+├── services/
+│   ├── catalog.service.ts
+│   └── order.service.ts
+└── pages/
+    ├── catalog-page.component.ts
+    └── orders-page.component.ts
+```
+
+Khi sửa quy tắc hiển thị sản phẩm, mã liên quan bị tản ra nhiều nơi. Tên thư mục cho biết **loại kỹ thuật** của tệp, nhưng không cho biết các tệp nào cùng thay đổi vì một nhu cầu nghiệp vụ. Kết quả thường là import chéo, service phình to và tâm lý đưa mọi thứ vào `shared` để “dễ tìm”.
+
+Cách chia theo loại tệp không sai với ứng dụng rất nhỏ. Nó trở nên tốn kém khi một thay đổi phải đi qua nhiều vùng không có quan hệ rõ ràng.
+
+### Feature boundary là ranh giới thay đổi
+
+Feature boundary là đường biên trả lời ba câu hỏi:
+
+1. **Feature này chịu trách nhiệm cho hành vi nào?** `catalog` tìm kiếm, lọc và hiển thị sản phẩm; nó không chịu trách nhiệm tạo đơn hàng.
+2. **Mã nào được phép biết chi tiết nội bộ?** Component trong `catalog` có thể gọi `CatalogFacade`; feature khác không nên gọi trực tiếp `CatalogApi` hoặc đọc signal nội bộ của nó.
+3. **State thuộc về ai và sống bao lâu?** Từ khóa tìm kiếm và lỗi tải danh mục thường thuộc route `catalog`, không phải state root của toàn ứng dụng.
+
+Ranh giới tốt không cố ngăn mọi import. Nó làm cho dependency quan trọng đi qua một API hẹp và có chủ đích.
+
+<Callout type="idea" title="Đặt tên theo ngôn ngữ nghiệp vụ">
+  Ưu tiên `catalog`, `checkout`, `customer-profile` hơn `feature-a` hoặc `common`. Tên nghiệp vụ giúp người đọc biết nơi cần sửa trước khi mở tệp.
+</Callout>
+
+## Xác định ranh giới feature
+
+Bắt đầu từ luồng giá trị cho người dùng, không bắt đầu từ class hoặc endpoint. Ví dụ, “xem và lọc danh mục” là một feature vì nó có màn hình, state và quy tắc riêng. Endpoint `GET /products` chỉ là một chi tiết hạ tầng phục vụ feature đó.
+
+### Dấu hiệu một vùng là feature
+
+Một vùng mã thường là feature khi có một hoặc nhiều dấu hiệu sau:
+
+- Có **route hoặc entry point UI** riêng, như `/catalog` hoặc vùng `checkout` trong ứng dụng.
+- Có **use case** riêng: tải danh sách, áp bộ lọc, gửi đơn, đổi mật khẩu.
+- Có state có vòng đời riêng. Ví dụ, rời `/catalog` thì bộ lọc có thể được bỏ.
+- Có quy tắc nghiệp vụ mà thay đổi độc lập với feature khác. Ví dụ, trạng thái đơn hàng được hiển thị theo quy tắc riêng.
+- Có thể phân công sở hữu theo nghiệp vụ, dù hiện tại chỉ một người phát triển.
+
+Không cần đủ cả năm dấu hiệu. Một dialog chỉnh địa chỉ có thể là phần nội bộ của `checkout`, không phải feature mới, nếu nó không có lifecycle hay use case độc lập.
+
+### Những thứ không tự động là feature
+
+Một class, một endpoint hoặc một widget không tự động tạo thành feature.
+
+| Thành phần | Thường nên đặt ở đâu? | Lý do |
+| --- | --- | --- |
+| `ButtonComponent`, format tiền tệ, hàm `clamp()` | `shared` | Dùng lại được mà không biết nghiệp vụ nào dùng nó. |
+| `HttpClient`, interceptor xác thực, cấu hình runtime | `core` hoặc app config | Là hạ tầng cấp ứng dụng. |
+| `ProductCardComponent` chỉ xuất hiện trong danh mục | `features/catalog/ui` | Nó mang ngữ nghĩa sản phẩm của catalog. |
+| `CatalogApi` chỉ gọi API phục vụ catalog | `features/catalog/data-access` | Chi tiết truy cập dữ liệu thuộc feature đang dùng nó. |
+| Widget “sản phẩm vừa xem” dùng ở catalog và checkout | Bắt đầu tại feature sở hữu; tách khi có API dùng chung thật | “Dùng ở hai nơi” chưa đủ nếu hai nơi cần hành vi khác nhau. |
+
+Đừng tạo `features/auth` chỉ vì có một `AuthService` root. Xác thực có thể là hạ tầng `core/auth` nếu nó chủ yếu cấp session, interceptor và guard cho toàn ứng dụng. Nó trở thành feature khi có luồng UI và use case riêng như đăng nhập, đăng ký hoặc khôi phục mật khẩu.
+
+### Kiểm tra ranh giới bằng thay đổi giả định
+
+Hãy hỏi: **nếu yêu cầu này thay đổi, tôi kỳ vọng sửa những thư mục nào?**
+
+Ví dụ, thay API catalog từ REST sang dữ liệu demo chỉ nên ảnh hưởng `features/catalog/data-access` và provider/cấu hình ở đúng ranh giới. `CatalogPageComponent` không nên biết `HttpClient`, URL hay cấu trúc JSON thô.
+
+Ngược lại, nếu đổi thẻ sản phẩm mà phải sửa `shared/http`, hoặc thêm tính năng wishlist mà `catalog` phải import UI nội bộ của `checkout`, ranh giới đang bị đặt sai hoặc dependency đã đi sai chiều.
+
+## Folder topology thực dụng
+
+Topology là cách các thư mục thể hiện ranh giới. Không có một cây thư mục duy nhất đúng cho mọi dự án. Cấu trúc tốt nhất là cấu trúc mà người mới có thể lần theo từ route đến logic và dữ liệu mà không đoán.
+
+### Cấu trúc ứng dụng mẫu
+
+```text
+src/app/
+├── app.component.ts
+├── app.config.ts                 # provider phạm vi ứng dụng
+├── app.routes.ts                 # ghép route cấp cao
+├── core/
+│   ├── auth/
+│   │   ├── auth-session.service.ts
+│   │   └── auth.interceptor.ts
+│   └── error-handling/
+│       └── global-error-handler.ts
+├── shared/
+│   ├── ui/
+│   │   ├── empty-state.component.ts
+│   │   └── loading-indicator.component.ts
+│   └── utils/
+│       └── format-price.ts
+└── features/
+    ├── catalog/
+    │   ├── catalog.routes.ts
+    │   ├── catalog.page.ts
+    │   ├── data-access/
+    │   ├── domain/
+    │   ├── state/
+    │   └── ui/
+    ├── checkout/
+    │   └── ...
+    └── orders/
+        └── ...
+```
+
+`app.routes.ts` chỉ ghép route. Nó không nên trở thành nơi khai báo component, provider và chi tiết logic của mọi feature. Mỗi feature giữ route con của mình để người đọc mở `features/catalog` là thấy entry point và các phần liên quan.
+
+### Cấu trúc bên trong feature
+
+Khi feature còn nhỏ, chỉ cần `catalog.page.ts`, `catalog.routes.ts` và vài tệp cạnh nhau. Chỉ tạo thư mục con khi mỗi nhóm có nhiều tệp hoặc có vai trò rõ ràng.
+
+```text
+features/catalog/
+├── catalog.routes.ts             # public entry point cho router
+├── catalog.page.ts               # container/page của route
+├── data-access/
+│   └── catalog-api.service.ts    # HTTP, DTO, mapper, cache dữ liệu
+├── domain/
+│   ├── product.model.ts          # kiểu nghiệp vụ dùng trong feature
+│   └── catalog-filter.ts         # quy tắc lọc thuần
+├── state/
+│   └── catalog.facade.ts         # state và use case của feature
+└── ui/
+    ├── product-card.component.ts # presentational component nội bộ
+    └── product-list.component.ts
+```
+
+Các tên `data-access`, `domain`, `state` và `ui` là quy ước, không phải framework. Có thể dùng `api`, `models`, `components` nếu team hiểu chúng nhất quán. Điều quan trọng là vai trò và hướng import, không phải số lượng thư mục.
+
+<Callout type="warn" title="Đừng tạo đủ layer trước khi có nhu cầu">
+  Một feature chỉ có trang tĩnh không cần `data-access`, `domain` hay facade. Tạo lớp rỗng chỉ để khớp sơ đồ làm đường đi của mã dài hơn mà không thêm ranh giới nào.
+</Callout>
+
+### Public API của feature
+
+Feature nên có ít entry point có chủ đích. Với route, `catalog.routes.ts` là public API tự nhiên: app router chỉ import route, không import component hoặc service nội bộ.
+
+```ts
+// app.routes.ts
+import { Routes } from '@angular/router';
+
+export const APP_ROUTES: Routes = [
+  {
+    path: 'catalog',
+    loadChildren: () =>
+      import('./features/catalog/catalog.routes').then((m) => m.CATALOG_ROUTES),
+  },
+];
+```
+
+Nếu feature cần được dùng như thư viện trong monorepo, có thể tạo `index.ts` xuất **chỉ** API được phép dùng, chẳng hạn route, model hợp đồng hoặc token extension. Không dùng barrel `index.ts` để xuất mọi tệp nội bộ; việc đó biến đường dẫn private thành API ngầm và che dependency vòng.
+
+```ts
+// features/catalog/index.ts
+export { CATALOG_ROUTES } from './catalog.routes';
+export type { Product } from './domain/product.model';
+```
+
+## Layers và hướng dependency
+
+Layer giúp trả lời: đoạn mã này được phép biết điều gì? Đừng biến layer thành nghi thức. Dùng nó khi một feature có UI, state và I/O đủ phức tạp để cần tránh component gọi trực tiếp mọi thứ.
+
+### Vai trò của từng layer
+
+| Layer | Trách nhiệm | Được biết | Không nên biết |
+| --- | --- | --- | --- |
+| **UI** (`page`, `ui`) | Render state, nhận input, phát event. | Facade/use case, view model, component con. | URL API, DTO thô, chi tiết lưu trữ. |
+| **State/application** (`state`) | Điều phối use case, sở hữu state màn hình, biến event thành hành động. | Domain và port/API của feature. | Chi tiết template hoặc CSS. |
+| **Domain** (`domain`) | Kiểu và quy tắc nghiệp vụ thuần. | TypeScript/logic thuần. | Angular, `HttpClient`, router, DOM. |
+| **Data access** (`data-access`) | Nói chuyện với HTTP, storage hoặc SDK; map dữ liệu ngoài vào domain. | `HttpClient`, DTO, domain model. | Component, template và state UI. |
+
+`Facade` là service cấp feature cung cấp một API nhỏ cho page, ví dụ `products`, `loading`, `error`, `setQuery()` và `reload()`. Nó không bắt buộc. Khi page chỉ có một request đơn giản, gọi service dữ liệu từ page vẫn có thể rõ ràng hơn. Facade có ích khi nhiều component cùng dùng state, khi có nhiều bước bất đồng bộ hoặc khi cần giữ UI không biết chi tiết dữ liệu.
+
+### Luật dependency
+
+Một luật thực dụng là dependency đi từ **bên ngoài vào bên trong**, còn dữ liệu trả về theo chiều ngược lại:
+
+```text
+Page/UI ─────► State / application ─────► Data access
+   │                    │                       │
+   │                    └──────────► Domain ◄───┘
+   │
+   └───────────────────► Domain (kiểu hiển thị)
+
+Không được phép:
+- domain ──► Angular, HTTP, router hoặc UI
+- data-access ──► page, component hoặc state UI
+- feature A ──► tệp private của feature B
+```
+
+Điều này không có nghĩa UI không bao giờ được import model domain. `Product` là dữ liệu cần hiển thị nên page có thể đọc nó. Điều cần tránh là domain import `ProductCardComponent`, hoặc `CatalogApi` gọi `Router.navigate()` để quyết định trải nghiệm UI.
+
+Khi domain cần một khả năng từ bên ngoài, hãy để application layer phụ thuộc vào một **hợp đồng** hoặc inject adapter phù hợp. Chỉ thêm token/interface khi có biến thể hoặc khi ranh giới hạ tầng thực sự cần được thay thế; không cần tạo interface cho mọi service.
+
+### Luồng xử lý trong một feature
+
+Ví dụ người dùng đổi từ khóa tìm kiếm. UI phát event, facade cập nhật state và yêu cầu dữ liệu, data access gọi mạng rồi trả model đã map. UI chỉ quan sát state để render.
+
+```text
+Người dùng nhập "laptop"
+          │
+          ▼
+CatalogPage ── setQuery('laptop') ──► CatalogFacade
+                                           │ cập nhật loading/state
+                                           ▼
+                                      CatalogApi.list('laptop')
+                                           │ HTTP + map DTO → Product
+                                           ▼
+                              products / loading / error signals
+                                           │
+                                           ▼
+                                  CatalogPage và ProductList render
+```
+
+Lợi ích chính là điểm thay đổi rõ: thay debounce hoặc cache ở facade/data access, thay bố cục ở UI và thay quy tắc lọc thuần ở domain. Không phải mọi event phải đi qua facade; đây là đường đi hữu ích cho state và side effect có ý nghĩa nghiệp vụ.
+
+## Ví dụ hoàn chỉnh với Catalog
+
+Ví dụ dưới đây dùng một feature có route `/catalog`. Mục tiêu là minh họa ranh giới, không phải tạo store tổng quát. `CatalogFacade` thuộc scope route để state bộ lọc được tạo khi vào feature và bị hủy khi rời feature trong điều hướng thông thường.
+
+### Khai báo route và scope state
+
+```ts
+// features/catalog/catalog.routes.ts
+import { Routes } from '@angular/router';
+import { CatalogFacade } from './state/catalog.facade';
+
+export const CATALOG_ROUTES: Routes = [
+  {
+    path: '',
+    providers: [CatalogFacade],
+    loadComponent: () =>
+      import('./catalog.page').then((m) => m.CatalogPageComponent),
+  },
+];
+```
+
+`providers` trên route tạo phạm vi injector cho route và các child route phù hợp. Vì vậy hai lần mở feature sau khi route cũ bị hủy nhận state mới. Nếu ứng dụng dùng custom `RouteReuseStrategy`, route có thể được giữ lại; khi đó không nên giả định facade luôn reset chỉ vì người dùng điều hướng.
+
+### Data access và model
+
+Data access map DTO của API sang model mà feature dùng. Ví dụ này giữ `priceCents` là số nguyên để không đưa quyết định format tiền tệ của UI vào dữ liệu nghiệp vụ.
+
+```ts
+// features/catalog/domain/product.model.ts
+export interface Product {
+  id: string;
+  name: string;
+  priceCents: number;
+}
+
+// features/catalog/data-access/catalog-api.service.ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { map, Observable } from 'rxjs';
+import { Product } from '../domain/product.model';
+
+interface ProductDto {
+  id: string;
+  title: string;
+  price_cents: number;
+}
+
+@Injectable({ providedIn: 'root' })
+export class CatalogApi {
+  private readonly http = inject(HttpClient);
+
+  list(query: string): Observable<Product[]> {
+    return this.http
+      .get<ProductDto[]>('/api/products', { params: { q: query } })
+      .pipe(map((items) => items.map(toProduct)));
+  }
+}
+
+function toProduct(dto: ProductDto): Product {
+  return {
+    id: dto.id,
+    name: dto.title,
+    priceCents: dto.price_cents,
+  };
+}
+```
+
+`CatalogApi` có thể là root service vì nó stateless và chỉ là client dùng lại được. `CatalogFacade` mới là nơi giữ state riêng của route. Nếu API cần cache hoặc cấu hình chỉ tồn tại trong feature, cung cấp nó ở route thay vì root.
+
+### Facade điều phối use case
+
+Facade nhận model đã chuẩn hóa, giữ state và xử lý lỗi. Nó không render template hoặc tự điều hướng; page giữ trách nhiệm hiển thị và router quyết định URL.
+
+```ts
+// features/catalog/state/catalog.facade.ts
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
+import { CatalogApi } from '../data-access/catalog-api.service';
+import { Product } from '../domain/product.model';
+
+@Injectable()
+export class CatalogFacade {
+  private readonly api = inject(CatalogApi);
+  private readonly queryState = signal('');
+  private readonly productsState = signal<Product[]>([]);
+  private readonly loadingState = signal(false);
+  private readonly errorState = signal<string | null>(null);
+
+  readonly query = this.queryState.asReadonly();
+  readonly products = this.productsState.asReadonly();
+  readonly loading = this.loadingState.asReadonly();
+  readonly error = this.errorState.asReadonly();
+  readonly isEmpty = computed(
+    () => !this.loading() && !this.error() && this.products().length === 0,
+  );
+
+  setQuery(query: string): void {
+    this.queryState.set(query);
+  }
+
+  async load(): Promise<void> {
+    this.loadingState.set(true);
+    this.errorState.set(null);
+
+    try {
+      const products = await firstValueFrom(this.api.list(this.query()));
+      this.productsState.set(products);
+    } catch {
+      this.errorState.set('Không thể tải danh mục. Hãy thử lại.');
+    } finally {
+      this.loadingState.set(false);
+    }
+  }
+}
+```
+
+Ví dụ dùng `firstValueFrom()` để trình bày luồng `async` ngắn. Với luồng tìm kiếm thật, cần xử lý request cũ về sau request mới, debounce và hủy subscription. Có thể dùng RxJS hoặc resource phù hợp, nhưng quyết định đó vẫn nằm trong `state`, không nằm trong `ProductListComponent`.
+
+### Page và UI component
+
+Page inject facade, gọi `load()` lúc khởi tạo và chuyển event nhập liệu thành lệnh rõ nghĩa. Component UI chỉ nhận data qua `input`; vì vậy nó có thể được dùng trong story/test mà không tạo HTTP client hay facade.
+
+```ts
+// features/catalog/catalog.page.ts
+import { Component, inject } from '@angular/core';
+import { CatalogFacade } from './state/catalog.facade';
+import { ProductListComponent } from './ui/product-list.component';
+
+@Component({
+  imports: [ProductListComponent],
+  template: `
+    <label>
+      Tìm sản phẩm
+      <input [value]="catalog.query()" (input)="onQuery($event)" />
+    </label>
+
+    @if (catalog.loading()) {
+      <p>Đang tải...</p>
+    } @else if (catalog.error(); as error) {
+      <p role="alert">{{ error }}</p>
+      <button type="button" (click)="catalog.load()">Thử lại</button>
+    } @else {
+      <app-product-list [products]="catalog.products()" />
+    }
+  `,
+})
+export class CatalogPageComponent {
+  protected readonly catalog = inject(CatalogFacade);
+
+  constructor() {
+    void this.catalog.load();
+  }
+
+  onQuery(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.catalog.setQuery(input.value);
+    void this.catalog.load();
+  }
+}
+```
+
+Đoạn ví dụ gọi `load()` cho mỗi ký tự để giữ trọng tâm vào ranh giới. Trong sản phẩm thật, thêm debounce ở facade hoặc cập nhật query lên URL rồi phản ứng với query param. Không thêm debounce vào `ProductListComponent`, vì component này không sở hữu ý nghĩa tìm kiếm.
+
+<Callout type="warn" title="Đừng đưa mọi lệnh vào constructor">
+  Constructor trong ví dụ là điểm khởi động ngắn. Nếu khởi tạo phụ thuộc input, route param hoặc nhiều điều kiện, dùng lifecycle phù hợp hoặc một luồng state tường minh. Tránh constructor chứa quy tắc nghiệp vụ dài và nhiều side effect.
+</Callout>
+
+## Shared và core: dùng chung nhưng không thành bãi tập kết
+
+`shared` và `core` là tên quy ước phổ biến, không phải hai thư mục bắt buộc. Chúng chỉ hữu ích khi có tiêu chí vào rõ ràng. Nếu không, chúng nhanh chóng thành nơi chứa mã không ai muốn sở hữu.
+
+### Shared nên chứa gì?
+
+`shared` chứa các primitive dùng lại được bởi nhiều feature **mà không mang ngôn ngữ hay dependency của một feature cụ thể**. Ví dụ gồm button, dialog nền tảng, loading indicator, pipe format ngày tổng quát và hàm format tiền tệ nhận tham số rõ ràng.
+
+Một `EmptyStateComponent` có inputs `title`, `description`, `actionLabel` là shared UI tốt. Một `OrderEmptyStateComponent` hiển thị “Bạn chưa có đơn hàng” không phải shared; nó mang từ vựng và hành động của `orders`.
+
+Shared cần giữ dependency hẹp:
+
+- Shared UI có thể phụ thuộc Angular và primitive shared khác.
+- Shared utility nên là hàm thuần khi có thể.
+- Shared không import `features/catalog`, `features/orders` hoặc `core` chứa state nghiệp vụ.
+- Feature được phép import shared; chiều ngược lại tạo dependency vòng hoặc ghép chặt ngầm.
+
+### Core nên chứa gì?
+
+`core` chứa singleton và hạ tầng có vòng đời ứng dụng: xác thực session, HTTP interceptor, logging, error handler, runtime configuration hoặc layout shell. Các provider này thường được đăng ký qua `app.config.ts` hoặc `providedIn: 'root'`.
+
+`core` không có nghĩa là “mọi service dùng ở nhiều nơi”. `CartFacade` được dùng trong header và checkout vẫn có thể thuộc feature `checkout` hoặc một vùng domain được đặt tên rõ, vì nó giữ state nghiệp vụ. Di chuyển nó vào `core` chỉ làm chủ sở hữu state khó nhận ra hơn.
+
+| Câu hỏi | `shared` | `core` | Feature |
+| --- | --- | --- | --- |
+| Có mang ngôn ngữ nghiệp vụ? | Không | Không hoặc rất ít | Có |
+| Vòng đời chính | Theo nơi component/hàm được dùng | Toàn ứng dụng | Theo route, màn hình hoặc use case |
+| Ví dụ | `LoadingIndicator`, `formatPrice` | `AuthSession`, interceptor | `CatalogFacade`, `OrderApi` |
+| Có được import feature không? | Không | Không | Chỉ public API của feature khác khi cần |
+
+### Quy trình đưa mã ra dùng chung
+
+Khi hai feature có đoạn code giống nhau, đừng di chuyển ngay. Trước tiên so sánh **hành vi**, không chỉ so sánh hình thức.
+
+1. Giữ implementation tại feature sở hữu đầu tiên.
+2. Khi feature thứ hai cần nó, xác định phần giống nhau có API và ngôn ngữ trung lập hay không.
+3. Tách phần trung lập nhỏ nhất, ví dụ `formatPrice(value, currency)` hoặc `ConfirmDialogComponent`.
+4. Để chi tiết nghiệp vụ ở lại feature: câu chữ, điều kiện quyền, hành động sau khi xác nhận.
+5. Kiểm tra shared mới không import trở lại feature nào.
+
+Ví dụ, cả `orders` và `catalog` đều hiển thị giá. Tách `formatPrice()` là hợp lý. Nhưng `canBuyProduct()` và `canCancelOrder()` là hai quy tắc khác nhau, không nên nhét vào `shared/commerce.service.ts`.
+
+## Mở rộng và refactor an toàn
+
+Kiến trúc theo feature phải cho phép bắt đầu đơn giản và tăng cấu trúc khi nhu cầu xuất hiện. Sơ đồ lý tưởng nhưng quá nhiều lớp từ ngày đầu sẽ chậm hơn một page rõ ràng với vài tệp cạnh nhau.
+
+### Bắt đầu nhỏ
+
+Một feature mới có thể bắt đầu như sau:
+
+```text
+features/wishlist/
+├── wishlist.routes.ts
+├── wishlist.page.ts
+└── wishlist-api.service.ts
+```
+
+Tách `ui/` khi page có component con tái sử dụng hoặc template khó đọc. Tách `state/` khi state/use case không còn vừa trong page. Tách `domain/` khi có quy tắc thuần hoặc model cần được bảo vệ khỏi DTO. Mỗi lần tách phải trả lời được câu hỏi: **dependency nào được làm rõ hoặc thay đổi nào được cô lập hơn?**
+
+### Tách feature khi nó lớn lên
+
+Feature có thể quá lớn khi có hai luồng thay đổi độc lập, hai entry point khác nhau hoặc nhiều phần chỉ dùng chung một model tên gọi. Ví dụ `account` ban đầu có profile, mật khẩu và địa chỉ. Nếu mỗi phần có route, quyền và state riêng, hãy tách thành `profile`, `security` và `addresses`, hoặc giữ chúng như sub-feature có boundary rõ trong `account`.
+
+Đừng tách chỉ vì thư mục có nhiều tệp. Một feature lớn nhưng cùng use case vẫn có thể dễ theo dõi hơn ba feature nhân tạo phải giao tiếp với nhau qua nhiều abstraction.
+
+### Giao tiếp giữa hai feature
+
+Ưu tiên giao tiếp qua các cơ chế phù hợp với loại quan hệ:
+
+| Tình huống | Cách ưu tiên | Tránh |
+| --- | --- | --- |
+| Điều hướng từ catalog sang chi tiết sản phẩm | Router với URL/route param | Import page hoặc gọi method private của feature kia. |
+| Component cha truyền dữ liệu cho feature con | `input`/`output` với kiểu rõ ràng | Feature con đọc trực tiếp state private của cha. |
+| Cả hai cần cùng dữ liệu nền tảng | Service/API được đặt tên theo domain hoặc `core` nếu thật sự app-wide | Copy cache vào hai facade root không liên quan. |
+| Cần kích hoạt một hành động công khai | Public facade/port nhỏ, hoặc event ở composition root | Import sâu vào `feature-b/state/internal-*.ts`. |
+
+Composition root là nơi ghép các phần của ứng dụng, thường là `app.routes.ts`, layout shell hoặc page cha. Nó có thể biết nhiều feature để điều phối. Các feature lá không nên biết cấu trúc private của nhau.
+
+<Callout type="idea" title="Dùng URL như một hợp đồng">
+  Nếu trạng thái cần được chia sẻ qua điều hướng, có thể bookmark hoặc cần khôi phục khi tải lại, ưu tiên biểu diễn nó bằng URL/route param. Đây là hợp đồng rõ hơn việc feature A gọi trực tiếp state của feature B.
+</Callout>
+
+### Đường đi refactor từ cấu trúc cũ
+
+Không cần dừng phát triển để tổ chức lại toàn bộ `src/app`. Refactor theo một use case đang thay đổi để mỗi bước vẫn giữ ứng dụng chạy được.
+
+1. Chọn một page có thay đổi thật, ví dụ `CatalogPageComponent`.
+2. Tạo `features/catalog/` và di chuyển page cùng component, model, service chỉ do catalog dùng. Sửa import bằng IDE và chạy test liên quan.
+3. Đặt route feature ở `catalog.routes.ts`; app router chỉ lazy-load hoặc import route đó.
+4. Phân loại các dependency còn lại: hạ tầng app-wide vào `core`, primitive trung lập vào `shared`, phần chỉ dùng bởi catalog ở lại feature.
+5. Thêm facade hoặc tách data access **sau** khi đường đi code đã rõ và có lý do cụ thể.
+6. Xóa export/đường dẫn cũ sau khi mọi consumer đã chuyển. Không giữ hai API song song vô thời hạn.
+
+Di chuyển tệp không tự động làm boundary tốt. Sau mỗi bước, kiểm tra import: page có còn lấy HTTP từ service toàn cục không, và shared mới có kéo một feature cụ thể vào không?
+
+## Lỗi thường gặp và trade-off
+
+| Dấu hiệu | Nguyên nhân | Cách xử lý |
+| --- | --- | --- |
+| `shared/` ngày càng lớn | Đưa mã vào dùng chung trước khi có abstraction trung lập. | Để mã ở feature mặc định; chỉ trích xuất phần có ít nhất hai consumer và API không mang nghiệp vụ. |
+| Một feature import sâu vào feature khác | Không có hợp đồng giao tiếp hoặc đang tái dùng implementation private. | Dùng router/input-output/public API nhỏ; cân nhắc trích xuất domain chung nếu thật sự cùng khái niệm. |
+| Mọi facade có `providedIn: 'root'` | Tiện tay đăng ký root. | Đặt facade stateful ở route/component khi state thuộc feature; chọn scope theo lifecycle. |
+| Page gọi `HttpClient` và tự map DTO | UI biết chi tiết hạ tầng nên khó test/thay API. | Đưa HTTP và mapping vào data access; page chỉ dùng model/view state. |
+| Tạo `domain`, `repository`, token cho một request đơn | Áp mẫu quá mức. | Giữ feature nhỏ; chỉ thêm ranh giới khi có quy tắc, biến thể hoặc độ phức tạp cần cô lập. |
+| Feature quá nhỏ, giao tiếp qua nhiều event/service | Tách theo tệp thay vì use case. | Gom các phần luôn thay đổi cùng nhau; chỉ tách khi có ownership hoặc lifecycle độc lập. |
+| Dependency vòng | Shared/core import feature, hoặc hai feature gọi private API của nhau. | Đảo chiều dependency qua composition root, hợp đồng nhỏ hoặc domain trung lập. |
+
+Trade-off cốt lõi là **cục bộ hóa** so với **tái sử dụng**. Giữ mã trong feature tạo vài đoạn lặp nhỏ lúc đầu, nhưng bảo toàn ngữ cảnh và cho phép mỗi feature đổi riêng. Trích xuất shared giảm lặp, nhưng tạo một API chung phải được duy trì. Nói ngắn gọn: tối ưu cho thay đổi độc lập trước; tái sử dụng sau khi sự giống nhau đã được chứng minh.
+
+<Callout type="warn" title="Không dùng cấu trúc thư mục để che thiết kế kém">
+  Chuyển một “god service” vào `features/orders/state` không làm nó có một trách nhiệm. Nếu class vừa tải dữ liệu, quyết định giá, điều hướng, hiện toast và ghi analytics, hãy tách theo các lý do thay đổi trước rồi mới quyết định thư mục.
+</Callout>
+
+## Checklist trước khi thêm mã
+
+Trước khi tạo tệp hoặc provider mới, kiểm tra nhanh:
+
+- [ ] Thay đổi này thuộc use case/feature nào? Nếu chưa trả lời được, chưa nên tạo `shared`.
+- [ ] Tệp mới có phải chi tiết private của feature không? Nếu có, đặt cạnh feature thay vì xuất global.
+- [ ] UI có biết URL API, DTO hoặc storage không? Nếu có, đưa chi tiết đó về data access/service phù hợp.
+- [ ] State này thuộc app, route hay một instance component? Chọn scope provider theo câu trả lời.
+- [ ] Dependency có đi từ domain ra Angular/UI không? Nếu có, đảo chiều hoặc tách adapter.
+- [ ] Mã dùng chung có API trung lập, ít nhất hai consumer và không import ngược feature không?
+- [ ] Feature này cần giao tiếp với feature khác qua URL, input/output hoặc một public contract nhỏ thay vì deep import không?
+- [ ] Việc thêm layer có làm một thay đổi cụ thể dễ cô lập hơn không? Nếu không, giữ cấu trúc đơn giản.
+
+## Tóm tắt
+
+- Feature là khả năng nghiệp vụ và là ranh giới thay đổi, không chỉ là một thư mục chứa component.
+- Giữ route, UI, state, domain và data access của một use case gần nhau. Chỉ tạo layer khi nó làm rõ trách nhiệm.
+- Cho dependency đi từ UI/application đến domain và hạ tầng; không để domain biết Angular hay để feature này phụ thuộc tệp private của feature khác.
+- `shared` dành cho primitive không mang nghiệp vụ; `core` dành cho hạ tầng có vòng đời ứng dụng. Cả hai không được trở thành nơi chứa mã “chưa biết để đâu”.
+- Bắt đầu với feature nhỏ, rồi tách `ui`, `state`, `domain` hoặc `data-access` khi có lý do thay đổi rõ. Refactor theo từng use case đang phát triển thay vì viết lại toàn bộ ứng dụng.
+
+<Cards>
+  <Card title="Kiến trúc standalone" href="/docs/di-kien-truc/standalone-architecture" description="Kết nối feature với bootstrap, provider và lazy route standalone." />
+  <Card title="Thiết kế service" href="/docs/di-kien-truc/service" description="Tách logic nghiệp vụ, truy cập dữ liệu và side effect khỏi component." />
+  <Card title="Dependency Injection" href="/docs/di-kien-truc/dependency-injection" description="Chọn scope provider theo quyền sở hữu state và lifecycle." />
+</Cards>

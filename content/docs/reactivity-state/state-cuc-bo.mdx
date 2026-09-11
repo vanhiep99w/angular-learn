@@ -1,10 +1,602 @@
 ---
 title: State cục bộ
-description: Tổ chức trạng thái ở component và feature mà không cần thư viện lớn.
+description: Tổ chức state theo component và feature bằng Signals, local store và ranh giới sở hữu rõ ràng trước khi cần global store.
 ---
 
-Trang này sẽ trình bày **State cục bộ** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của bài">
+  State cục bộ là điểm bắt đầu mặc định cho một màn hình Angular. Bài này giúp bạn chọn đúng nơi đặt state, giới hạn ai được quyền ghi, và chỉ nâng phạm vi khi có bằng chứng rằng phạm vi hiện tại không còn đủ.
 </Callout>
+
+## Mục lục
+
+- [State cục bộ là gì?](#state-cục-bộ-là-gì)
+  - [State, dữ liệu dẫn xuất và side effect](#state-dữ-liệu-dẫn-xuất-và-side-effect)
+  - [Quy tắc mặc định: đặt state gần nơi sử dụng](#quy-tắc-mặc-định-đặt-state-gần-nơi-sử-dụng)
+- [Scope, lifetime và ownership](#scope-lifetime-và-ownership)
+  - [Ba câu hỏi trước khi tạo state](#ba-câu-hỏi-trước-khi-tạo-state)
+  - [Các phạm vi phổ biến](#các-phạm-vi-phổ-biến)
+  - [Lifetime: state sống đến khi nào?](#lifetime-state-sống-đến-khi-nào)
+  - [Ownership: ai được quyền ghi?](#ownership-ai-được-quyền-ghi)
+- [Signals làm state cục bộ](#signals-làm-state-cục-bộ)
+  - [Component nhỏ: signal ngay trong class](#component-nhỏ-signal-ngay-trong-class)
+  - [Giữ nguồn sự thật nhỏ và dẫn xuất bằng computed](#giữ-nguồn-sự-thật-nhỏ-và-dẫn-xuất-bằng-computed)
+  - [Luồng dữ liệu một chiều](#luồng-dữ-liệu-một-chiều)
+- [Local store cho một feature](#local-store-cho-một-feature)
+  - [Khi nào tách store khỏi component?](#khi-nào-tách-store-khỏi-component)
+  - [Ví dụ: TaskStore theo phạm vi feature](#ví-dụ-taskstore-theo-phạm-vi-feature)
+  - [Cấp provider quyết định phạm vi instance](#cấp-provider-quyết-định-phạm-vi-instance)
+- [Mô hình hóa trạng thái bằng state machine tối giản](#mô-hình-hóa-trạng-thái-bằng-state-machine-tối-giản)
+  - [Trạng thái loại trừ lẫn nhau](#trạng-thái-loại-trừ-lẫn-nhau)
+  - [Chuyển trạng thái có chủ đích](#chuyển-trạng-thái-có-chủ-đích)
+  - [Kết hợp state machine với local store](#kết-hợp-state-machine-với-local-store)
+- [Nâng cấp phạm vi state đúng thời điểm](#nâng-cấp-phạm-vi-state-đúng-thời-điểm)
+  - [Từ component sang shared feature state](#từ-component-sang-shared-feature-state)
+  - [Khi nào cần global state?](#khi-nào-cần-global-state)
+  - [Dấu hiệu chưa nên dùng global store](#dấu-hiệu-chưa-nên-dùng-global-store)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Đặt state quá cao hoặc quá thấp](#đặt-state-quá-cao-hoặc-quá-thấp)
+  - [Nhiều nguồn sự thật](#nhiều-nguồn-sự-thật)
+  - [Lộ quyền ghi và mutation](#lộ-quyền-ghi-và-mutation)
+  - [Dùng effect để điều phối state](#dùng-effect-để-điều-phối-state)
+  - [Local store không thay thế RxJS](#local-store-không-thay-thế-rxjs)
+- [Checklist thiết kế](#checklist-thiết-kế)
+- [Tóm tắt](#tóm-tắt)
+
+## State cục bộ là gì?
+
+**State cục bộ** là dữ liệu chỉ cần cho một component, một cây component nhỏ, hoặc một feature đang hoạt động. Ví dụ: tab đang chọn của trang hồ sơ, bộ lọc của danh sách công việc, nội dung form chưa gửi và kết quả tải của riêng màn hình đó.
+
+Từ “cục bộ” không chỉ nói về vị trí file. Nó nói về **phạm vi tiêu thụ** và **vòng đời**: chỉ các phần gần feature cần dữ liệu, và dữ liệu nên biến mất khi feature không còn tồn tại. Một `signal` đặt trong component là state cục bộ. Một service được cung cấp trên component gốc của feature cũng là state cục bộ, dù service nằm ở file riêng.
+
+```text
+Trang TaskPage được tạo
+        │
+        ▼
+TaskPage / TaskStore giữ query, tasks, status
+        │
+        ├──► TaskToolbar đọc query và gửi ý định đổi bộ lọc
+        └──► TaskList đọc tasks và gửi ý định hoàn thành việc
+        │
+        ▼
+Rời trang TaskPage
+        │
+        ▼
+Component và provider cục bộ bị hủy; state của instance đó kết thúc
+```
+
+Điểm xuất phát tốt nhất là state nhỏ nhất có thể đáp ứng giao diện hiện tại. Việc này không phủ nhận state dùng chung hay global state; nó trì hoãn chi phí phối hợp của chúng đến lúc thật sự cần.
+
+### State, dữ liệu dẫn xuất và side effect
+
+Trước khi chọn nơi đặt biến, phân loại dữ liệu. Ba loại này có cách quản lý khác nhau:
+
+| Loại | Ví dụ ở màn hình công việc | Cách xử lý |
+| --- | --- | --- |
+| **State gốc** | `query`, danh sách `tasks`, lựa chọn filter | Lưu tại một nguồn sự thật và cập nhật qua action. |
+| **Dữ liệu dẫn xuất** | `visibleTasks`, `remainingCount`, `isEmpty` | Tính từ state gốc bằng `computed`; không lưu bản sao. |
+| **Side effect** | gọi HTTP, ghi URL, ghi `localStorage`, analytics | Thực hiện ở ranh giới có chủ đích; không dùng làm nơi tính state. |
+
+Ví dụ, không lưu đồng thời `tasks`, `query` và `filteredTasks`. `filteredTasks` có thể tính lại từ hai giá trị đầu. Nếu lưu cả ba, mỗi thay đổi `query` tạo thêm một nghĩa vụ đồng bộ và một cơ hội để UI hiển thị dữ liệu cũ.
+
+### Quy tắc mặc định: đặt state gần nơi sử dụng
+
+Đặt state tại **tổ tiên chung gần nhất** của mọi consumer cần đọc nó. Nếu chỉ một component cần, component đó sở hữu state. Nếu hai component con cùng cần, component cha hoặc provider cục bộ của feature là ứng viên. Đừng đưa dữ liệu lên root chỉ vì “có thể sau này sẽ dùng”.
+
+<Callout type="idea" title="Câu hỏi chọn vị trí">
+  “Nếu component/feature này bị hủy, state này còn ý nghĩa không?” Nếu câu trả lời là không, state thường không nên sống trong service `providedIn: 'root'`.
+</Callout>
+
+## Scope, lifetime và ownership
+
+Một thiết kế state dễ bảo trì trả lời rõ ba khái niệm liên quan nhưng không đồng nhất: **scope** (ai nhìn thấy), **lifetime** (sống bao lâu) và **ownership** (ai quyết định giá trị kế tiếp).
+
+### Ba câu hỏi trước khi tạo state
+
+1. **Ai cần đọc?** Liệt kê component, directive hoặc service thực sự tiêu thụ giá trị. Danh sách này quyết định scope.
+2. **State phải tồn tại qua sự kiện nào?** Rời route, đóng dialog, refresh trang hay đổi người dùng? Câu trả lời quyết định lifetime và có cần persistence hay không.
+3. **Ai có quyền thay đổi?** Chỉ rõ owner và các action hợp lệ, chẳng hạn `setQuery`, `toggleTask`, `reload`. Câu trả lời quyết định API.
+
+Không có một “phạm vi Angular” nào luôn đúng. Giá trị `isDialogOpen` và session đăng nhập đều là state, nhưng chúng phục vụ consumer, lifetime và quy tắc ghi hoàn toàn khác nhau.
+
+### Các phạm vi phổ biến
+
+| Phạm vi | Ví dụ | Nơi đặt phù hợp | Khi instance kết thúc |
+| --- | --- | --- | --- |
+| Component | giá trị input tạm, menu mở/đóng, tab hiện tại | field `signal` trong component | component bị hủy |
+| Cây component / feature | bộ lọc và danh sách của một trang có nhiều component con | service được khai báo trong `providers` của component feature | component cung cấp provider bị hủy |
+| Route hoặc lazy feature | state cần chia sẻ trong khu vực route nhưng không phải toàn app | route provider hoặc provider của shell feature | rời route / lazy injector bị hủy |
+| Ứng dụng | phiên đăng nhập, theme, thông báo toàn cục | root service hoặc global store | toàn bộ phiên chạy ứng dụng |
+| Bền vững qua reload | tùy chọn người dùng, bản nháp cần khôi phục | state trong bộ nhớ kết hợp storage/server | theo chính sách lưu trữ |
+
+Scope không tự tạo persistence. Ngược lại, `providedIn: 'root'` chỉ giữ instance trong bộ nhớ của ứng dụng đang chạy; reload trình duyệt vẫn tạo state mới. Chỉ đồng bộ có chủ đích với URL, `localStorage`, IndexedDB hoặc server mới giúp dữ liệu vượt qua mốc đó.
+
+### Lifetime: state sống đến khi nào?
+
+Vòng đời nên khớp với ý nghĩa của dữ liệu. Một form “tạo công việc” thường nên xóa nội dung khi đóng dialog. Một bộ lọc của trang danh sách có thể nên giữ khi component con re-render, nhưng không nhất thiết phải giữ khi rời route. Không có câu trả lời kỹ thuật tự động; đây là quyết định trải nghiệm cần được ghi rõ.
+
+```text
+signal trong component ─────────────► hủy cùng component
+provider trên component feature ────► hủy cùng feature host
+provider trên route ────────────────► hủy khi route injector bị loại bỏ
+providedIn: 'root' ─────────────────► tồn tại đến khi ứng dụng bị hủy/reload
+storage hoặc server ────────────────► có thể qua reload, tùy chính sách
+```
+
+Nếu state cục bộ bị hủy đúng lúc, subscription và effect gắn với injection context đó cũng có cơ hội được dọn dẹp theo vòng đời Angular. Tuy nhiên, các tài nguyên tự tạo ngoài Angular vẫn cần cơ chế cleanup riêng phù hợp với API của chúng.
+
+### Ownership: ai được quyền ghi?
+
+Consumer đọc state không mặc nhiên có quyền sửa state. Owner là nơi bảo vệ invariant — điều kiện luôn phải đúng — của dữ liệu. Ví dụ, số lượng công việc hoàn thành không thể vượt số công việc; action `toggleTask` là nơi hợp lý để duy trì điều đó.
+
+Mẫu API thông dụng là:
+
+- Giữ `WritableSignal` private: chỉ owner gọi `.set()` hoặc `.update()`.
+- Công khai signal readonly hoặc các giá trị `computed` để template/consumer đọc.
+- Công khai method theo **ý định** như `setQuery`, `addTask`, `retry`, thay vì để consumer ghi cấu trúc state tùy ý.
+
+Quy tắc này không có nghĩa mỗi boolean cần một service. Với component rất nhỏ, component vừa là owner vừa là consumer, nên một `readonly isOpen = signal(false)` công khai trong class là đủ. Ranh giới API trở nên quan trọng khi state đi qua nhiều component hoặc chứa quy tắc nghiệp vụ.
+
+## Signals làm state cục bộ
+
+Signal biểu diễn tốt giá trị hiện tại của UI. Component đọc signal trong template bằng `state()`, Angular theo dõi lần đọc đó và cập nhật view phù hợp khi owner ghi giá trị mới. Xem bài [Signals](/docs/reactivity-state/signals) để nắm cơ chế `signal`, `computed`, `set` và `update` chi tiết hơn.
+
+### Component nhỏ: signal ngay trong class
+
+Một bộ đếm bước trong form chỉ phục vụ component này. Đặt nó trong component là cách trực tiếp và dễ xóa nhất.
+
+```ts
+import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-checkout-stepper',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <p>Bước {{ step() }} / {{ totalSteps }}</p>
+    <button type="button" (click)="previous()" [disabled]="isFirst()">
+      Quay lại
+    </button>
+    <button type="button" (click)="next()" [disabled]="isLast()">
+      Tiếp tục
+    </button>
+  `,
+})
+export class CheckoutStepperComponent {
+  readonly totalSteps = 3;
+  readonly step = signal(1);
+
+  readonly isFirst = computed(() => this.step() === 1);
+  readonly isLast = computed(() => this.step() === this.totalSteps);
+
+  next(): void {
+    this.step.update((current) => Math.min(current + 1, this.totalSteps));
+  }
+
+  previous(): void {
+    this.step.update((current) => Math.max(current - 1, 1));
+  }
+}
+```
+
+`step` là state gốc duy nhất. `isFirst` và `isLast` là dữ liệu dẫn xuất, vì chúng luôn tính được từ `step`. Các method là ranh giới ghi, nên không có template nào tự gán giá trị vượt khoảng `1..3`.
+
+### Giữ nguồn sự thật nhỏ và dẫn xuất bằng computed
+
+Khi state là object hoặc array, trả về reference mới bằng `.update()`. Điều này làm thay đổi hiện rõ và tránh consumer vô tình dùng một object đã bị sửa tại chỗ.
+
+```ts
+import { computed, signal } from '@angular/core';
+
+interface Task {
+  id: number;
+  title: string;
+  done: boolean;
+}
+
+const tasks = signal<Task[]>([
+  { id: 1, title: 'Đọc về local state', done: false },
+]);
+const query = signal('');
+
+const visibleTasks = computed(() => {
+  const normalizedQuery = query().trim().toLocaleLowerCase();
+  if (!normalizedQuery) return tasks();
+
+  return tasks().filter((task) =>
+    task.title.toLocaleLowerCase().includes(normalizedQuery),
+  );
+});
+
+const remainingCount = computed(
+  () => tasks().filter((task) => !task.done).length,
+);
+
+function toggleTask(id: number): void {
+  tasks.update((current) =>
+    current.map((task) =>
+      task.id === id ? { ...task, done: !task.done } : task,
+    ),
+  );
+}
+```
+
+`visibleTasks` không phải bản sao cần cập nhật thủ công. Khi `query` hoặc `tasks` đổi, Angular biết lần đọc tiếp theo của `visibleTasks()` cần tính từ nguồn mới. Nếu đây là field của component, hãy giữ source signal private khi component con không cần quyền ghi.
+
+### Luồng dữ liệu một chiều
+
+Template nên phát **ý định**, owner chuyển ý định thành state mới, rồi template đọc state mới. Luồng này làm đường đi của một thay đổi có thể lần theo được.
+
+```text
+Người dùng nhấn "Hoàn thành"
+             │
+             ▼
+(click) gọi component.completeTask(id)
+             │
+             ▼
+owner gọi _tasks.update(...)
+             │
+             ▼
+state gốc đổi ──► computed bị invalid ──► template đọc và cập nhật DOM
+```
+
+Không để template sửa object trong signal, ví dụ `(click)="tasks()[0].done = true"`. Code này vừa bỏ qua action, vừa khiến thay đổi khó kiểm thử và khó truy vết.
+
+## Local store cho một feature
+
+Khi một feature có nhiều component đồng cấp cùng đọc state, nhét mọi field và method vào component shell nhanh chóng làm class đó khó hiểu. **Local store** là một service nhỏ, có một instance trong phạm vi feature, cung cấp state readonly và action theo ý định. Nó không bắt buộc phải dùng thư viện store.
+
+### Khi nào tách store khỏi component?
+
+Tách khi ít nhất một điều sau đúng:
+
+- Toolbar, danh sách và panel chi tiết cần cùng một state.
+- Logic cập nhật có invariant hoặc cần tái sử dụng trong nhiều component của feature.
+- Component bắt đầu vừa điều phối layout, vừa gọi API, vừa xử lý chuyển state.
+- Bạn muốn kiểm thử quy tắc state mà không cần dựng template.
+
+Không tách chỉ vì “mọi state phải có store”. Nếu một component có một vài signal và handler ngắn, thêm service chỉ tăng số file và điểm gián tiếp.
+
+### Ví dụ: TaskStore theo phạm vi feature
+
+Store dưới đây sở hữu danh sách, truy vấn và filter của feature. Nó chỉ công khai readonly view; mọi thay đổi đi qua action. `visibleTasks` và `remainingCount` là `computed`, không phải field mutable khác.
+
+```ts
+import { Injectable, computed, signal } from '@angular/core';
+
+type Filter = 'all' | 'open' | 'done';
+
+interface Task {
+  id: number;
+  title: string;
+  done: boolean;
+}
+
+interface TaskState {
+  tasks: Task[];
+  query: string;
+  filter: Filter;
+}
+
+const initialState: TaskState = {
+  tasks: [],
+  query: '',
+  filter: 'all',
+};
+
+@Injectable()
+export class TaskStore {
+  private readonly _state = signal<TaskState>(initialState);
+
+  readonly state = this._state.asReadonly();
+  readonly visibleTasks = computed(() => {
+    const { tasks, query, filter } = this._state();
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+
+    return tasks.filter((task) => {
+      const matchesQuery = task.title
+        .toLocaleLowerCase()
+        .includes(normalizedQuery);
+      const matchesFilter =
+        filter === 'all' ||
+        (filter === 'open' && !task.done) ||
+        (filter === 'done' && task.done);
+
+      return matchesQuery && matchesFilter;
+    });
+  });
+  readonly remainingCount = computed(
+    () => this._state().tasks.filter((task) => !task.done).length,
+  );
+
+  setQuery(query: string): void {
+    this._state.update((state) => ({ ...state, query }));
+  }
+
+  setFilter(filter: Filter): void {
+    this._state.update((state) => ({ ...state, filter }));
+  }
+
+  replaceTasks(tasks: Task[]): void {
+    this._state.update((state) => ({ ...state, tasks }));
+  }
+
+  toggleTask(id: number): void {
+    this._state.update((state) => ({
+      ...state,
+      tasks: state.tasks.map((task) =>
+        task.id === id ? { ...task, done: !task.done } : task,
+      ),
+    }));
+  }
+}
+```
+
+Một component con có thể inject `TaskStore` và gọi `store.visibleTasks()` trong template. Điều đó là phù hợp khi component con thuộc feature và store được cung cấp cục bộ. Nếu muốn component con tái sử dụng độc lập, truyền data bằng input và phát output là ranh giới rõ hơn thay vì buộc nó phụ thuộc vào `TaskStore`.
+
+### Cấp provider quyết định phạm vi instance
+
+`@Injectable()` không tự quyết định scope; nơi đăng ký provider mới quyết định instance được tạo ở injector nào. Cung cấp `TaskStore` ở component shell để mỗi lần trang feature được tạo có một store riêng.
+
+```ts
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { TaskStore } from './task.store';
+
+@Component({
+  selector: 'app-task-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [TaskStore],
+  template: `
+    <app-task-toolbar />
+    <app-task-list />
+    <p>Còn lại: {{ store.remainingCount() }}</p>
+  `,
+})
+export class TaskPageComponent {
+  readonly store = inject(TaskStore);
+}
+```
+
+Cả `TaskPageComponent`, `app-task-toolbar` và `app-task-list` trong cây con có thể nhận cùng instance qua DI. Mở một instance thứ hai của page tạo store thứ hai; chúng không rò query hoặc danh sách sang nhau. Đây là lý do dùng `providers: [TaskStore]` khác về ngữ nghĩa với `@Injectable({ providedIn: 'root' })`.
+
+<Callout type="warn" title="Đừng nhầm service với singleton">
+  Service chỉ là class có thể được DI. Nó là singleton hay cục bộ phụ thuộc vào provider. Đặt `providedIn: 'root'` cho state của một trang biến state đó thành state toàn ứng dụng một cách vô tình.
+</Callout>
+
+## Mô hình hóa trạng thái bằng state machine tối giản
+
+Một tập boolean như `isLoading`, `hasError` và `isLoaded` cho phép các tổ hợp vô nghĩa: vừa loading vừa error, hoặc loaded nhưng chưa có data. Khi UI có các pha loại trừ nhau, biểu diễn nó bằng một **discriminated union** — union TypeScript có field phân biệt — giống một state machine nhỏ.
+
+### Trạng thái loại trừ lẫn nhau
+
+Ví dụ tải danh sách chỉ có thể ở một pha chính tại một thời điểm:
+
+```ts
+interface Task {
+  id: number;
+  title: string;
+  done: boolean;
+}
+
+type LoadState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'success'; tasks: Task[] }
+  | { kind: 'error'; message: string };
+```
+
+```text
+             load
+ idle ─────────────► loading
+                        │  │
+              success   │  │ failure
+                        ▼  ▼
+                    success  error
+                       │       │
+                       └──reload┘
+                           │
+                           ▼
+                         loading
+```
+
+Một value `LoadState` không thể đồng thời là `{ kind: 'loading' }` và `{ kind: 'error' }`. Template thu hẹp kiểu theo `kind`, nên mỗi nhánh chỉ truy cập data tồn tại trong nhánh đó.
+
+### Chuyển trạng thái có chủ đích
+
+Tạo event và một reducer nhỏ để đặt luật chuyển state ở một nơi. Reducer là hàm nhận state hiện tại cùng event, rồi trả state kế tiếp. Vì nó thuần, bạn có thể kiểm thử mà không cần Angular.
+
+```ts
+type LoadEvent =
+  | { type: 'load' }
+  | { type: 'succeed'; tasks: Task[] }
+  | { type: 'fail'; message: string }
+  | { type: 'retry' };
+
+function reduceLoadState(state: LoadState, event: LoadEvent): LoadState {
+  switch (event.type) {
+    case 'load':
+    case 'retry':
+      return { kind: 'loading' };
+    case 'succeed':
+      return state.kind === 'loading'
+        ? { kind: 'success', tasks: event.tasks }
+        : state;
+    case 'fail':
+      return state.kind === 'loading'
+        ? { kind: 'error', message: event.message }
+        : state;
+  }
+}
+```
+
+Reducer trên là cố ý tối giản. Nó không xử lý cancellation, request cạnh tranh hoặc cache; các vấn đề về luồng thời gian thuộc về lớp HTTP/RxJS. Giá trị của nó là làm các pha UI hợp lệ trở nên hữu hạn và dễ đọc.
+
+### Kết hợp state machine với local store
+
+Store có thể giữ state machine trong một signal và phơi bày view model dẫn xuất. Component không cần biết boolean nào phải đổi cùng lúc.
+
+```ts
+import { Injectable, computed, signal } from '@angular/core';
+
+@Injectable()
+export class TaskLoadStore {
+  private readonly _loadState = signal<LoadState>({ kind: 'idle' });
+
+  readonly loadState = this._loadState.asReadonly();
+  readonly isLoading = computed(() => this._loadState().kind === 'loading');
+  readonly tasks = computed(() => {
+    const state = this._loadState();
+    return state.kind === 'success' ? state.tasks : [];
+  });
+
+  dispatch(event: LoadEvent): void {
+    this._loadState.update((state) => reduceLoadState(state, event));
+  }
+}
+```
+
+Trong template, rẽ nhánh theo state thay vì ghép nhiều cờ:
+
+```html
+@switch (store.loadState().kind) {
+  @case ('idle') {
+    <button type="button" (click)="store.dispatch({ type: 'load' })">Tải</button>
+  }
+  @case ('loading') {
+    <p aria-busy="true">Đang tải…</p>
+  }
+  @case ('success') {
+    <app-task-list [tasks]="store.tasks()" />
+  }
+  @case ('error') {
+    <p role="alert">Không thể tải dữ liệu.</p>
+    <button type="button" (click)="store.dispatch({ type: 'retry' })">Thử lại</button>
+  }
+}
+```
+
+Ví dụ minh họa state UI. Một action `load` thực tế nên được một lớp điều phối gọi API xử lý, sau đó dispatch `succeed` hoặc `fail`. Không gọi HTTP trực tiếp từ `computed`; `computed` phải chỉ dẫn xuất dữ liệu.
+
+## Nâng cấp phạm vi state đúng thời điểm
+
+Nâng scope là thay đổi thiết kế, không phải phần thưởng cho feature lớn hơn. Mỗi bước thêm consumer, lifecycle và nhu cầu phối hợp; chỉ thực hiện khi chúng thực sự xuất hiện.
+
+### Từ component sang shared feature state
+
+Di chuyển từ field của component sang provider cục bộ khi nhiều component trong **cùng một feature** cần xem hoặc yêu cầu thay đổi cùng dữ liệu. Giữ lại action và readonly API gần như không đổi; chỉ đổi nơi owner sống.
+
+```text
+Ban đầu:                       Khi feature lớn hơn:
+
+TaskListComponent              TaskPageComponent (providers: [TaskStore])
+  └─ signal(tasks)               ├─ TaskToolbar ─┐
+  └─ toggleTask()                ├─ TaskList ───┼─► cùng TaskStore instance
+                                └─ TaskDetails ─┘
+```
+
+Đây thường là bước nâng cấp đầu tiên, vì nó vẫn tạo một instance riêng cho mỗi feature. Người dùng rời page thì data tạm và các selection cũ không vô tình ảnh hưởng page khác.
+
+### Khi nào cần global state?
+
+Global state phù hợp khi dữ liệu có consumer độc lập ở nhiều vùng xa nhau của ứng dụng, cần tồn tại xuyên route, hoặc có workflow liên feature mà không thể biểu diễn rõ qua input/output, route data hay một shared feature service.
+
+Các ví dụ có thể hợp lý:
+
+- Danh tính người dùng, quyền hiện tại và theme mà nhiều route cùng cần.
+- Một workflow nhiều bước đi qua nhiều route nhưng vẫn là một transaction chung.
+- Dữ liệu được nhiều feature độc lập cập nhật, cần quy ước action/reducer/selector thống nhất và khả năng truy vết bằng DevTools.
+- Nhóm lớn cần một giao thức rõ ràng cho thay đổi state, ví dụ với NgRx.
+
+Global state không làm state “dễ truy cập” trở thành “dễ hiểu”. Nó tăng coupling: bất kỳ feature nào cũng có thể bắt đầu phụ thuộc vào lifetime và shape của state dùng chung. Với dữ liệu server, cân nhắc cache/query layer và chính sách invalidation trước khi coi toàn bộ response là app state vĩnh viễn.
+
+### Dấu hiệu chưa nên dùng global store
+
+Chưa cần NgRx hoặc root store khi lý do duy nhất là một trong các điều sau:
+
+- “Tôi muốn tránh truyền một input qua một hoặc hai tầng.” Composition component hoặc một provider feature thường đơn giản hơn.
+- “Mọi project chuyên nghiệp đều dùng store.” Quy mô consumer và workflow mới là bằng chứng, không phải tên công cụ.
+- “Có một request HTTP.” HTTP là luồng bất đồng bộ; nó không tự làm data trở thành global state.
+- “Tôi muốn state còn sau refresh.” Đây là yêu cầu persistence; root store trong bộ nhớ không giải quyết nó.
+
+Trang [NgRx](/docs/reactivity-state/ngrx) đi sâu vào store tập trung. Hãy mang theo danh sách consumer, lifetime và workflow khi đánh giá nó; đó là dữ kiện cần thiết để so chi phí với lợi ích.
+
+## Lỗi thường gặp và trade-off
+
+### Đặt state quá cao hoặc quá thấp
+
+Đặt state ở root quá sớm làm feature xa nhau phụ thuộc vào nhau, state khó reset khi đổi route và test cần dọn dẹp nhiều hơn. Đặt state quá thấp tạo nhiều bản sao: toolbar và list mỗi nơi giữ `query` riêng rồi UI không đồng bộ.
+
+Hãy tìm tổ tiên chung gần nhất của các consumer. Nếu consumer nằm ở nhánh khác hoặc qua route khác, đánh giá provider feature/route trước rồi mới cân nhắc root.
+
+### Nhiều nguồn sự thật
+
+```ts
+// Tránh: ba biến phải được đồng bộ thủ công.
+const tasks = signal<Task[]>([]);
+const query = signal('');
+const filteredTasks = signal<Task[]>([]);
+```
+
+`filteredTasks` nên là `computed` từ `tasks` và `query`. Chỉ lưu nó nếu bạn có lý do độc lập để nó tồn tại, chẳng hạn một snapshot do người dùng xác nhận. Khi đó, đặt tên và action sao cho phân biệt snapshot với kết quả lọc hiện tại.
+
+### Lộ quyền ghi và mutation
+
+```ts
+// Tránh: consumer nào cũng có thể xóa hết state.
+readonly tasks = signal<Task[]>([]);
+
+// Tốt hơn: owner giữ quyền ghi.
+private readonly _tasks = signal<Task[]>([]);
+readonly tasks = this._tasks.asReadonly();
+```
+
+`asReadonly()` không clone sâu object. Vì vậy vẫn phải coi `tasks()` là dữ liệu bất biến: không gọi `tasks()[0].title = '...'` và không `push()` vào array trả về. Dùng `.update()` để tạo nhánh object/array mới.
+
+Trade-off là thêm một ít code và allocation. Đổi lại, owner, đường thay đổi và notification nhất quán hơn. Với state UI thông thường, đây là trade-off tốt; nếu dữ liệu rất lớn, đo đạc và chia nhỏ state trước khi tối ưu bằng mutation.
+
+### Dùng effect để điều phối state
+
+Không dùng `effect` để nhìn `query` rồi ghi `filteredTasks`, hoặc nhìn `isLoading` rồi ghi `status`. Đây là derived state bị trì hoãn, có thể tạo vòng lặp và làm thứ tự cập nhật khó giải thích.
+
+```ts
+// Tránh: state trùng lặp và effect ghi lại state.
+effect(() => filteredTasks.set(filterTasks(tasks(), query())));
+
+// Nên: giá trị dẫn xuất khai báo trực tiếp.
+const filteredTasks = computed(() => filterTasks(tasks(), query()));
+```
+
+`effect` phù hợp khi đồng bộ ra bên ngoài, chẳng hạn ghi lựa chọn đã được xác nhận vào URL. Ngay cả khi đó, xác định rõ owner của state nguồn và tránh để effect trở thành kênh ghi state ngầm. Bài [Computed và effect](/docs/reactivity-state/computed-effect) giải thích ranh giới này kỹ hơn.
+
+### Local store không thay thế RxJS
+
+Local store giữ **giá trị hiện tại** tốt, nhưng không tự thay thế operator cho dòng sự kiện theo thời gian. Tìm kiếm có `debounce`, hủy request cũ, retry/backoff hay WebSocket vẫn cần Observable/RxJS để điều phối.
+
+Một ranh giới thực tế là dùng RxJS cho request và đưa kết quả cuối về action của local store. Store giữ `{ kind: 'loading' }`, `success` hoặc `error` để template render; pipeline chịu trách nhiệm cancellation và lỗi của request. Xem [Signals và RxJS](/docs/reactivity-state/signals-rxjs) để chọn ranh giới chuyển đổi.
+
+## Checklist thiết kế
+
+Trước khi thêm hoặc nâng cấp state, kiểm tra:
+
+1. Giá trị này là state gốc, derived state hay side effect?
+2. Những consumer cụ thể nào cần đọc nó? Tổ tiên chung gần nhất là đâu?
+3. State phải sống qua việc đóng component, rời route hoặc refresh không?
+4. Owner nào giữ `WritableSignal` và action nào là đường ghi hợp lệ?
+5. Có thể thay một field mutable bằng `computed` không?
+6. Các pha UI có loại trừ nhau không? Nếu có, discriminated union có diễn tả chúng rõ hơn nhiều boolean không?
+7. Luồng bất đồng bộ có debounce, cancellation, retry hoặc nhiều nguồn event không? Nếu có, giữ RxJS ở ranh giới đó.
+8. Có bằng chứng nhiều feature độc lập cần cùng state, hay chỉ là dự đoán? Chỉ bằng chứng đầu tiên mới biện minh cho việc nâng scope.
+
+## Tóm tắt
+
+- State cục bộ là lựa chọn mặc định cho dữ liệu chỉ phục vụ một component, cây component nhỏ hoặc một feature.
+- Chọn nơi đặt state bằng ba câu hỏi: ai đọc nó (**scope**), nó sống đến khi nào (**lifetime**) và ai thay đổi nó (**ownership**).
+- Dùng signal cho state gốc hiện tại; dùng `computed` cho dữ liệu dẫn xuất; giữ side effect ở ranh giới có chủ đích.
+- Component nhỏ có thể tự sở hữu signal. Khi nhiều component trong feature cùng dùng state, một service được cung cấp cục bộ là local store đủ nhẹ.
+- `providers: [TaskStore]` trên feature host tạo instance theo feature; `providedIn: 'root'` tạo lifetime toàn ứng dụng, không phải persistence qua reload.
+- State machine tối giản bằng discriminated union loại bỏ các tổ hợp boolean vô nghĩa và làm pha UI rõ ràng.
+- Chỉ nâng lên shared/global state khi consumer, lifetime hoặc workflow thực sự vượt qua ranh giới feature. Global store là một trade-off về phối hợp, không phải mặc định.
+
+<Cards>
+  <Card title="Signals" href="/docs/reactivity-state/signals" description="Ôn cách tạo, đọc và cập nhật state đồng bộ trong Angular." />
+  <Card title="Signals và RxJS" href="/docs/reactivity-state/signals-rxjs" description="Chọn ranh giới giữa giá trị hiện tại và luồng sự kiện bất đồng bộ." />
+  <Card title="NgRx" href="/docs/reactivity-state/ngrx" description="Đánh giá store tập trung khi phạm vi state thật sự cần mở rộng." />
+</Cards>

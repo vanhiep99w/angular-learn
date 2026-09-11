@@ -1,10 +1,746 @@
 ---
 title: Reactive Forms
-description: Xây dựng form theo mô hình dữ liệu với API reactive.
+description: Xây dựng biểu mẫu Angular theo mô hình dữ liệu với FormControl, FormGroup, FormArray, kiểu dữ liệu, validation và kiểm thử.
 ---
 
-Trang này sẽ trình bày **Reactive Forms** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang này">
+  Reactive Forms đặt trạng thái biểu mẫu trong TypeScript thay vì phân tán trong DOM. Sau bài này, bạn có thể tạo form sản phẩm có kiểu dữ liệu, trường động, quy tắc cập nhật rõ ràng, luồng submit an toàn và test tập trung vào hành vi.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Khi nào nên dùng Reactive Forms](#khi-nào-nên-dùng-reactive-forms)
+  - [Mô hình luồng dữ liệu](#mô-hình-luồng-dữ-liệu)
+- [Ba khối xây dựng form](#ba-khối-xây-dựng-form)
+  - [FormControl: một giá trị và trạng thái của nó](#formcontrol-một-giá-trị-và-trạng-thái-của-nó)
+  - [FormGroup: một đối tượng có cấu trúc](#formgroup-một-đối-tượng-có-cấu-trúc)
+  - [FormArray: một danh sách thay đổi độ dài](#formarray-một-danh-sách-thay-đổi-độ-dài)
+- [Tạo form sản phẩm đầu tiên](#tạo-form-sản-phẩm-đầu-tiên)
+  - [Khai báo component standalone](#khai-báo-component-standalone)
+  - [Nối form model với template](#nối-form-model-với-template)
+  - [Đọc giá trị an toàn](#đọc-giá-trị-an-toàn)
+- [Typed Reactive Forms](#typed-reactive-forms)
+  - [Nullability và NonNullableFormBuilder](#nullability-và-nonnullableformbuilder)
+  - [Giữ model form và DTO ở hai ranh giới](#giữ-model-form-và-dto-ở-hai-ranh-giới)
+- [Cập nhật giá trị và trạng thái](#cập-nhật-giá-trị-và-trạng-thái)
+  - [setValue, patchValue và reset](#setvalue-patchvalue-và-reset)
+  - [Trạng thái tương tác và trạng thái validation](#trạng-thái-tương-tác-và-trạng-thái-validation)
+  - [valueChanges, statusChanges và updateOn](#valuechanges-statuschanges-và-updateon)
+  - [Control bị vô hiệu hóa](#control-bị-vô-hiệu-hóa)
+- [Validation và submit](#validation-và-submit)
+  - [Đặt validator trong model](#đặt-validator-trong-model)
+  - [Luồng submit đáng tin cậy](#luồng-submit-đáng-tin-cậy)
+  - [Lỗi hiển thị vào đúng thời điểm](#lỗi-hiển-thị-vào-đúng-thời-điểm)
+- [FormArray trong thực tế](#formarray-trong-thực-tế)
+  - [Thêm và xóa thẻ](#thêm-và-xóa-thẻ)
+  - [Danh sách object và lựa chọn cấu trúc](#danh-sách-object-và-lựa-chọn-cấu-trúc)
+- [Kiểm thử Reactive Forms](#kiểm-thử-reactive-forms)
+  - [Test model không cần DOM](#test-model-không-cần-dom)
+  - [Test liên kết template và submit](#test-liên-kết-template-và-submit)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Trộn hai form API trên cùng control](#trộn-hai-form-api-trên-cùng-control)
+  - [Sửa trực tiếp value hoặc controls](#sửa-trực-tiếp-value-hoặc-controls)
+  - [Dùng patchValue để che dữ liệu thiếu](#dùng-patchvalue-để-che-dữ-liệu-thiếu)
+  - [Subscribe nhưng không quản lý vòng đời](#subscribe-nhưng-không-quản-lý-vòng-đời)
+  - [Form quá lớn và abstraction quá sớm](#form-quá-lớn-và-abstraction-quá-sớm)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Tổng quan
+
+**Reactive Forms** là API biểu mẫu trong đó component tạo một cây control bằng TypeScript. Cây này là nguồn sự thật cho dữ liệu đang soạn thảo: mỗi control có giá trị, lỗi validation và các cờ tương tác. Template chỉ liên kết các phần tử HTML với cây đó qua các directive như `[formGroup]`, `formControlName` và `formArrayName`.
+
+Ví dụ, ô nhập tên không tự sở hữu giá trị cuối cùng. `FormControl` tên `name` mới là nơi Angular đọc, ghi và kiểm tra giá trị. Vì model tồn tại độc lập với DOM, component có thể vá dữ liệu từ API, phản ứng với thay đổi và kiểm thử quy tắc form mà không phải mô phỏng trình duyệt cho mọi trường hợp.
+
+### Khi nào nên dùng Reactive Forms
+
+Reactive Forms phù hợp khi form có nhiều hơn vài trường đơn giản, có validation, dữ liệu sửa từ API, trường động, hoặc cần kiểm thử đáng tin cậy. Form tạo sản phẩm có `name`, `price`, danh sách `tags` và quy tắc chỉ gửi khi hợp lệ là một ví dụ điển hình.
+
+Template-driven forms vẫn hữu ích cho form nhỏ và chủ yếu khai báo trong HTML. Tuy nhiên, Reactive Forms thường dễ mở rộng hơn vì cấu trúc dữ liệu nằm trong class TypeScript, gần service và model miền hơn. Không cần đổi mọi form sang Reactive Forms; hãy chọn nó khi cấu trúc và hành vi của form cần được quản lý như state thực thụ.
+
+<Callout type="idea" title="Quy tắc chọn nhanh">
+  Nếu bạn cần gọi `setValue`, vá dữ liệu từ API, thêm/xóa trường, dùng typed forms hoặc viết unit test cho validation, hãy bắt đầu bằng Reactive Forms. Nếu form chỉ có một ô tìm kiếm không có quy tắc, một binding đơn giản có thể ít chi phí hơn.
+</Callout>
+
+### Mô hình luồng dữ liệu
+
+Reactive Forms vẫn là luồng dữ liệu rõ ràng, không phải cơ chế hai chiều không kiểm soát. Người dùng phát sự kiện `input`; directive form ghi vào control; control chạy validation và phát trạng thái mới; Angular phản ánh lỗi, giá trị hoặc thuộc tính `disabled` trở lại template.
+
+```text
+Người dùng nhập "Bút bi"
+          │
+          ▼
+<input formControlName="name">
+          │ FormControlName ghi giá trị
+          ▼
+┌────────────────────────────────────────────┐
+│ form.controls.name: FormControl<string>    │
+│ value, errors, dirty, touched, valid       │
+└──────────────────┬─────────────────────────┘
+                   │ cập nhật FormGroup cha
+                   ▼
+┌────────────────────────────────────────────┐
+│ form: FormGroup                            │
+│ value, status và validator của toàn form   │
+└──────────────────┬─────────────────────────┘
+                   │
+        template đọc errors / valid
+                   ▼
+Thông báo lỗi, nút Lưu và payload khi submit
+```
+
+Điểm quan trọng là **không đọc giá trị từ `document.querySelector()` để tạo payload**. Khi form model đã là nguồn sự thật, mọi thao tác ghi dữ liệu nên đi qua API của control. Nhờ vậy trạng thái, validator và giao diện luôn nhận được cùng một thay đổi.
+
+## Ba khối xây dựng form
+
+Cây Reactive Form được ghép từ ba loại control chính. Có thể hình dung `FormControl` là một lá, `FormGroup` là một object có tên trường, còn `FormArray` là một mảng có số phần tử thay đổi.
+
+| Loại | Đại diện cho | Ví dụ phù hợp | API cấu trúc thường dùng |
+| --- | --- | --- | --- |
+| `FormControl<T>` | Một giá trị đơn | tên, giá, checkbox công bố | `setValue()`, `reset()` |
+| `FormGroup<TControls>` | Object có key cố định | thông tin sản phẩm, địa chỉ | `controls`, `getRawValue()` |
+| `FormArray<TControl>` | Danh sách cùng loại hoặc cùng cấu trúc | thẻ, số điện thoại, biến thể | `push()`, `removeAt()`, `at()` |
+
+### FormControl: một giá trị và trạng thái của nó
+
+`FormControl` quản lý một giá trị đơn và metadata quanh giá trị đó. Ví dụ, control tên vừa giữ chuỗi người dùng nhập vừa biết chuỗi đó có rỗng không, người dùng đã chạm vào ô chưa và validator có báo lỗi không.
+
+```ts
+import { FormControl, Validators } from '@angular/forms';
+
+const name = new FormControl('', {
+  nonNullable: true,
+  validators: [Validators.required, Validators.minLength(3)],
+});
+
+name.setValue('Bút bi');
+
+console.log(name.value); // 'Bút bi'
+console.log(name.valid); // true
+console.log(name.errors); // null
+```
+
+Một `FormControl` thường bắt đầu là `pristine` và `untouched`. Khi người dùng đổi giá trị qua giao diện, nó thành `dirty`. Khi ô input mất focus, nó thành `touched`. Các cờ này không nói dữ liệu có đúng hay không; chúng nói **người dùng đã tương tác đến đâu**. Phân biệt hai nhóm cờ giúp bạn không hiện lỗi bắt buộc ngay lúc màn hình vừa mở.
+
+### FormGroup: một đối tượng có cấu trúc
+
+`FormGroup` gom những control có key đã biết. Form sản phẩm có `name`, `price` và `description`, nên nó tự nhiên là một object chứ không phải danh sách vị trí số.
+
+```ts
+import { FormControl, FormGroup, Validators } from '@angular/forms';
+
+const productForm = new FormGroup({
+  name: new FormControl('', { nonNullable: true, validators: Validators.required }),
+  price: new FormControl(0, { nonNullable: true, validators: Validators.min(0.01) }),
+  description: new FormControl('', { nonNullable: true }),
+});
+
+productForm.controls.name.setValue('Sổ tay');
+console.log(productForm.value); // { name: 'Sổ tay', price: 0, description: '' }
+```
+
+Group tổng hợp giá trị và trạng thái từ control con. Nếu `name` không hợp lệ, `productForm.invalid` cũng là `true`. Group cũng có thể có validator cho quy tắc liên quan nhiều trường, chẳng hạn ngày kết thúc phải sau ngày bắt đầu. Validator thuộc về mức thấp nhất chứa đủ dữ liệu để quyết định quy tắc.
+
+### FormArray: một danh sách thay đổi độ dài
+
+`FormArray` phù hợp khi số phần tử không cố định. Danh sách thẻ sản phẩm có thể bắt đầu rỗng, sau đó người dùng thêm hoặc xóa từng thẻ. Một `FormArray` giữ controls, không phải chỉ giữ mảng giá trị thô.
+
+```ts
+import { FormArray, FormControl, Validators } from '@angular/forms';
+
+const tags = new FormArray<FormControl<string>>([
+  new FormControl('văn phòng phẩm', { nonNullable: true }),
+]);
+
+tags.push(new FormControl('', { nonNullable: true, validators: Validators.required }));
+tags.removeAt(0);
+
+console.log(tags.value); // ['']
+```
+
+Đừng thay `tags.controls` bằng một mảng mới hoặc gọi `tags.value.push(...)`. Những thao tác đó bỏ qua chuỗi cập nhật nội bộ của Angular. Hãy dùng `push`, `insert`, `removeAt` hoặc `clear` để Angular đăng ký parent, chạy validator và cập nhật template.
+
+## Tạo form sản phẩm đầu tiên
+
+Phần này tạo một standalone component có form sản phẩm. Ví dụ cố ý dùng `FormBuilder.nonNullable` để mọi field ở đây có kiểu không-null; phần sau giải thích trade-off của lựa chọn đó.
+
+### Khai báo component standalone
+
+`ReactiveFormsModule` cung cấp các directive kết nối model và template. Với standalone component, import module này trong metadata của component. `ProductApi` dưới đây là service minh họa có method `create(payload)`; chi tiết HTTP không phải trách nhiệm của form.
+
+```ts
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+
+import { ProductApi } from './product-api.service';
+
+@Component({
+  selector: 'app-product-editor',
+  imports: [ReactiveFormsModule],
+  templateUrl: './product-editor.component.html',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class ProductEditorComponent {
+  private readonly fb = inject(FormBuilder);
+  private readonly productApi = inject(ProductApi);
+
+  readonly form = this.fb.nonNullable.group({
+    name: ['', [Validators.required, Validators.minLength(3)]],
+    price: [0, [Validators.required, Validators.min(0.01)]],
+    description: [''],
+    tags: this.fb.nonNullable.array<string>([]),
+  });
+
+  get tags() {
+    return this.form.controls.tags;
+  }
+
+  addTag(): void {
+    this.tags.push(this.fb.nonNullable.control(''));
+  }
+
+  removeTag(index: number): void {
+    this.tags.removeAt(index);
+  }
+
+  submit(): void {
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
+
+    const payload = this.form.getRawValue();
+    this.productApi.create(payload).subscribe();
+  }
+}
+```
+
+`readonly` không làm form bất biến. `readonly form` chỉ ngăn component gán một `FormGroup` khác vào property này; `form.patchValue()` và `tags.push()` vẫn là các thay đổi có chủ đích trên model form. Cách đặt tên này giúp người đọc thấy component giữ một instance form ổn định.
+
+### Nối form model với template
+
+`[formGroup]="form"` đặt context group cho thẻ `form`. `formControlName` tìm control có key tương ứng trong context đó. Với `FormArray`, `formArrayName="tags"` đặt context mảng và `[formControlName]="i"` chọn phần tử theo chỉ số.
+
+```html
+<form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+  <label for="name">Tên sản phẩm</label>
+  <input id="name" type="text" formControlName="name" />
+
+  @if (form.controls.name.touched && form.controls.name.hasError('required')) {
+    <p role="alert">Tên sản phẩm là bắt buộc.</p>
+  }
+  @if (form.controls.name.touched && form.controls.name.hasError('minlength')) {
+    <p role="alert">Tên cần có ít nhất 3 ký tự.</p>
+  }
+
+  <label for="price">Giá</label>
+  <input id="price" type="number" formControlName="price" min="0.01" step="0.01" />
+
+  <div formArrayName="tags">
+    <p>Thẻ</p>
+    @for (tag of tags.controls; track $index; let i = $index) {
+      <div>
+        <label [for]="'tag-' + i">Thẻ {{ i + 1 }}</label>
+        <input [id]="'tag-' + i" type="text" [formControlName]="i" />
+        <button type="button" (click)="removeTag(i)">Xóa thẻ</button>
+      </div>
+    }
+    <button type="button" (click)="addTag()">Thêm thẻ</button>
+  </div>
+
+  <button type="submit" [disabled]="form.invalid">Lưu sản phẩm</button>
+</form>
+```
+
+`(ngSubmit)` nhận cả việc người dùng bấm nút submit lẫn việc nhấn <kbd>Enter</kbd> trong form. `novalidate` tắt popup validation mặc định của trình duyệt để Angular kiểm soát trải nghiệm thông báo. Nó không thay thế validation phía máy chủ; server vẫn phải kiểm tra mọi payload.
+
+<Callout type="warn" title="Nút action phụ cần có type rõ ràng">
+  Trong một thẻ `<form>`, `<button>` không ghi `type` thường hoạt động như `submit`. Nút “Thêm thẻ” hoặc “Xóa thẻ” phải là `type="button"`; nếu không, một thao tác chỉnh form có thể vô tình gọi `submit()`.
+</Callout>
+
+### Đọc giá trị an toàn
+
+`form.value` là snapshot giá trị của **các control đang enabled**. Kiểu của nó có thể là `Partial`, vì một control có thể bị disable bất kỳ lúc nào. `form.getRawValue()` lấy cả control enabled lẫn disabled, nên thường cho object đầy đủ hơn khi form dùng `NonNullableFormBuilder`.
+
+```ts
+const editableValue = this.form.value;
+// { name?: string; price?: number; description?: string; tags?: string[] }
+
+const rawValue = this.form.getRawValue();
+// { name: string; price: number; description: string; tags: string[] }
+```
+
+Không có method nào tự động biến form value thành contract API hoàn hảo. Ví dụ `price` từ `<input type="number">` được Angular value accessor chuyển thành `number`, nhưng API có thể cần `priceCents` là số nguyên. Hãy map form model sang command hoặc DTO ở ranh giới submit thay vì ép form mang cả tên field kỹ thuật của API.
+
+## Typed Reactive Forms
+
+Từ Angular 14, Reactive Forms được typed mặc định. Khi tạo group bằng `FormBuilder`, TypeScript suy ra control nào chứa kiểu gì. Lợi ích cụ thể là `form.controls.price.setValue('mười')` báo lỗi lúc biên dịch thay vì chỉ tạo payload sai khi chạy.
+
+```ts
+this.form.controls.price.setValue(12500); // hợp lệ
+// this.form.controls.price.setValue('12500'); // TypeScript báo lỗi
+```
+
+Kiểu control không thay thế validation runtime. TypeScript chỉ kiểm tra code bạn viết; người dùng, browser extension hoặc request tự gọi API vẫn có thể tạo dữ liệu sai. Vì vậy typed forms và validators giải quyết hai lớp vấn đề khác nhau: một lớp khi phát triển, một lớp khi ứng dụng chạy.
+
+### Nullability và NonNullableFormBuilder
+
+Một `FormControl` tạo theo mặc định thường có kiểu `T | null`. Lý do là gọi `reset()` không truyền giá trị có thể đưa nó về `null`.
+
+```ts
+import { FormControl } from '@angular/forms';
+
+const nullableTitle = new FormControl('Bút');
+nullableTitle.reset();
+console.log(nullableTitle.value); // null
+```
+
+Nếu `null` không có ý nghĩa nghiệp vụ, dùng `{ nonNullable: true }` hoặc `FormBuilder.nonNullable`. Khi đó `reset()` quay về giá trị ban đầu thay vì `null`.
+
+```ts
+const title = new FormControl('Bút', { nonNullable: true });
+title.reset();
+console.log(title.value); // 'Bút'
+```
+
+`nonNullable` không có nghĩa input HTML không thể trống. Chuỗi rỗng `''` vẫn hợp lệ về kiểu và chỉ bị cấm khi thêm `Validators.required`. Chọn `nonNullable` khi model thực sự dùng chuỗi rỗng, `0` hoặc `false` làm giá trị chưa nhập. Giữ `null` khi nó diễn đạt một trạng thái thật, ví dụ “chưa chọn người quản lý”.
+
+### Giữ model form và DTO ở hai ranh giới
+
+Form model mô tả dữ liệu dễ chỉnh sửa trên UI. DTO hoặc command mô tả contract ở ranh giới service/API. Hai kiểu này đôi khi trùng nhau, nhưng không nên buộc chúng luôn giống nhau.
+
+```ts
+type CreateProductCommand = {
+  name: string;
+  priceCents: number;
+  description?: string;
+  tags: string[];
+};
+
+function toCreateProductCommand(value: {
+  name: string;
+  price: number;
+  description: string;
+  tags: string[];
+}): CreateProductCommand {
+  return {
+    name: value.name.trim(),
+    priceCents: Math.round(value.price * 100),
+    description: value.description.trim() || undefined,
+    tags: value.tags.map((tag) => tag.trim()).filter(Boolean),
+  };
+}
+```
+
+Mapping này là nơi đặt conversion đơn vị, bỏ chuỗi trống hoặc đổi tên field. Đừng đặt side effect như gọi HTTP trong validator hay dùng template để tự biến đổi payload. Nói ngắn gọn: form giữ state soạn thảo, còn service nhận một command có nghĩa nghiệp vụ rõ ràng.
+
+## Cập nhật giá trị và trạng thái
+
+Reactive Forms cung cấp method để thay đổi model có kiểm soát. Những method này cập nhật control, chạy validator, tính lại trạng thái của parent và thường phát qua observable. Dùng chúng thay vì thay object value trực tiếp.
+
+### setValue, patchValue và reset
+
+`setValue()` yêu cầu cung cấp đầy đủ cấu trúc ở cấp control đang gọi. Đây là điểm mạnh khi bạn muốn phát hiện data mapping thiếu field. `patchValue()` chỉ cập nhật các key được truyền và bỏ qua những key còn lại; nó phù hợp cho cập nhật một phần, nhưng có thể che lỗi nếu dùng để nạp object mà bạn nghĩ là đầy đủ.
+
+```ts
+this.form.setValue({
+  name: 'Bút gel',
+  price: 15000,
+  description: 'Mực xanh',
+  tags: ['văn phòng phẩm'],
+});
+
+this.form.patchValue({
+  price: 18000,
+});
+
+this.form.reset({
+  name: '',
+  price: 0,
+  description: '',
+  tags: [],
+});
+```
+
+Sau `reset()`, cờ tương tác quay về trạng thái ban đầu. Đây là lựa chọn tốt sau khi lưu thành công hoặc khi chuyển sang bản ghi khác. Nếu bạn nạp dữ liệu để sửa mà muốn UI chưa hiện lỗi, `patchValue()` rồi `markAsPristine()` và `markAsUntouched()` có thể làm rõ ý định; tuy nhiên `reset(initialValue)` thường là cách đơn giản hơn để nhận cả giá trị lẫn trạng thái mới.
+
+<Callout type="warn" title="`setValue()` trên FormArray cần đúng số phần tử">
+  `tags.setValue(['mới'])` chỉ hợp lệ khi mảng đã có đúng một control. Nếu API trả về số thẻ khác, hãy tạo lại controls bằng `clear()` rồi `push()`, hoặc tạo một `FormArray` phù hợp trước khi thay thế group. `patchValue()` không tự tạo control còn thiếu.
+</Callout>
+
+### Trạng thái tương tác và trạng thái validation
+
+Mỗi control có hai nhóm state cần đọc với mục đích khác nhau:
+
+| Nhóm | Cờ | Ý nghĩa thực tế |
+| --- | --- | --- |
+| Tương tác | `pristine` / `dirty` | Giá trị có còn như ban đầu hay đã được người dùng/chương trình thay đổi. |
+| Tương tác | `untouched` / `touched` | Control đã mất focus sau khi được người dùng vào hay chưa. |
+| Validation | `valid` / `invalid` | Tất cả validator đồng bộ và kết quả hiện có cho phép dữ liệu hay không. |
+| Validation async | `pending` | Angular đang chờ async validator hoàn tất. |
+| Availability | `enabled` / `disabled` | Control có tham gia validation và `value` của parent hay không. |
+
+`dirty` không đồng nghĩa người dùng đã thay đổi dữ liệu: gọi `patchValue()` từ code cũng có thể ảnh hưởng state tùy thao tác. Tương tự, `touched` không đồng nghĩa invalid. Một điều kiện UX thường dùng là `control.invalid && (control.touched || form.submitted)` để chỉ gợi ý sửa sau khi người dùng đã có cơ hội tương tác hoặc đã cố gửi form.
+
+`form.submitted` là trạng thái của directive `FormGroupDirective` trên template. Nếu component cần kiểm soát hoàn toàn mà không phụ thuộc directive, bạn có thể giữ một boolean `hasSubmitted`; với đa số form, `markAllAsTouched()` trong `submit()` là cách đơn giản để đưa mọi lỗi liên quan ra sau lần gửi đầu.
+
+### valueChanges, statusChanges và updateOn
+
+`valueChanges` phát giá trị mới khi control cập nhật. `statusChanges` phát `VALID`, `INVALID`, `PENDING` hoặc `DISABLED` khi trạng thái validation thay đổi. Chúng hữu ích cho logic phản ứng có chủ đích, ví dụ gợi ý giá hoặc tải lại lựa chọn phụ thuộc vào category.
+
+```ts
+import { DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { debounceTime, distinctUntilChanged } from 'rxjs';
+
+private readonly destroyRef = inject(DestroyRef);
+
+ngOnInit(): void {
+  this.form.controls.name.valueChanges
+    .pipe(
+      debounceTime(250),
+      distinctUntilChanged(),
+      takeUntilDestroyed(this.destroyRef),
+    )
+    .subscribe((name) => {
+      this.suggestSlug(name);
+    });
+}
+```
+
+Đừng subscribe chỉ để sao chép từng giá trị sang một field component riêng. `form.controls.name.value` đã là state hiện tại. Chỉ subscribe khi có phản ứng thực sự, và gắn vòng đời bằng `takeUntilDestroyed` nếu stream không tự hoàn thành.
+
+Mặc định, Angular cập nhật control khi xảy ra `change`, thường tương ứng mỗi lần input thay đổi. Đặt `updateOn: 'blur'` để cập nhật khi ô mất focus hoặc `updateOn: 'submit'` để cập nhật khi form submit. Đây là lựa chọn UX và hiệu năng, không phải cách để bỏ validation.
+
+```ts
+readonly searchForm = this.fb.nonNullable.group(
+  {
+    query: ['', Validators.minLength(2)],
+  },
+  { updateOn: 'blur' },
+);
+```
+
+`updateOn: 'blur'` giảm validation khi người dùng đang gõ, nhưng giá trị control chưa phản ánh ký tự mới cho đến khi blur. Dùng nó cho kiểm tra tốn kém hoặc dễ gây nhiễu. Với thông báo cần phản hồi ngay, giữ mặc định `change`. Chi tiết async validator và chiến lược hiển thị lỗi được mở rộng ở bài [Validation](/docs/routing-forms/validation).
+
+### Control bị vô hiệu hóa
+
+`disable()` làm control không tham gia validation và loại nó khỏi `form.value` của parent. Đây là ngữ nghĩa của form state, không chỉ là hiệu ứng giao diện.
+
+```ts
+this.form.controls.price.disable();
+
+console.log(this.form.value.price); // undefined, vì price bị disabled
+console.log(this.form.getRawValue().price); // 15000, vẫn có trong raw value
+
+this.form.controls.price.enable();
+```
+
+Nếu một field cần đọc nhưng không được phép sửa, ưu tiên gọi `control.disable()` từ TypeScript thay vì vừa tạo `disabled` attribute trong template vừa giữ control enabled. Hai nguồn trạng thái có thể mâu thuẫn. Trước khi dùng `getRawValue()` để gửi field disabled, hãy xác định rõ API có cho phép client thay đổi field đó không; UI disabled không phải cơ chế phân quyền.
+
+## Validation và submit
+
+Validation là tập rule chạy trên form model để trả về lỗi hoặc `null`. Rule như bắt buộc, min/max và định dạng thuộc control. Rule so sánh nhiều field thuộc group. Validation phía client giúp trải nghiệm nhanh, nhưng chỉ server mới là nơi thực thi cuối cùng cho dữ liệu đáng tin cậy.
+
+### Đặt validator trong model
+
+Khai báo validator cùng control làm cấu trúc và rule đọc được tại một chỗ. Angular chạy synchronous validators trước. Nếu có asynchronous validator, status có thể là `PENDING` trong lúc request hoặc promise đang xử lý.
+
+```ts
+readonly form = this.fb.nonNullable.group({
+  name: ['', [Validators.required, Validators.minLength(3)]],
+  price: [0, [Validators.required, Validators.min(0.01)]],
+  description: ['', Validators.maxLength(500)],
+});
+```
+
+Template không nên tự viết lại quy tắc bằng nhiều biểu thức khác nhau. Nó nên hỏi kết quả từ control, ví dụ `hasError('minlength')`. Một validator custom phải là hàm thuần: nhận `AbstractControl`, trả `ValidationErrors | null`, và không đổi control khác hay gọi HTTP. Side effect trong validator khiến mỗi lần Angular tính lại form có thể tạo request hoặc vòng lặp khó đoán.
+
+```ts
+import { AbstractControl, ValidationErrors, ValidatorFn } from '@angular/forms';
+
+export function noWhitespaceOnly(): ValidatorFn {
+  return (control: AbstractControl<string>): ValidationErrors | null => {
+    return control.value.trim().length > 0 ? null : { whitespaceOnly: true };
+  };
+}
+```
+
+### Luồng submit đáng tin cậy
+
+Nút bị disable là phản hồi tốt cho UI, nhưng không phải guard duy nhất. Người dùng có thể submit bằng bàn phím, code có thể gọi method trực tiếp, và trạng thái có thể đổi giữa lần render với event. `submit()` luôn phải kiểm tra validity lại.
+
+```ts
+isSaving = false;
+
+submit(): void {
+  if (this.form.invalid || this.isSaving) {
+    this.form.markAllAsTouched();
+    return;
+  }
+
+  this.isSaving = true;
+  const command = toCreateProductCommand(this.form.getRawValue());
+
+  this.productApi.create(command).subscribe({
+    next: () => {
+      this.form.reset({ name: '', price: 0, description: '', tags: [] });
+      this.isSaving = false;
+    },
+    error: () => {
+      this.isSaving = false;
+      // Gán lỗi server vào state UI hoặc control phù hợp khi cần.
+    },
+  });
+}
+```
+
+Khi có async validator, cân nhắc chặn cả `form.pending` để không gửi trước khi kiểm tra xong. Khi cần lỗi từ server cho một field, dùng `control.setErrors(...)` một cách có chủ đích, nhưng đừng ghi đè mất lỗi validator đang tồn tại. Một cách bền hơn là giữ lỗi server ở state riêng, hoặc hợp nhất error map cẩn thận rồi xóa lỗi server khi người dùng đổi giá trị liên quan.
+
+### Lỗi hiển thị vào đúng thời điểm
+
+Một form tốt không chỉ có rule đúng mà còn nói lỗi đúng lúc. Hiện lỗi required ngay khi trang mở làm người dùng thấy bị trách trước khi làm gì. Chờ đến khi ô `touched`, hoặc sau khi bấm Lưu gọi `markAllAsTouched()`, tạo phản hồi gần thao tác hơn.
+
+```html
+@if (form.controls.price.invalid && form.controls.price.touched) {
+  <p id="price-error" role="alert">
+    @if (form.controls.price.hasError('min')) {
+      Giá phải lớn hơn 0.
+    }
+  </p>
+}
+
+<input
+  id="price"
+  type="number"
+  formControlName="price"
+  [attr.aria-describedby]="form.controls.price.invalid ? 'price-error' : null"
+/>
+```
+
+Khi có thể, dùng `label`, text lỗi dễ hiểu và `aria-describedby` để người dùng dùng screen reader nhận được ngữ cảnh. Bài [Validation](/docs/routing-forms/validation) trình bày sâu hơn về validator bất đồng bộ, lỗi server và chiến lược UX.
+
+## FormArray trong thực tế
+
+Mỗi phần tử của `FormArray` có thể là `FormControl` đơn, một `FormGroup`, hoặc thậm chí một `FormArray` khác. Hãy chọn cấu trúc phản ánh dữ liệu, không phản ánh cách bạn tình cờ render HTML hôm nay.
+
+### Thêm và xóa thẻ
+
+Ví dụ product editor dùng `FormArray<FormControl<string>>` cho các thẻ. Tạo control trong một factory nhỏ giúp mọi phần tử mới có cùng validator và default value.
+
+```ts
+private createTagControl(initialValue = '') {
+  return this.fb.nonNullable.control(initialValue, [
+    Validators.required,
+    Validators.maxLength(30),
+  ]);
+}
+
+addTag(): void {
+  this.tags.push(this.createTagControl());
+}
+
+loadTags(tags: string[]): void {
+  this.tags.clear();
+  for (const tag of tags) {
+    this.tags.push(this.createTagControl(tag));
+  }
+}
+```
+
+Nếu mảng chứa object, mỗi vị trí nên là một group. Ví dụ biến thể sản phẩm có `label` và `stock`; `FormArray` quản lý danh sách biến thể, còn `FormGroup` ở mỗi phần tử quản lý object biến thể.
+
+### Danh sách object và lựa chọn cấu trúc
+
+```ts
+readonly variants = this.fb.nonNullable.array([
+  this.fb.nonNullable.group({
+    label: ['Màu xanh', Validators.required],
+    stock: [0, [Validators.required, Validators.min(0)]],
+  }),
+]);
+
+addVariant(): void {
+  this.variants.push(
+    this.fb.nonNullable.group({
+      label: ['', Validators.required],
+      stock: [0, [Validators.required, Validators.min(0)]],
+    }),
+  );
+}
+```
+
+Trong template, phần tử object cần `[formGroupName]="i"` trước khi dùng `formControlName="label"`. Sự lồng nhau này cho Angular biết key `label` thuộc group biến thể thứ `i`, không thuộc form gốc.
+
+```html
+<div formArrayName="variants">
+  @for (variant of variants.controls; track $index; let i = $index) {
+    <fieldset [formGroupName]="i">
+      <legend>Biến thể {{ i + 1 }}</legend>
+      <input formControlName="label" />
+      <input type="number" formControlName="stock" />
+    </fieldset>
+  }
+</div>
+```
+
+Dùng `FormArray` khi thứ tự hoặc vị trí có ý nghĩa và số phần tử thay đổi. Dùng `FormGroup` khi key được biết trước. Nếu key thật sự do người dùng hoặc dữ liệu quyết định, `FormRecord` là API phù hợp hơn; trang [Typed và dynamic forms](/docs/routing-forms/typed-dynamic-forms) sẽ mở rộng bài toán schema và key động.
+
+## Kiểm thử Reactive Forms
+
+Vì model form là TypeScript object, nhiều hành vi có thể test không cần selector CSS hoặc event DOM. Điều này làm test ngắn, ít vỡ khi đổi markup và tập trung vào contract: giá trị nào hợp lệ, submit có gọi service không, field động có được tạo đúng không.
+
+### Test model không cần DOM
+
+Ví dụ sau tạo component bằng `TestBed`, nhưng gọi API form trực tiếp. Test không cần render template vì đang kiểm tra quy tắc model và method của component.
+
+```ts
+import { TestBed } from '@angular/core/testing';
+
+import { ProductEditorComponent } from './product-editor.component';
+import { ProductApi } from './product-api.service';
+
+describe('ProductEditorComponent', () => {
+  let component: ProductEditorComponent;
+  let productApi: jasmine.SpyObj<ProductApi>;
+
+  beforeEach(() => {
+    productApi = jasmine.createSpyObj<ProductApi>('ProductApi', ['create']);
+
+    TestBed.configureTestingModule({
+      imports: [ProductEditorComponent],
+      providers: [{ provide: ProductApi, useValue: productApi }],
+    });
+
+    component = TestBed.createComponent(ProductEditorComponent).componentInstance;
+  });
+
+  it('không gửi khi form không hợp lệ và đánh dấu lỗi để hiển thị', () => {
+    component.submit();
+
+    expect(component.form.invalid).toBeTrue();
+    expect(component.form.controls.name.touched).toBeTrue();
+    expect(productApi.create).not.toHaveBeenCalled();
+  });
+
+  it('thêm một tag bằng FormArray', () => {
+    component.addTag();
+
+    expect(component.tags.length).toBe(1);
+    expect(component.tags.at(0).value).toBe('');
+  });
+});
+```
+
+Test `submit()` thành công cần fake `productApi.create()` trả `Observable`, chẳng hạn `of(void 0)`. Test nên assert điều người dùng quan sát được hoặc contract tại ranh giới: service nhận command nào, form có reset không, lỗi có được hiển thị không. Không cần assert framework gọi chính xác `updateValueAndValidity()` bao nhiêu lần; đó là implementation detail của Angular.
+
+### Test liên kết template và submit
+
+Khi contract bao gồm việc template đã gắn đúng `formControlName`, hãy render fixture và phát sự kiện thật. Test này phát hiện lỗi mà unit test model không thấy, ví dụ gõ nhầm key `formControlName="prcie"`.
+
+```ts
+import { By } from '@angular/platform-browser';
+import { of } from 'rxjs';
+
+it('nhập tên rồi submit payload đã map', () => {
+  productApi.create.and.returnValue(of(void 0));
+  const fixture = TestBed.createComponent(ProductEditorComponent);
+  fixture.detectChanges();
+
+  const nameInput = fixture.debugElement.query(By.css('#name')).nativeElement as HTMLInputElement;
+  nameInput.value = 'Bút gel';
+  nameInput.dispatchEvent(new Event('input'));
+
+  const priceInput = fixture.debugElement.query(By.css('#price')).nativeElement as HTMLInputElement;
+  priceInput.value = '12.5';
+  priceInput.dispatchEvent(new Event('input'));
+  fixture.detectChanges();
+
+  fixture.debugElement.query(By.css('form')).triggerEventHandler('ngSubmit', {});
+
+  expect(productApi.create).toHaveBeenCalledWith({
+    name: 'Bút gel',
+    priceCents: 1250,
+    description: undefined,
+    tags: [],
+  });
+});
+```
+
+Tách hai tầng test là trade-off hữu ích: phần lớn rule chạy nhanh không cần DOM, còn một số ít integration test bảo vệ binding và accessibility. Nếu form có async validator hoặc service HTTP thật, dùng fake service hoặc `HttpTestingController`; không gọi backend trong unit test.
+
+## Lỗi thường gặp và trade-off
+
+Reactive Forms cho cấu trúc và khả năng kiểm thử tốt, nhưng vẫn có thể thành khó hiểu nếu model, template và dữ liệu API bị trộn trách nhiệm. Các lỗi dưới đây thường gây payload sai hoặc trạng thái UI không đồng bộ.
+
+### Trộn hai form API trên cùng control
+
+Không gắn `[(ngModel)]` và `formControlName` lên cùng một input. Hai directive đều cố làm source of truth, nên Angular cảnh báo và hành vi khó dự đoán.
+
+```html
+<!-- Không làm thế này. -->
+<input [(ngModel)]="productName" formControlName="name" />
+
+<!-- Reactive Form là source of truth duy nhất. -->
+<input formControlName="name" />
+```
+
+Nếu cần đọc tên ở component, dùng `this.form.controls.name.value`. Nếu cần phản ứng khi đổi tên, dùng `valueChanges` với một mục đích rõ ràng. Đừng tạo `productName` song song chỉ để đồng bộ lại từ form.
+
+### Sửa trực tiếp value hoặc controls
+
+`value` là snapshot đọc. Gán vào nó không cập nhật form. Tương tự, mutate trực tiếp array `controls` bỏ qua quan hệ cha-con và các lần tính lại trạng thái.
+
+```ts
+// Sai: không dùng API Reactive Forms.
+// this.form.value.name = 'Bút chì';
+// this.tags.controls.push(this.fb.nonNullable.control('mới'));
+
+// Đúng: Angular biết thay đổi và cập nhật state liên quan.
+this.form.controls.name.setValue('Bút chì');
+this.tags.push(this.fb.nonNullable.control('mới'));
+```
+
+### Dùng patchValue để che dữ liệu thiếu
+
+`patchValue()` rất tiện khi chỉ sửa `price`, nhưng nó im lặng bỏ qua key không có. Khi map response API đầy đủ để edit, `setValue()` giúp phát hiện backend đã đổi contract hoặc mapper bỏ quên field.
+
+Hãy dùng `patchValue()` cho thay đổi thật sự từng phần. Hãy ưu tiên `setValue()` khi data phải đầy đủ theo form. Nếu object có field API thừa không thuộc form, map nó sang form value trước thay vì hy vọng `patchValue()` tự chọn đúng.
+
+### Subscribe nhưng không quản lý vòng đời
+
+`valueChanges` không tự dừng chỉ vì bạn không còn nhìn component. Subscription của component cần được hủy khi component bị destroy. Dùng `takeUntilDestroyed()` với `DestroyRef`, hoặc để template dùng `async` pipe khi phù hợp.
+
+Ngoài vòng đời, cần cân nhắc tần suất. Gọi API trong `valueChanges` của ô tìm kiếm mỗi ký tự vừa tốn mạng vừa dễ gặp race condition. Thêm `debounceTime`, `distinctUntilChanged`, xử lý hủy request bằng operator phù hợp, hoặc chuyển `updateOn` sang `blur` nếu UX cho phép.
+
+### Form quá lớn và abstraction quá sớm
+
+Một component có vài field và một submit có thể giữ form ngay trong component. Khi form editor dài, tách section thành component con và truyền `FormGroup`/control cụ thể vào input. Mỗi component con vẫn nên chỉ render phần state mà nó được giao, thay vì tự tạo một form thứ hai không liên kết.
+
+Ngược lại, không cần viết form factory, schema engine và control wrapper cho form đơn giản. Abstraction chỉ đáng giá khi nhiều form lặp lại rule hoặc có schema thật sự biến đổi. Mỗi lớp trừu tượng mới có chi phí type, debug và onboarding.
+
+<Callout type="warn" title="Client validation không phải hàng rào bảo mật">
+  Người dùng có thể sửa request, bỏ qua giao diện hoặc gọi API trực tiếp. Server phải xác thực quyền, kiểm tra kiểu, range và quy tắc nghiệp vụ độc lập. Form phía client chỉ cải thiện trải nghiệm và giảm request sai rõ ràng.
+</Callout>
+
+## Checklist và tóm tắt
+
+Trước khi coi một Reactive Form đã sẵn sàng, kiểm tra:
+
+- [ ] `ReactiveFormsModule` được import tại standalone component hoặc NgModule đang khai báo template.
+- [ ] Form model có một source of truth; input không trộn `ngModel` và `formControlName`.
+- [ ] `FormControl`, `FormGroup` và `FormArray` phản ánh đúng một giá trị, object cố định và danh sách động.
+- [ ] Kiểu `null` hoặc `nonNullable` được chọn theo ý nghĩa dữ liệu, không chỉ để làm TypeScript im lặng.
+- [ ] Dùng `setValue`, `patchValue`, `reset` và API `FormArray` thay vì mutate `value` hoặc `controls`.
+- [ ] Lỗi chỉ hiện sau `touched` hoặc một lần submit có chủ đích; form vẫn kiểm tra `invalid` trong method submit.
+- [ ] Payload được map từ form value sang command/DTO ở ranh giới service; server vẫn validate độc lập.
+- [ ] Subscription từ `valueChanges`/`statusChanges` có vòng đời rõ ràng.
+- [ ] Có test model cho rule quan trọng và một số test template cho binding/submit.
+
+Tóm lại, Reactive Forms là một cây state có cấu trúc. `FormControl` quản lý một field, `FormGroup` mô hình hóa object, và `FormArray` quản lý danh sách động. Typed forms bắt lỗi dùng sai API khi phát triển; validators kiểm tra dữ liệu khi chạy; API cập nhật của form giữ state nhất quán. Khi submit và test được đặt quanh một model rõ ràng, form lớn vẫn có thể thay đổi an toàn.
+
+<Cards>
+  <Card title="Validation" href="/docs/routing-forms/validation" description="Viết validator đồng bộ, bất đồng bộ và hiển thị lỗi có ngữ cảnh." />
+  <Card title="Typed và dynamic forms" href="/docs/routing-forms/typed-dynamic-forms" description="Mở rộng typed forms, FormRecord và form sinh từ schema." />
+  <Card title="Routing & Forms" href="/docs/routing-forms" description="Quay lại lộ trình Router và Forms của nhóm bài." />
+</Cards>

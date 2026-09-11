@@ -1,10 +1,552 @@
 ---
 title: Profiling hiệu năng
-description: Đo change detection, render, bundle và thời gian tải.
+description: Đo tải trang, tương tác, change detection và rendering Angular để tìm nút thắt bằng bằng chứng.
 ---
 
-Trang này sẽ trình bày **Profiling hiệu năng** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của bài">
+  Profiling không phải là tìm mọi dòng code “có vẻ chậm”. Đây là quy trình nối một trải nghiệm người dùng chậm với số đo, trace và nguyên nhân có thể kiểm chứng; sau đó chỉ giữ tối ưu khi phép đo sau thay đổi tốt hơn.
 </Callout>
+
+## Mục lục
+
+- [Tư duy đo trước khi tối ưu](#tư-duy-đo-trước-khi-tối-ưu)
+  - [Hiện tượng, chỉ số và nguyên nhân](#hiện-tượng-chỉ-số-và-nguyên-nhân)
+  - [Quy tắc đo công bằng](#quy-tắc-đo-công-bằng)
+- [Mô hình hiệu năng Angular](#mô-hình-hiệu-năng-angular)
+  - [Đường đi của một tương tác](#đường-đi-của-một-tương-tác)
+  - [Bốn nhóm chi phí](#bốn-nhóm-chi-phí)
+- [Chọn và đọc chỉ số](#chọn-và-đọc-chỉ-số)
+  - [Chỉ số trải nghiệm người dùng](#chỉ-số-trải-nghiệm-người-dùng)
+  - [Chỉ số chẩn đoán](#chỉ-số-chẩn-đoán)
+  - [Bảng baseline tối thiểu](#bảng-baseline-tối-thiểu)
+- [Chuẩn bị ca đo](#chuẩn-bị-ca-đo)
+  - [Tạo kịch bản tái lập](#tạo-kịch-bản-tái-lập)
+  - [Đánh dấu mốc ứng dụng](#đánh-dấu-mốc-ứng-dụng)
+- [Chrome DevTools: tìm chi phí của trình duyệt](#chrome-devtools-tìm-chi-phí-của-trình-duyệt)
+  - [Performance trace](#performance-trace)
+  - [Network, Coverage và Memory](#network-coverage-và-memory)
+- [Angular DevTools: tìm chi phí ở component](#angular-devtools-tìm-chi-phí-ở-component)
+- [Đọc trace từ triệu chứng đến nguyên nhân](#đọc-trace-từ-triệu-chứng-đến-nguyên-nhân)
+  - [Long task và luồng chính](#long-task-và-luồng-chính)
+  - [JavaScript, style, layout, paint](#javascript-style-layout-paint)
+  - [Phân biệt tải chậm và tương tác chậm](#phân-biệt-tải-chậm-và-tương-tác-chậm)
+- [Change detection và rendering](#change-detection-và-rendering)
+  - [Khi nào view được kiểm tra](#khi-nào-view-được-kiểm-tra)
+  - [Giảm công việc nhưng không phá tính đúng đắn](#giảm-công-việc-nhưng-không-phá-tính-đúng-đắn)
+  - [Danh sách lớn và identity của item](#danh-sách-lớn-và-identity-của-item)
+- [Ví dụ hoàn chỉnh: danh sách sản phẩm bị lag](#ví-dụ-hoàn-chỉnh-danh-sách-sản-phẩm-bị-lag)
+  - [Đo và lập giả thuyết](#đo-và-lập-giả-thuyết)
+  - [Sửa theo nguyên nhân](#sửa-theo-nguyên-nhân)
+  - [Đo lại và quyết định](#đo-lại-và-quyết-định)
+- [Các tối ưu dễ sai và trade-off](#các-tối-ưu-dễ-sai-và-trade-off)
+- [Quy trình profiling có thể lặp lại](#quy-trình-profiling-có-thể-lặp-lại)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+- [Đi tiếp](#đi-tiếp)
+
+## Tư duy đo trước khi tối ưu
+
+Người dùng không quan tâm một component dùng `OnPush` hay một hàm được memoize. Họ cảm nhận trang xuất hiện muộn, gõ chữ bị trễ hoặc danh sách cuộn giật. Những biểu hiện này là điểm bắt đầu đúng để profiling.
+
+### Hiện tượng, chỉ số và nguyên nhân
+
+Hãy tách ba tầng sau để tránh sửa nhầm chỗ:
+
+| Tầng | Câu hỏi | Ví dụ |
+| --- | --- | --- |
+| Hiện tượng | Người dùng thấy gì? | Gõ vào ô tìm kiếm, ký tự xuất hiện sau một nhịp rõ rệt. |
+| Chỉ số | Có thể đo sự chậm này bằng gì? | Interaction to Next Paint (INP) cao; trace có task JavaScript dài sau `input`. |
+| Nguyên nhân | Công việc nào tạo chi phí? | Mỗi lần gõ lọc 10.000 item, tạo mảng mới và render lại toàn bộ danh sách. |
+
+Một trace có nhiều hàm tốn thời gian chưa tự chứng minh hàm đó cần tối ưu. Nó chỉ là bằng chứng để đặt giả thuyết. Ví dụ, parse một response lớn có thể đắt nhưng xảy ra một lần và không nằm trên hành trình quan trọng; tối ưu nó có thể không thay đổi điều người dùng cảm nhận.
+
+<Callout type="idea" title="Đầu ra tốt của một lượt profiling">
+  Viết được một câu có cấu trúc: “Ở kịch bản **X**, chỉ số **Y** là **Z**; trace cho thấy chi phí chính là **A**; thay đổi **B** giảm/tăng chỉ số thành **C**.” Nếu chưa viết được câu này, chưa nên kết luận tối ưu nào hiệu quả.
+</Callout>
+
+### Quy tắc đo công bằng
+
+So sánh trước/sau chỉ có giá trị khi điều kiện đủ giống nhau. Ghi lại ít nhất:
+
+- **Bản build và môi trường:** ưu tiên production build; development mode có kiểm tra và source map làm sai lệch chi phí. Ghi commit hoặc version, trình duyệt và cấu hình máy nếu có thể.
+- **Đường đi và dữ liệu:** cùng route, tài khoản, dữ liệu fixture và số lượng item. Một danh sách 20 hàng không đại diện cho lỗi ở 2.000 hàng.
+- **Trạng thái cache:** phân biệt cold load (cache trống) với warm load (đã có cache). Không kết luận cold load từ một lần warm load.
+- **Mạng và CPU:** chỉ bật throttling khi mô phỏng một điều kiện đã định. Dùng cùng cấu hình ở cả hai lượt đo.
+- **Số mẫu:** chạy nhiều lần. Một lần nhanh hoặc chậm bất thường có thể do GC, extension, request nền hoặc scheduler của hệ điều hành.
+
+Không cần biến mỗi benchmark thành nghiên cứu thống kê. Với một sửa lỗi UI, ba đến năm lượt đo trên cùng kịch bản thường đủ để phát hiện kết quả đảo chiều hoặc nhiễu lớn. Nếu nhiễu lớn, điều cần sửa đầu tiên là kịch bản đo chứ không phải code ứng dụng.
+
+## Mô hình hiệu năng Angular
+
+Angular không làm chậm hay nhanh theo một phép màu riêng. Ứng dụng vẫn dùng luồng chính (main thread) của trình duyệt để chạy JavaScript, tính style, layout, paint và xử lý event. Angular thêm các bước quản lý state, change detection và cập nhật DOM vào đường đi đó.
+
+### Đường đi của một tương tác
+
+Ví dụ người dùng thay đổi từ khóa tìm kiếm. Một tương tác thường đi theo flow sau:
+
+```text
+Người dùng gõ phím
+      │
+      ▼
+Browser dispatch event `input`
+      │
+      ▼
+Handler Angular cập nhật state / signal
+      │
+      ▼
+Change detection kiểm tra view cần cập nhật
+      │
+      ▼
+Template tính binding, Angular ghi DOM khác biệt
+      │
+      ▼
+Browser tính style → layout → paint → compositing
+      │
+      ▼
+Khung hình mới xuất hiện trên màn hình
+```
+
+Một input chậm có thể mắc ở bất kỳ mũi tên nào. `debounceTime` có thể giảm số lần gọi API, nhưng không chữa được layout nặng. `OnPush` có thể giảm số view được kiểm tra, nhưng không chữa được một hàm sắp xếp 10.000 phần tử ngay trong event handler. Trace giúp xác định mũi tên nào thực sự tốn thời gian.
+
+### Bốn nhóm chi phí
+
+| Nhóm | Dấu hiệu thường thấy | Công cụ để xác nhận | Hướng xử lý ban đầu |
+| --- | --- | --- | --- |
+| Tải tài nguyên | LCP muộn, waterfall dài, bundle JS lớn | Network, Lighthouse, Coverage | Lazy-load, giảm dependency, cache và tối ưu ảnh/font. |
+| JavaScript | Long task, interaction bị chặn trước paint | Performance trace, CPU profile | Giảm tính toán, chia nhỏ work, chuyển tính toán sang Worker nếu phù hợp. |
+| Angular/render | Nhiều lượt change detection hoặc component render đắt | Angular DevTools Profiler, trace | Thu hẹp dependency, `OnPush`, signal, `track`, virtual scrolling. |
+| Trình duyệt vẽ | `Recalculate Style`, `Layout` hoặc `Paint` lớn | Performance trace, Rendering tools | Giảm DOM, tránh forced layout, ưu tiên transform/opacity khi animation. |
+
+Một lỗi thực tế có thể thuộc nhiều nhóm. Chẳng hạn bundle lớn làm tải JavaScript lâu, sau đó component nhận dữ liệu lớn lại tạo DOM quá nhiều. Đừng cố chọn một “mẹo tối ưu” bao trùm; đo và giải từng nút thắt theo thứ tự tác động lớn nhất.
+
+## Chọn và đọc chỉ số
+
+Chỉ số là ngôn ngữ chung giữa người phát triển, reviewer và người vận hành. Chọn chỉ số bám theo hành trình thay vì theo một con số đẹp trên dashboard.
+
+### Chỉ số trải nghiệm người dùng
+
+| Chỉ số | Nó mô tả | Hữu ích khi | Không nên hiểu nhầm |
+| --- | --- | --- | --- |
+| LCP (Largest Contentful Paint) | Thời điểm phần nội dung lớn nhất đang nhìn thấy được render | Trang vào đầu, trang sản phẩm, landing page | LCP tốt không đảm bảo nút bấm sau đó phản hồi nhanh. |
+| INP (Interaction to Next Paint) | Độ trễ từ một tương tác đến paint kế tiếp; phản ánh event, JavaScript và render | Form, tìm kiếm, menu, thao tác bảng | Một click trong DevTools không thay thế hoàn toàn dữ liệu người dùng thật. |
+| CLS (Cumulative Layout Shift) | Mức dịch chuyển bố cục ngoài ý muốn trong vòng đời trang | Ảnh, font, quảng cáo, dữ liệu tải muộn | Animation do người dùng chủ động thường không phải lỗi CLS cần xử lý. |
+| FCP (First Contentful Paint) | Lúc nội dung đầu tiên xuất hiện | Nhận biết trang trắng quá lâu | FCP có thể tốt trong khi nội dung chính vẫn chưa xuất hiện. |
+| TTFB (Time to First Byte) | Thời gian nhận byte phản hồi đầu tiên | Chẩn đoán server, CDN, SSR, redirect | TTFB thấp không nói gì về bundle hay client render sau đó. |
+
+Các ngưỡng Web Vitals thay đổi theo hướng dẫn của nền tảng và cần được diễn giải theo percentile của dữ liệu người dùng thật. Khi profiling một lỗi cục bộ, hãy dùng chúng để định hướng, rồi thêm chỉ số sát hành trình hơn: “thời gian từ click Lọc đến danh sách mới được paint” hoặc “thời gian route `/orders` interactive”.
+
+### Chỉ số chẩn đoán
+
+Các chỉ số sau không phải đích sản phẩm nhưng giải thích vì sao trải nghiệm chậm:
+
+- **Long task:** một task giữ main thread trên 50 ms. Trong khoảng đó trình duyệt khó phản hồi input hoặc paint khung hình mới.
+- **Scripting time:** thời gian chạy JavaScript. Tách được chi phí handler, parse JSON, framework và thư viện.
+- **Rendering time:** tổng thời gian style, layout, paint và compositing. Nó thường tăng cùng kích thước/độ phức tạp DOM.
+- **Số lượt change detection và thời lượng mỗi lượt:** chỉ có ý nghĩa khi so với cùng thao tác. “Nhiều” không luôn là lỗi; một lượt ngắn có thể rẻ hơn một lượt ít nhưng render hàng nghìn node.
+- **Số node DOM, heap và garbage collection (GC):** giúp thấy danh sách quá lớn, node không được dọn, hoặc allocation lặp lại. Heap tăng liên tục sau khi rời route là tín hiệu cần điều tra leak.
+- **Kích thước và phần mã không dùng của bundle:** giúp tìm chi phí tải. Coverage chỉ là gợi ý: code chưa chạy trong một kịch bản vẫn có thể cần cho route khác.
+
+### Bảng baseline tối thiểu
+
+Lưu baseline trong issue, PR hoặc ghi chú kỹ thuật. Bảng nhỏ này giúp người khác tái lập kết luận:
+
+| Kịch bản | Điều kiện | Chỉ số chính | Trước | Sau | Kết luận |
+| --- | --- | --- | ---: | ---: | --- |
+| Cold load `/products` | 4× CPU, Fast 3G, cache trống | LCP | 3,4 s | 2,6 s | Giảm sau khi lazy-load chart. |
+| Gõ 10 ký tự tìm kiếm | 2.000 sản phẩm fixture | thời gian input → paint | 180 ms | 42 ms | Không còn long task. |
+| Mở/đóng chi tiết 20 lần | Chrome desktop, cache ấm | heap sau GC | 82 MB | 83 MB | Chưa thấy tăng dần rõ rệt. |
+
+Đừng ghi “nhanh hơn” mà không chỉ rõ đơn vị, điều kiện và hướng thay đổi. Một “giảm 50%” từ 2 ms xuống 1 ms có thể kém quan trọng hơn giảm 180 ms xuống 80 ms trên thao tác người dùng lặp lại.
+
+## Chuẩn bị ca đo
+
+### Tạo kịch bản tái lập
+
+Viết thao tác như một kịch bản ngắn, có điểm bắt đầu và điểm kết thúc quan sát được. Ví dụ:
+
+1. Mở `/products` trong cửa sổ ẩn danh để cache trống.
+2. Chờ danh sách 2.000 sản phẩm fixture tải xong.
+3. Đặt con trỏ vào ô tìm kiếm và gõ `angular` bằng cùng cách mỗi lần.
+4. Kết thúc khi text “7 kết quả” đã xuất hiện và browser paint khung hình chứa kết quả đó.
+
+Tránh đo bằng cách click ngẫu nhiên trong lúc DevTools đang mở nhiều tab. Kịch bản càng mơ hồ, trace càng khó so sánh. Với luồng rất quan trọng, có thể tự động hóa thao tác bằng E2E và thu thập metric riêng; nhưng trace thủ công vẫn hữu ích để điều tra một lần hồi quy cụ thể.
+
+### Đánh dấu mốc ứng dụng
+
+`performance.mark()` không làm ứng dụng nhanh hơn. Nó đặt tên cho thời điểm nghiệp vụ để bạn nối trace trình duyệt với hành vi Angular.
+
+```ts
+import { Component, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-product-search',
+  template: `
+    <input (input)="search($any($event.target).value)" placeholder="Tìm sản phẩm" />
+    <p>{{ resultCount() }} kết quả</p>
+  `,
+})
+export class ProductSearchComponent {
+  readonly resultCount = signal(0);
+
+  search(query: string): void {
+    performance.mark('product-search:start');
+
+    // Ví dụ: cập nhật state sau khi lọc hoặc nhận kết quả API.
+    this.resultCount.set(query.length);
+
+    requestAnimationFrame(() => {
+      performance.mark('product-search:painted');
+      performance.measure('product-search:input-to-paint', {
+        start: 'product-search:start',
+        end: 'product-search:painted',
+      });
+    });
+  }
+}
+```
+
+Mốc `requestAnimationFrame` là ước lượng cho “trước paint kế tiếp”, không phải chứng minh tuyệt đối rằng mọi pixel đã hiện. Nó vẫn rất hữu ích để so sánh cùng một flow trước/sau. Đặt mark ở ranh giới nghiệp vụ như bắt đầu tìm kiếm, nhận API, render xong skeleton; đừng rải mark vào mọi hàm nhỏ.
+
+<Callout type="warn" title="Không để instrumentation làm bẩn production">
+  Mark/measure số lượng lớn, log object lớn hoặc gửi từng phép đo lên mạng có thể tự tạo chi phí. Hãy lấy mẫu, chỉ bật theo môi trường/debug flag và dọn `performance.clearMarks()`/`clearMeasures()` nếu tạo tên động trong một luồng dài.
+</Callout>
+
+## Chrome DevTools: tìm chi phí của trình duyệt
+
+Chrome DevTools cho thấy toàn bộ đường đi trên main thread, không chỉ phần Angular. Đây là công cụ ưu tiên khi không biết hiện tượng đến từ JavaScript, network hay rendering.
+
+### Performance trace
+
+Quy trình điều tra một thao tác tương tác:
+
+1. Mở **DevTools → Performance**. Đóng bớt extension và tab nặng để giảm nhiễu.
+2. Bật screenshots nếu cần đối chiếu timeline với màn hình. Chỉ bật network/CPU throttling khi đó là điều kiện đã ghi trong baseline.
+3. Nhấn Record, thực hiện đúng một kịch bản, dừng record ngay sau khi màn hình ổn định.
+4. Trong overview, tìm vùng interaction chậm hoặc khoảng main thread bị kín. Zoom vào task dài nhất gần thời điểm người dùng bắt đầu thao tác.
+5. Đọc call tree hoặc bottom-up: call tree giữ thứ tự gọi; bottom-up gom thời gian theo hàm và tốt để tìm nơi tiêu tốn tổng thời gian.
+6. Kiểm tra các event `product-search:*` nếu đã đặt mark. Chúng neo trace vào bước nghiệp vụ, tránh suy luận từ timestamp trần.
+
+```text
+input event
+    │
+    ├── 92 ms JavaScript
+    │     ├── filterProducts()        58 ms
+    │     ├── sortByRelevance()       21 ms
+    │     └── template / framework    13 ms
+    │
+    ├── 31 ms Recalculate Style + Layout
+    └── 18 ms Paint
+          │
+          ▼
+    khung hình kết quả mới
+```
+
+Trong ví dụ, tối ưu change detection trước `filterProducts()` chưa phải giả thuyết mạnh nhất. Task chính là lọc/sắp xếp đồng bộ. Tuy nhiên, sau khi giảm JavaScript, chi phí layout 31 ms có thể trở thành nút thắt kế tiếp; profiling là vòng lặp, không phải một lần chạy.
+
+### Network, Coverage và Memory
+
+**Network** trả lời “đợi cái gì?”: request nào chặn dữ liệu, có redirect, cache miss, payload lớn hay chuỗi request tuần tự không. Xem timing của request để tách thời gian DNS/kết nối, chờ server và tải nội dung. Đừng chỉ nhìn tổng thời gian waterfall rồi kết luận Angular chậm.
+
+**Coverage** ước lượng byte JavaScript/CSS chưa được thực thi trong ca đo hiện tại. Dùng nó để đặt câu hỏi về một thư viện lớn hoặc route không cần tải ngay. Không xóa module chỉ vì Coverage tô đỏ: một code path ít dùng có thể phục vụ hành trình khác hoặc chỉ chạy sau tương tác.
+
+**Memory** hữu ích khi ứng dụng càng dùng càng ì hoặc tab bị treo. Chụp heap snapshot trước và sau một chuỗi thao tác có thể tái lập, ví dụ vào/rời dialog 20 lần. Tìm object/nút DOM bị giữ lại qua reference. Một heap lớn không tự động là memory leak; tín hiệu đáng tin hơn là heap vẫn tăng qua nhiều chu kỳ sau khi GC và khi dữ liệu cũ đáng lẽ đã không còn reachable.
+
+<Callout type="idea" title="Dùng công cụ đúng câu hỏi">
+  Network cho “vì sao dữ liệu đến muộn”; Performance cho “vì sao main thread bận”; Memory cho “vì sao tài nguyên không được giải phóng”. Chuyển công cụ khi câu hỏi đổi, thay vì ép một panel trả lời mọi thứ.
+</Callout>
+
+## Angular DevTools: tìm chi phí ở component
+
+Angular DevTools bổ sung góc nhìn framework cho trace trình duyệt. Trong ứng dụng Angular chạy ở chế độ được DevTools hỗ trợ, extension thường cung cấp cây component để xem state/input và tab **Profiler** để ghi các chu kỳ change detection/render.
+
+Một quy trình thực dụng:
+
+1. Mở route lỗi và xác nhận Angular DevTools nhận diện ứng dụng.
+2. Vào **Profiler**, bắt đầu ghi, thực hiện duy nhất kịch bản đã định, rồi dừng.
+3. Xem chu kỳ nào dài bất thường và component nào đóng góp nhiều thời gian. Click component để đối chiếu input, state hoặc thao tác vừa xảy ra.
+4. Chuyển sang Chrome Performance nếu cần biết thời gian còn lại là JavaScript trong thư viện, layout hay paint.
+
+Angular DevTools trả lời tốt câu hỏi “component/view nào được kiểm tra hoặc render đắt?”. Nó không thay Chrome DevTools cho tải ảnh, CSS layout hay một hàm thư viện không hiện rõ trong component tree. Kết luận mạnh thường cần cả hai: Angular DevTools khoanh vùng component, Chrome trace xác nhận chi phí thật trên main thread.
+
+<Callout type="warn" title="Đừng profile development mode để chốt số liệu">
+  Development mode và DevTools có thể thêm overhead hoặc kiểm tra bổ sung. Dùng chúng để tìm quan hệ nhân quả; xác nhận chỉ số trải nghiệm cuối cùng bằng production build, nơi mã tối ưu và hành vi tải gần với người dùng hơn.
+</Callout>
+
+## Đọc trace từ triệu chứng đến nguyên nhân
+
+### Long task và luồng chính
+
+Main thread thực hiện phần lớn JavaScript và rendering. Khi một task chạy quá 50 ms, nó trở thành **long task**: event mới, callback hẹn giờ và cơ hội paint có thể phải đợi task kết thúc. Đây là lý do một handler 120 ms có thể làm UI “đơ” dù request API rất nhanh.
+
+Tìm long task gần thời điểm interaction, rồi đi xuống call stack. Xem nó có phải một lần chi phí cần thiết (parse payload sau load), hay lặp lại theo từng phím gõ/cuộn/click. Một chi phí 30 ms lặp 10 lần có thể gây hại hơn một chi phí 100 ms chỉ xảy ra lúc khởi động mà người dùng không chờ.
+
+Chia nhỏ công việc bằng `setTimeout`, `requestIdleCallback` hoặc scheduler chỉ hợp lý khi phần việc có thể trì hoãn mà không làm UX sai. Ví dụ, cập nhật biểu đồ phân tích có thể hoãn; nhưng danh sách kết quả mà người dùng đang nhìn cần phản hồi nhất quán. Với tính toán CPU nặng độc lập DOM, Web Worker là ranh giới tốt hơn vì nó giải phóng main thread, nhưng cần trả giá bằng sao chép/serialize dữ liệu và kiến trúc message.
+
+### JavaScript, style, layout, paint
+
+Sau JavaScript, trình duyệt có thể cần:
+
+- **Recalculate Style:** xác định CSS rule nào áp dụng cho node. Selector phức tạp và thay đổi class trên DOM lớn có thể làm bước này tăng.
+- **Layout:** tính kích thước và vị trí. Đọc `offsetHeight`, `getBoundingClientRect()` hoặc thuộc tính layout ngay sau khi vừa ghi style có thể ép browser layout đồng bộ, gọi là forced reflow.
+- **Paint:** vẽ pixel cho phần thay đổi. Blur, shadow lớn, clip phức tạp hoặc vùng repaint lớn có thể đắt.
+- **Compositing:** ghép các layer. Animation `transform` và `opacity` thường ít buộc layout/paint hơn thay đổi `top`, `left`, `width` hoặc `height`, nhưng không phải lý do để tạo layer cho mọi node.
+
+Ví dụ forced layout cần tránh trong vòng lặp:
+
+```ts
+// Không tốt: mỗi vòng có thể ghi rồi ép browser đọc layout mới ngay.
+for (const item of items) {
+  item.style.width = `${nextWidth}px`;
+  console.log(item.offsetWidth);
+}
+
+// Tốt hơn: đọc trước, rồi gom các lần ghi.
+const widths = items.map((item) => item.offsetWidth);
+items.forEach((item, index) => {
+  item.style.width = `${widths[index] + 10}px`;
+});
+```
+
+Ví dụ này không bảo đảm luôn là hotspot. Chỉ áp dụng khi trace cho thấy layout có ý nghĩa. Thêm cache hoặc thay CSS mà không có trace có thể tăng độ phức tạp nhưng không thay đổi frame time.
+
+### Phân biệt tải chậm và tương tác chậm
+
+Tải đầu và tương tác sau tải cần cách đo khác nhau:
+
+| Triệu chứng | Mốc để xem | Nghi ngờ trước | Ví dụ cải tiến |
+| --- | --- | --- | --- |
+| Trang trắng/nội dung chính đến muộn | TTFB, FCP, LCP, Network waterfall | Server, render-blocking resource, ảnh, JS ban đầu | CDN/cache, tối ưu ảnh, lazy-load route, giảm initial bundle. |
+| Trang hiện nhưng click/gõ chậm | INP, long task, event → paint | Handler nặng, render nhiều DOM, layout | Lọc theo debounce phù hợp, virtual scroll, chia nhỏ work, sửa layout. |
+| Cuộn giật | Frame timeline, rendering, event scroll | DOM quá lớn, handler scroll, paint | Virtualize, passive listener khi phù hợp, tránh đo layout trên mọi scroll. |
+| Dùng lâu càng chậm | Heap snapshot, allocation timeline | Leak subscription/listener, cache vô hạn | Dọn resource, giới hạn cache, xác nhận object được giải phóng. |
+
+Một thay đổi tối ưu tải đầu như lazy-load module có thể khiến lần mở tính năng đó chậm hơn vì phải tải muộn. Đó là trade-off hợp lệ nếu route ít dùng; hãy đo cả cold load route và navigation thực tế trước khi quyết định.
+
+## Change detection và rendering
+
+### Khi nào view được kiểm tra
+
+Change detection là quá trình Angular đánh giá binding trong template và đồng bộ khác biệt vào DOM. Nó không có nghĩa Angular luôn viết lại toàn bộ DOM; DOM chỉ đổi khi giá trị binding khác. Nhưng bản thân việc duyệt view, gọi expression và tạo dữ liệu trung gian vẫn có chi phí.
+
+Một view `OnPush` thường được kiểm tra khi nhận input mới, event trong subtree chạy, `AsyncPipe` phát giá trị, template đã đọc signal thay đổi, hoặc code gọi `markForCheck()`. Với chiến lược mặc định, phạm vi kiểm tra rộng hơn. Xem bài [Signals và Zone.js](/docs/nen-tang/signals-va-zonejs) để hiểu notification và change detection chi tiết.
+
+Điểm quan trọng là **notification không đồng nghĩa render đắt**. Một signal đổi có thể đánh thức view cần thiết, nhưng template của view đó vẫn có thể gọi hàm sắp xếp mảng lớn. Ngược lại, `OnPush` không giúp nếu parent liên tục cấp input object/array mới mà child phải xử lý nặng theo mỗi lượt.
+
+### Giảm công việc nhưng không phá tính đúng đắn
+
+Ưu tiên làm state và dependency rõ ràng trước khi dùng API ép render:
+
+```ts
+import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+
+interface Product {
+  id: number;
+  name: string;
+}
+
+@Component({
+  selector: 'app-product-filter',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <input (input)="query.set($any($event.target).value)" />
+
+    @for (product of filteredProducts(); track product.id) {
+      <p>{{ product.name }}</p>
+    }
+  `,
+})
+export class ProductFilterComponent {
+  readonly query = signal('');
+  readonly products = signal<Product[]>([]);
+
+  readonly filteredProducts = computed(() => {
+    const normalizedQuery = this.query().trim().toLowerCase();
+    return this.products().filter((product) =>
+      product.name.toLowerCase().includes(normalizedQuery),
+    );
+  });
+}
+```
+
+`computed` cache kết quả cho đến khi `query` hoặc `products` đổi. Điều này phù hợp hơn gọi `filterProducts()` trong template, vì template có thể được đánh giá trong nhiều lượt change detection dù input không đổi. `OnPush` làm phạm vi kiểm tra rõ hơn, còn `track product.id` cho Angular một identity ổn định để tái sử dụng node DOM.
+
+Không biến mọi field thành signal hoặc gắn `OnPush` toàn dự án mà không kiểm tra. State mutate tại chỗ, callback thư viện chạy ngoài Angular, hoặc component dựa vào side effect ngầm có thể làm UI không cập nhật. Migration an toàn là đo một subtree nóng, đổi nhỏ, rồi chạy test tương tác và trace lại.
+
+### Danh sách lớn và identity của item
+
+Với danh sách, có hai chi phí khác nhau:
+
+1. **Tính danh sách:** lọc, sắp xếp, mapping hoặc tạo view model.
+2. **Hiển thị danh sách:** tạo/cập nhật node DOM, style, layout và paint.
+
+`track` giải quyết chủ yếu vế thứ hai. Nó cho Angular biết item nào là cùng thực thể giữa hai mảng. Không có identity ổn định, khi mảng mới xuất hiện Angular có thể phải hủy/tạo lại nhiều node hơn cần thiết. `track` không làm phép lọc 50.000 item rẻ hơn.
+
+```html
+<!-- Không nên track theo index khi danh sách có chèn/xóa/sắp xếp. -->
+@for (product of products(); track $index) {
+  <app-product-row [product]="product" />
+}
+
+<!-- Nên dùng khóa nghiệp vụ ổn định. -->
+@for (product of products(); track product.id) {
+  <app-product-row [product]="product" />
+}
+```
+
+Khi số item nhìn thấy vẫn quá lớn, dùng virtual scrolling: chỉ render vùng đang nhìn thấy cùng một buffer nhỏ. Trade-off là chiều cao item động, accessibility, tìm kiếm trong trang và đo layout có thể phức tạp hơn. Chỉ đưa virtualization vào khi trace chứng minh DOM/render của danh sách là vấn đề.
+
+## Ví dụ hoàn chỉnh: danh sách sản phẩm bị lag
+
+Giả sử route sản phẩm tải 2.000 item. Người dùng gõ vào ô tìm kiếm và cảm thấy ký tự phản hồi chậm.
+
+### Đo và lập giả thuyết
+
+Kịch bản là gõ `angular` vào danh sách fixture sau khi dữ liệu tải xong. Trace ở production build cho mỗi ký tự cho thấy:
+
+| Quan sát | Số đo | Diễn giải ban đầu |
+| --- | ---: | --- |
+| `input` đến paint | 180 ms | Vượt mức phản hồi mong muốn của tương tác gõ. |
+| JavaScript trong handler | 92 ms | Có long task; cần mở stack để biết hàm nào. |
+| `filterProducts()` + `sort()` | 79 ms | Tính toán lặp trên toàn tập dữ liệu là nghi phạm chính. |
+| Style/layout/paint | 49 ms | Render 2.000 hàng cũng đáng kể. |
+| Network | Không có request | Debounce API không phải lời giải cho trace này. |
+
+Code ban đầu có hai vấn đề được trace củng cố: tính toán nằm trong template và tất cả hàng đều được render.
+
+```ts
+// Không nên: template có thể gọi lại hàm này nhiều lần.
+filterProducts(): Product[] {
+  return this.products
+    .filter((product) => product.name.includes(this.query))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+```
+
+```html
+@for (product of filterProducts(); track $index) {
+  <app-product-row [product]="product" />
+}
+```
+
+### Sửa theo nguyên nhân
+
+Bước đầu giữ một danh sách nguồn, đưa kết quả dẫn xuất vào `computed`, và track theo `id`. Nếu sort là yêu cầu UX, giữ nó; đừng xóa tính năng chỉ để benchmark đẹp.
+
+```ts
+import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+
+interface Product {
+  id: number;
+  name: string;
+}
+
+@Component({
+  selector: 'app-products-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <input
+      [value]="query()"
+      (input)="query.set($any($event.target).value)"
+      placeholder="Tìm sản phẩm"
+    />
+
+    @for (product of visibleProducts(); track product.id) {
+      <app-product-row [product]="product" />
+    }
+  `,
+})
+export class ProductsPageComponent {
+  readonly query = signal('');
+  readonly products = signal<Product[]>([]);
+
+  readonly matchedProducts = computed(() => {
+    const normalized = this.query().trim().toLocaleLowerCase('vi-VN');
+
+    return this.products()
+      .filter((product) => product.name.toLocaleLowerCase('vi-VN').includes(normalized))
+      .toSorted((a, b) => a.name.localeCompare(b.name, 'vi-VN'));
+  });
+
+  // Ví dụ đơn giản. Với danh sách thực sự lớn, thay bằng virtual scroll.
+  readonly visibleProducts = computed(() => this.matchedProducts().slice(0, 100));
+}
+```
+
+Giới hạn 100 item là một quyết định sản phẩm, không phải tối ưu trung lập: người dùng phải có phân trang, nút “xem thêm” hoặc virtual scroll để vẫn tiếp cận kết quả còn lại. Nếu yêu cầu là hiển thị mọi item cùng lúc, hãy thử virtualization thay vì cắt dữ liệu im lặng.
+
+### Đo lại và quyết định
+
+Đo cùng kịch bản, dữ liệu và throttling. Ví dụ kết quả sau thay đổi:
+
+| Chỉ số | Trước | Sau | Ý nghĩa |
+| --- | ---: | ---: | --- |
+| input → paint (median 5 lượt) | 180 ms | 42 ms | Người dùng thấy phản hồi gần như ngay. |
+| JavaScript | 92 ms | 24 ms | Không còn long task ở handler này. |
+| Style/layout/paint | 49 ms | 12 ms | Ít node cần hiển thị hơn. |
+| Hành vi tìm kiếm | đúng | đúng | Component/E2E test xác nhận vẫn truy cập được kết quả. |
+
+Kết luận không phải “Signals luôn nhanh”. Kết luận có bằng chứng hơn là: cache tính toán dẫn xuất, identity ổn định và giới hạn số DOM node đã giảm hai loại chi phí đo được trong kịch bản này. Nếu `matchedProducts` vẫn mất hàng trăm ms với 100.000 item, nút thắt tiếp theo là thuật toán/index tìm kiếm hoặc Worker, không phải tiếp tục giảm change detection.
+
+## Các tối ưu dễ sai và trade-off
+
+| Thay đổi hấp dẫn | Vì sao có thể sai | Cách ra quyết định tốt hơn |
+| --- | --- | --- |
+| Bật `OnPush` ở mọi component | Có thể làm lộ mutation/callback ngoài Angular, UI stale và debugging khó hơn | Đo subtree nóng, dùng immutable update và thêm test cho trạng thái async trước khi mở rộng. |
+| Gọi `detectChanges()` để “chữa” UI | Ép kiểm tra đồng bộ có thể che điểm notification sai và tăng work | Ưu tiên signal, `AsyncPipe` hoặc `markForCheck()` tại ranh giới callback. |
+| Memoize mọi hàm | Cache có chi phí bộ nhớ, invalidation và có thể giữ dữ liệu cũ | Cache phép tính được trace chứng minh là lặp/nặng; giữ dependency rõ ràng. |
+| Debounce mọi input | Giảm việc nhưng thêm độ trễ cảm nhận; không chữa render/layout nặng | Debounce request hoặc tính toán tốn kém theo yêu cầu UX, sau đó đo INP. |
+| Lazy-load mọi thứ | Giảm initial bundle nhưng chuyển độ trễ sang lần dùng tính năng | Xem route nào phổ biến, prefetch có phù hợp không, và đo cold navigation. |
+| Dùng virtual scroll cho mọi list | Tăng phức tạp focus, a11y, chiều cao động và test | Dùng khi DOM/render của list là hotspot với dữ liệu thật. |
+| Xóa code theo Coverage | Coverage chỉ phản ánh một phiên chạy | Kiểm tra route/feature ownership và bundle analyzer trước khi gỡ dependency. |
+| Chỉ chạy Lighthouse một lần | Điểm lab thay đổi theo máy/mạng và không đại diện mọi interaction | Lấy nhiều mẫu, đọc trace, rồi kết hợp field data nếu có. |
+
+<Callout type="warn" title="Tối ưu không được làm mất tính đúng đắn">
+  Nếu tối ưu làm kết quả tìm kiếm thiếu, screen reader không tới được item, loading state không hiện hoặc dữ liệu cũ bị hiển thị, đó là regression dù benchmark đẹp hơn. Luôn chạy test liên quan và kiểm tra thao tác thật sau thay đổi hiệu năng.
+</Callout>
+
+## Quy trình profiling có thể lặp lại
+
+Dùng vòng lặp sau cho một report hiệu năng, issue hoặc PR:
+
+1. **Nêu triệu chứng và hành trình.** Viết người dùng làm gì, dữ liệu bao nhiêu và “xong” nghĩa là gì.
+2. **Chọn chỉ số chính.** Ví dụ LCP cho tải trang, input-to-paint/INP cho gõ tìm kiếm, heap sau GC cho nghi memory leak.
+3. **Ghi baseline.** Dùng production build và điều kiện đo cố định; lưu trace hoặc ảnh chụp panel có timestamp.
+4. **Đọc evidence.** Khoanh một long task, request, component render hoặc layout event gần chỉ số xấu. Tách observation khỏi giả thuyết.
+5. **Đổi một nguyên nhân có khả năng cao.** Ví dụ thêm `track product.id`, tránh hàm nặng trong template, hoặc lazy-load một dependency lớn. Không gộp năm tối ưu vào một lượt.
+6. **Xác minh tính đúng đắn.** Chạy unit/component/E2E test phù hợp, kiểm tra keyboard và loading/error state nếu thay đổi UI.
+7. **Đo lại.** Cùng kịch bản, cùng điều kiện, nhiều lượt. So sánh median hoặc một summary nhất quán thay vì chọn lượt đẹp nhất.
+8. **Giữ, điều chỉnh hoặc hoàn tác.** Giữ khi chỉ số/trải nghiệm tốt hơn và trade-off chấp nhận được; hoàn tác khi không có lợi ích rõ ràng.
+
+Một template ghi chú ngắn:
+
+```text
+Kịch bản: Gõ "angular" ở /products với 2.000 fixture item.
+Điều kiện: production build, Chrome 123, CPU 4×, cache ấm.
+Baseline: input → paint median 180 ms; long task 92 ms trong filterProducts().
+Giả thuyết: filter/sort chạy trong template và 2.000 row tạo render cost.
+Thay đổi: computed + track id + virtualized/giới hạn viewport.
+Kết quả: input → paint median 42 ms; không long task; test tìm kiếm xanh.
+Quyết định: giữ; theo dõi cold navigation vì virtualization thêm dependency/cấu hình.
+```
+
+## Checklist và tóm tắt
+
+Trước khi kết thúc một lượt profiling, kiểm tra:
+
+- [ ] Có mô tả hành trình người dùng và dữ liệu đại diện.
+- [ ] Có baseline trước thay đổi, đơn vị đo và điều kiện đo.
+- [ ] Trace hoặc công cụ đã chỉ ra chi phí gần triệu chứng, không chỉ một linh cảm.
+- [ ] Đã phân biệt tải tài nguyên, JavaScript, Angular/render và browser rendering.
+- [ ] Mỗi thay đổi gắn với một giả thuyết; không gộp nhiều thay đổi không thể tách kết quả.
+- [ ] Đã đo lại cùng điều kiện và chạy kiểm thử hành vi liên quan.
+- [ ] Đã ghi trade-off, ví dụ độ trễ lazy-load, bộ nhớ cache hoặc accessibility của virtual list.
+
+Tóm lại, performance Angular là chuỗi chi phí từ network đến JavaScript, change detection, DOM và paint. Chrome DevTools nhìn toàn bộ chuỗi; Angular DevTools giúp khoanh vùng component và chu kỳ framework. `OnPush`, Signals, `computed`, `track` và virtual scrolling là công cụ có điều kiện, không phải checklist phải bật hết. Hãy để số đo trên một hành trình thật quyết định công cụ nào đáng dùng.
+
+## Đi tiếp
+
+<Cards>
+  <Card title="Signals và Zone.js" href="/docs/nen-tang/signals-va-zonejs" description="Hiểu notification, change detection, OnPush và zoneless trước khi tối ưu render." />
+  <Card title="SSR và hydration" href="/docs/testing-performance-deploy/ssr-hydration" description="Tối ưu lần hiển thị đầu và xử lý ranh giới server/trình duyệt." />
+  <Card title="Build và tối ưu bundle" href="/docs/testing-performance-deploy/build-optimization" description="Kiểm soát JavaScript tải ban đầu, lazy loading và budgets." />
+  <Card title="Kiểm thử component" href="/docs/testing-performance-deploy/component-testing" description="Bảo vệ hành vi UI trong khi thay đổi kiến trúc và rendering." />
+</Cards>

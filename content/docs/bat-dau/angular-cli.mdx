@@ -1,10 +1,271 @@
 ---
 title: Angular CLI
-description: Các lệnh CLI quan trọng để tạo, chạy và quản lý dự án.
+description: Tạo, chạy, sinh mã, kiểm thử và cập nhật ứng dụng Angular bằng Angular CLI.
 ---
 
-Trang này sẽ trình bày **Angular CLI** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang">
+  Angular CLI là công cụ dòng lệnh chính thức để khởi tạo và vận hành workspace Angular. Trang này dùng các lệnh phổ biến của Angular hiện đại; hãy luôn xem <code>--help</code> của phiên bản CLI đang dùng trước khi áp dụng một tuỳ chọn ít gặp.
 </Callout>
+
+## Mục lục
+
+- [Angular CLI là gì?](#angular-cli-là-gì)
+- [Cài đặt và kiểm tra](#cài-đặt-và-kiểm-tra)
+  - [Dùng CLI toàn cục hoặc theo dự án](#dùng-cli-toàn-cục-hoặc-theo-dự-án)
+  - [Xem phiên bản và trợ giúp](#xem-phiên-bản-và-trợ-giúp)
+- [Tạo workspace mới](#tạo-workspace-mới)
+  - [Các lựa chọn khi tạo dự án](#các-lựa-chọn-khi-tạo-dự-án)
+  - [Quy trình tối thiểu](#quy-trình-tối-thiểu)
+- [Chạy ứng dụng khi phát triển](#chạy-ứng-dụng-khi-phát-triển)
+  - [Khi không chạy được](#khi-không-chạy-được)
+- [Sinh mã bằng generate](#sinh-mã-bằng-generate)
+  - [Đọc lệnh được sinh trước khi dùng](#đọc-lệnh-được-sinh-trước-khi-dùng)
+- [Build, kiểm thử và các lệnh vận hành](#build-kiểm-thử-và-các-lệnh-vận-hành)
+  - [Build theo cấu hình](#build-theo-cấu-hình)
+  - [Kiểm thử, lint và mở rộng](#kiểm-thử-lint-và-mở-rộng)
+- [Cấu hình workspace](#cấu-hình-workspace)
+- [Quy trình làm việc đề xuất](#quy-trình-làm-việc-đề-xuất)
+- [Những lưu ý quan trọng](#những-lưu-ý-quan-trọng)
+- [Bước tiếp theo](#bước-tiếp-theo)
+
+## Angular CLI là gì?
+
+**Angular CLI** (Command Line Interface) là bộ lệnh `ng` dùng để tạo và quản lý một *workspace* Angular. Workspace là thư mục gốc chứa mã nguồn, cấu hình build, các thư viện có thể tái sử dụng và một hoặc nhiều ứng dụng.
+
+Thay vì tự ghép bundler, test runner và quy ước thư mục, CLI tạo sẵn cấu trúc nhất quán rồi chạy các *target* (tác vụ như `build`, `serve`, `test`) đã khai báo. Ví dụ, `ng build` không chỉ gọi một trình đóng gói: nó đọc cấu hình của project, biên dịch TypeScript, xử lý tài nguyên và ghi kết quả vào thư mục đầu ra.
+
+```text
+Lệnh ng
+  │
+  ├── ng new       → tạo workspace và ứng dụng ban đầu
+  ├── ng generate  → thêm mã theo schematic/generator
+  ├── ng serve     → chạy máy chủ phát triển và theo dõi thay đổi
+  └── ng build     → tạo gói triển khai theo cấu hình
+```
+
+<Callout type="idea" title="Đừng học thuộc mọi cờ lệnh">
+  Hãy nhớ nhóm lệnh và mục đích của chúng. Với một generator hoặc builder cụ thể, <code>ng &lt;lệnh&gt; --help</code> là nguồn chính xác nhất vì các lựa chọn có thể thay đổi giữa các bản Angular.
+</Callout>
+
+## Cài đặt và kiểm tra
+
+### Dùng CLI toàn cục hoặc theo dự án
+
+Cài CLI toàn cục thuận tiện khi bạn thường xuyên tạo project mới:
+
+```bash
+npm install -g @angular/cli
+```
+
+Sau khi vào một workspace, nên chạy `ng` từ thư mục đó. Hệ thống package manager sẽ ưu tiên bản CLI cục bộ mà dự án đã khai báo trong `devDependencies`, nhờ vậy cả nhóm dùng cùng công cụ.
+
+Nếu chỉ muốn tạo một project mà không cài toàn cục, dùng `npx` với bản mới nhất:
+
+```bash
+npx @angular/cli@latest new cua-hang
+```
+
+`npx` tải và chạy gói cho lệnh hiện tại. Với dự án đang tồn tại, hãy ưu tiên CLI cục bộ của dự án thay vì ép dùng `@latest`; một CLI quá mới có thể không tương thích với phiên bản Angular trong mã nguồn.
+
+### Xem phiên bản và trợ giúp
+
+```bash
+ng version
+ng help
+ng generate --help
+ng generate component --help
+```
+
+`ng version` hiển thị Angular, CLI, Node.js và các package liên quan. Khi gặp lỗi khó tái hiện, thông tin này cần có trong báo cáo lỗi. `--help` cho biết cú pháp và các cờ mà bản CLI hiện tại thực sự hỗ trợ.
+
+## Tạo workspace mới
+
+Lệnh dưới đây tạo một ứng dụng có định tuyến và dùng SCSS cho stylesheet:
+
+```bash
+ng new cua-hang --routing --style=scss
+```
+
+CLI có thể đặt thêm câu hỏi tương tác, chẳng hạn có tạo ứng dụng SSR hay không. SSR (server-side rendering) là việc render HTML trên máy chủ trước khi gửi tới trình duyệt; chỉ bật nó khi yêu cầu sản phẩm cần SEO, thời gian hiển thị ban đầu hoặc kiến trúc máy chủ phù hợp.
+
+```bash
+ng new cua-hang-ssr --routing --style=scss --ssr
+```
+
+### Các lựa chọn khi tạo dự án
+
+| Nhu cầu | Lựa chọn | Ý nghĩa |
+| --- | --- | --- |
+| Có điều hướng giữa các trang | `--routing` | Tạo cấu hình Angular Router ban đầu. |
+| Dùng SCSS | `--style=scss` | Chọn phần mở rộng và bộ xử lý stylesheet mặc định. |
+| Không tạo Git repository | `--skip-git` | Hữu ích khi thư mục đã nằm trong repository có sẵn. |
+| Cần SSR ngay từ đầu | `--ssr` | Bổ sung cấu hình render phía máy chủ. |
+| Xem mọi tuỳ chọn | `ng new --help` | Kiểm tra theo đúng phiên bản CLI đang dùng. |
+
+Các project Angular mới mặc định dùng kiến trúc **standalone**, nghĩa là component có thể khai báo trực tiếp các dependency thay vì bắt buộc đặt trong `NgModule`. Không nên thêm `NgModule` chỉ vì hướng dẫn cũ dùng nó; hãy làm theo cấu trúc do workspace hiện tại tạo ra.
+
+### Quy trình tối thiểu
+
+```bash
+ng new cua-hang --routing --style=scss
+cd cua-hang
+ng serve --open
+```
+
+`--open` yêu cầu CLI mở địa chỉ máy chủ phát triển trong trình duyệt. Khi lệnh đang chạy, sửa một template hoặc stylesheet rồi lưu tệp: CLI sẽ biên dịch lại và trình duyệt thường được cập nhật tự động.
+
+## Chạy ứng dụng khi phát triển
+
+Trong thư mục workspace, chạy:
+
+```bash
+ng serve
+```
+
+Máy chủ phát triển thường lắng nghe ở `http://localhost:4200/`. Có thể đổi cổng hoặc mở trình duyệt tự động:
+
+```bash
+ng serve --port 4300 --open
+```
+
+`ng serve` dành cho vòng lặp phát triển cục bộ. Nó ưu tiên phản hồi nhanh và theo dõi thay đổi, không phải là artefact để đưa thẳng lên môi trường production. Để tạo artefact triển khai, dùng `ng build`.
+
+### Khi không chạy được
+
+1. Đảm bảo terminal đang ở thư mục có `angular.json`.
+2. Chạy `npm install` sau khi mới clone repository hoặc sau khi thay đổi lockfile.
+3. Kiểm tra phiên bản Node.js và CLI bằng `ng version`.
+4. Đọc lỗi đầu tiên có ý nghĩa trong terminal; lỗi sau đó thường chỉ là hệ quả.
+
+<Callout type="warn" title="Không mở workspace từ thư mục con tuỳ ý">
+  Các lệnh như <code>ng serve</code>, <code>ng build</code> và <code>ng test</code> cần tìm cấu hình workspace. Nếu CLI báo “This command is not available when running the Angular CLI outside a workspace”, hãy quay về thư mục gốc chứa <code>angular.json</code>.
+</Callout>
+
+## Sinh mã bằng generate
+
+`ng generate` tạo tệp theo generator của Angular và cập nhật những nơi cần thiết. Dạng viết tắt là `ng g`.
+
+Ví dụ tạo component cho danh sách sản phẩm:
+
+```bash
+ng generate component features/products/product-list
+# viết tắt: ng g c features/products/product-list
+```
+
+Ví dụ tạo service và interface:
+
+```bash
+ng generate service core/api/products --skip-tests
+ng generate interface models/product
+```
+
+Generator giữ tên tệp, selector, test và quy ước thư mục nhất quán. Kết quả cụ thể phụ thuộc các mặc định trong `angular.json` và các cờ đã truyền. Chẳng hạn `--skip-tests` không tạo tệp test cho lần sinh mã đó; chỉ dùng khi nhóm đã thống nhất cách bù lại phạm vi kiểm thử.
+
+### Đọc lệnh được sinh trước khi dùng
+
+Trước khi dùng generator ở một codebase lạ, kiểm tra các lựa chọn của nó:
+
+```bash
+ng generate component --help
+ng generate service --help
+```
+
+Một số lựa chọn hữu ích thường có là tên đường dẫn, `--skip-tests`, kiểu stylesheet và chiến lược change detection. Ví dụ, `--change-detection OnPush` yêu cầu component dùng chiến lược kiểm tra thay đổi `OnPush`, giúp giới hạn thời điểm Angular kiểm tra lại view. Đây không phải cờ nên áp dụng đại trà: hãy theo quy ước hiệu năng và cách quản lý state của project.
+
+## Build, kiểm thử và các lệnh vận hành
+
+### Build theo cấu hình
+
+```bash
+ng build
+ng build --configuration production
+```
+
+Lệnh build đọc target `build` của project, tối ưu hoá theo cấu hình được chọn và ghi artefact vào `outputPath` trong `angular.json` (thường nằm dưới `dist/`). `production` là tên cấu hình phổ biến, nhưng không phải workspace nào cũng đặt giống vậy. Hãy xem `angular.json` trước khi gọi một cấu hình tuỳ biến như `staging`.
+
+Trong development, có thể chọn cấu hình serve đã được khai báo:
+
+```bash
+ng serve --configuration development
+```
+
+Nếu workspace có nhiều project, chỉ rõ tên project để tránh chạy nhầm ứng dụng:
+
+```bash
+ng build cua-hang
+ng serve cua-hang
+```
+
+### Kiểm thử, lint và mở rộng
+
+```bash
+ng test
+ng lint
+ng add @angular/material
+ng update @angular/core @angular/cli
+```
+
+- `ng test` chạy target `test`. Các workspace mới của Angular hiện đại thường dùng Vitest, còn project cũ có thể vẫn dùng Karma hoặc cấu hình khác. Vì vậy, hãy xem `angular.json` và `package.json` thay vì giả định test runner.
+- `ng lint` chỉ hoạt động khi project có target `lint`, thường do một công cụ như Angular ESLint cung cấp. Angular CLI không tự bảo đảm mọi workspace đều có lệnh lint.
+- `ng add` cài một package có schematic rồi để package đó cấu hình tích hợp. Đọc các thay đổi được đề xuất trước khi chấp nhận.
+- `ng update` tìm và chạy migration do package cung cấp. Commit hoặc tạo nhánh trước khi cập nhật, sau đó chạy test và build.
+
+<Callout type="info" title="Update không chỉ là đổi version">
+  Migration có thể sửa mã nguồn và cấu hình để phù hợp với API mới. Hãy xem diff sau <code>ng update</code>, đặc biệt với ứng dụng có thư viện nội bộ hoặc cấu hình build riêng.
+</Callout>
+
+## Cấu hình workspace
+
+`angular.json` là nơi CLI biết workspace có những project nào và mỗi project có các target nào. Một target có thể có `options` dùng chung và các `configurations` cho từng môi trường.
+
+```text
+angular.json
+└── projects
+    └── cua-hang
+        └── architect (hoặc targets)
+            ├── build
+            │   ├── options
+            │   └── configurations.production
+            ├── serve
+            └── test
+```
+
+Tên trường có thể khác giữa các phiên bản và workspace, nhưng ý tưởng không đổi: lệnh `ng <target> <project> --configuration <tên>` chọn một tác vụ và một tập tuỳ chọn đã khai báo. Tránh sửa trực tiếp cấu hình nếu chưa hiểu target nào đang tham chiếu nó; một thay đổi ở `build` có thể ảnh hưởng cả CI/CD và môi trường production.
+
+Dùng `ng config` để đọc hoặc đặt một giá trị cấu hình của CLI khi cần:
+
+```bash
+ng config cli.analytics false
+```
+
+Lệnh trên tắt telemetry của Angular CLI cho workspace hoặc phạm vi cấu hình mà CLI đang áp dụng. Với cấu hình quan trọng của ứng dụng, ưu tiên review thay đổi trong tệp cấu hình cùng với pull request thay vì thay đổi ngầm trên máy cá nhân.
+
+## Quy trình làm việc đề xuất
+
+Một vòng lặp nhỏ, dễ kiểm soát cho một thay đổi giao diện có thể là:
+
+1. Chạy `ng serve` và mở ứng dụng.
+2. Tạo phần mã lặp lại bằng `ng generate`, hoặc tạo thủ công khi thay đổi quá nhỏ.
+3. Viết hoặc cập nhật test gần với thay đổi.
+4. Chạy `ng test` và kiểm tra lỗi trong trình duyệt.
+5. Chạy `ng build --configuration production` trước khi mở pull request hoặc để CI xác nhận.
+
+CLI giúp chuẩn hoá thao tác, nhưng không thay thế review mã, kiểm thử nghiệp vụ hay kiểm tra accessibility. Một build thành công chỉ chứng minh ứng dụng có thể được biên dịch theo cấu hình đó.
+
+## Những lưu ý quan trọng
+
+- **Không dùng `--force` như cách sửa lỗi mặc định.** Cờ này có thể bỏ qua kiểm tra an toàn của schematic hoặc ghi đè lựa chọn cần được xem xét. Hãy hiểu nguyên nhân xung đột trước.
+- **Không đưa `dist/` vào Git trừ khi quy trình triển khai yêu cầu.** Đây là artefact sinh ra từ build, không phải nguồn mã chính.
+- **Giữ lockfile trong commit.** `package-lock.json`, `pnpm-lock.yaml` hoặc lockfile tương ứng giúp CI cài đúng dependency đã được kiểm thử.
+- **Chạy lệnh từ đúng workspace.** Trong monorepo, luôn chỉ rõ project khi tên mặc định không rõ ràng.
+- **Kiểm tra tuỳ chọn theo phiên bản.** Tài liệu trên mạng có thể nói về Angular cũ, nhất là với `NgModule`, builder, Karma và cấu hình SSR.
+
+## Bước tiếp theo
+
+Sau khi tạo được workspace và quen với các lệnh `ng`, hãy tìm hiểu cách bố trí các tệp mà CLI đã tạo và dùng công cụ hỗ trợ khi phát triển.
+
+<Cards>
+  <Card title="Ứng dụng đầu tiên" href="/docs/bat-dau/ung-dung-dau-tien" description="Tạo và chạy một ứng dụng Angular tối giản." />
+  <Card title="Cấu trúc workspace" href="/docs/bat-dau/cau-truc-workspace" description="Hiểu các thư mục và tệp cấu hình do CLI quản lý." />
+  <Card title="Công cụ phát triển" href="/docs/bat-dau/cong-cu-phat-trien" description="Thiết lập DevTools, linting và formatting cho quy trình hằng ngày." />
+</Cards>

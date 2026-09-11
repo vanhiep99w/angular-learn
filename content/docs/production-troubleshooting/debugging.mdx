@@ -1,10 +1,696 @@
 ---
-title: Kỹ thuật debugging
-description: Quy trình khoanh vùng lỗi bằng DevTools, source map và logging.
+title: Kỹ thuật debugging Angular
+description: Quy trình tìm nguyên nhân lỗi Angular bằng tái hiện, DevTools, source map, Network và kiểm tra state/template.
 ---
 
-Trang này sẽ trình bày **Kỹ thuật debugging** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang này">
+  Debug không phải là thử ngẫu nhiên các thay đổi cho đến khi lỗi biến mất. Mục tiêu là biến một triệu chứng thành giả thuyết có thể bác bỏ, thu thập bằng chứng nhỏ nhất cần thiết, rồi thêm một kiểm thử hoặc guardrail để lỗi khó lặp lại.
 </Callout>
+
+## Mục lục
+
+- [Tư duy debug: từ triệu chứng đến bằng chứng](#tư-duy-debug-từ-triệu-chứng-đến-bằng-chứng)
+  - [Tách triệu chứng, cơ chế và nguyên nhân](#tách-triệu-chứng-cơ-chế-và-nguyên-nhân)
+  - [Lập giả thuyết có thể bác bỏ](#lập-giả-thuyết-có-thể-bác-bỏ)
+- [Luồng điều tra một lỗi Angular](#luồng-điều-tra-một-lỗi-angular)
+  - [Bộ dữ liệu tối thiểu cho một ca lỗi](#bộ-dữ-liệu-tối-thiểu-cho-một-ca-lỗi)
+  - [Thứ tự giảm không gian tìm kiếm](#thứ-tự-giảm-không-gian-tìm-kiếm)
+- [Tái hiện lỗi trước khi sửa](#tái-hiện-lỗi-trước-khi-sửa)
+  - [Viết kịch bản tái hiện](#viết-kịch-bản-tái-hiện)
+  - [Cô lập biến số](#cô-lập-biến-số)
+  - [Khi không tái hiện được ở máy cục bộ](#khi-không-tái-hiện-được-ở-máy-cục-bộ)
+- [Đọc lỗi JavaScript và stack trace](#đọc-lỗi-javascript-và-stack-trace)
+  - [Đọc stack từ trên xuống dưới](#đọc-stack-từ-trên-xuống-dưới)
+  - [Breakpoint, exception pause và debugger](#breakpoint-exception-pause-và-debugger)
+- [Source map và bundle production](#source-map-và-bundle-production)
+  - [Source map giải quyết vấn đề gì](#source-map-giải-quyết-vấn-đề-gì)
+  - [Chính sách source map an toàn](#chính-sách-source-map-an-toàn)
+  - [Stack trace không map được](#stack-trace-không-map-được)
+- [Browser DevTools: bắt đầu từ đúng panel](#browser-devtools-bắt-đầu-từ-đúng-panel)
+  - [Console và Sources](#console-và-sources)
+  - [Elements và Storage](#elements-và-storage)
+  - [Performance khi lỗi là chậm hoặc giật](#performance-khi-lỗi-là-chậm-hoặc-giật)
+- [Angular DevTools: component, injector và profiler](#angular-devtools-component-injector-và-profiler)
+- [Debug request bằng Network](#debug-request-bằng-network)
+  - [Đọc một request đầy đủ](#đọc-một-request-đầy-đủ)
+  - [Phân biệt lỗi mạng, HTTP và lỗi xử lý response](#phân-biệt-lỗi-mạng-http-và-lỗi-xử-lý-response)
+  - [Ví dụ điều tra màn hình tải mãi](#ví-dụ-điều-tra-màn-hình-tải-mãi)
+- [Debug state reactive](#debug-state-reactive)
+  - [Làm rõ ai sở hữu và ai ghi state](#làm-rõ-ai-sở-hữu-và-ai-ghi-state)
+  - [Signals, RxJS và trạng thái bất biến](#signals-rxjs-và-trạng-thái-bất-biến)
+- [Debug template và DOM](#debug-template-và-dom)
+  - [Kiểm tra điều kiện render và dữ liệu hiển thị](#kiểm-tra-điều-kiện-render-và-dữ-liệu-hiển-thị)
+  - [Lỗi form và event binding](#lỗi-form-và-event-binding)
+- [Debug change detection](#debug-change-detection)
+  - [Dấu hiệu cần nghi ngờ change detection](#dấu-hiệu-cần-nghi-ngờ-change-detection)
+  - [OnPush, reference và signal](#onpush-reference-và-signal)
+  - [Zone, bất đồng bộ và zoneless](#zone-bất-đồng-bộ-và-zoneless)
+- [Ví dụ xuyên suốt: đơn hàng không hiển thị](#ví-dụ-xuyên-suốt-đơn-hàng-không-hiển-thị)
+  - [Triệu chứng và giả thuyết](#triệu-chứng-và-giả-thuyết)
+  - [Thu thập bằng chứng](#thu-thập-bằng-chứng)
+  - [Sửa đúng lớp và thêm regression test](#sửa-đúng-lớp-và-thêm-regression-test)
+- [Logging có chủ đích, không làm lộ dữ liệu](#logging-có-chủ-đích-không-làm-lộ-dữ-liệu)
+- [Sai lầm phổ biến và trade-off](#sai-lầm-phổ-biến-và-trade-off)
+- [Checklist trước khi đóng một lỗi](#checklist-trước-khi-đóng-một-lỗi)
+- [Tóm tắt](#tóm-tắt)
+
+## Tư duy debug: từ triệu chứng đến bằng chứng
+
+Một lỗi Angular thường được nhìn thấy dưới dạng màn hình trắng, nút không phản hồi, dữ liệu cũ hoặc request thất bại. Đó là **triệu chứng**, chưa phải nguyên nhân. Cùng một triệu chứng “danh sách trống” có thể do API trả mảng rỗng, interceptor gửi sai token, template kiểm tra nhầm điều kiện, hoặc state bị ghi đè sau khi request hoàn tất.
+
+Debug tốt tạo một chuỗi lập luận có thể kiểm tra. Mỗi thao tác phải trả lời một câu hỏi cụ thể: request có rời browser không, response có đúng không, component có nhận dữ liệu không, hay template không render dữ liệu đã có.
+
+### Tách triệu chứng, cơ chế và nguyên nhân
+
+| Lớp | Ý nghĩa | Ví dụ trong Angular | Bằng chứng phù hợp |
+| --- | --- | --- | --- |
+| Triệu chứng | Điều người dùng hoặc monitoring quan sát được | Route `/orders` chỉ hiện spinner. | Ảnh chụp, URL, thời điểm, thao tác. |
+| Cơ chế gần | Điều trực tiếp tạo ra triệu chứng | `loading` không được đặt về `false` khi HTTP lỗi. | Breakpoint, log tạm thời, component state. |
+| Nguyên nhân gốc | Điều kiện hệ thống hoặc lỗi thiết kế khiến cơ chế xảy ra | Service chỉ xử lý nhánh thành công; endpoint mới trả `401` khi token hết hạn. | Request, code path, lịch sử release, test thiếu. |
+
+Sửa cơ chế gần có thể khôi phục giao diện, nhưng chưa chắc ngăn lỗi tái diễn. Ví dụ, ép spinner tắt sau 10 giây che đi lỗi xác thực và tạo trải nghiệm mơ hồ. Một bản sửa hoàn chỉnh phải làm rõ trạng thái lỗi, xử lý token hết hạn ở lớp phù hợp và có test cho nhánh đó.
+
+### Lập giả thuyết có thể bác bỏ
+
+Một giả thuyết hữu ích luôn có điều kiện, kết quả dự đoán và phép đo để bác bỏ. Thay vì nói “có thể change detection bị lỗi”, hãy viết:
+
+> Khi người dùng mở `/orders` với token hết hạn, `GET /api/orders` trả `401`. `OrdersComponent` chỉ cập nhật `loading` trong callback thành công, nên spinner giữ nguyên.
+
+Giả thuyết này dự đoán ba điều: Network có `401`, callback lỗi chạy, và `loading` không đổi. Chỉ cần một quan sát trái ngược là phải điều chỉnh giả thuyết.
+
+<Callout type="idea" title="Nguyên tắc một thay đổi, một quan sát">
+  Chỉ đổi một biến để kiểm tra một giả thuyết. Nếu vừa xóa cache, đổi endpoint, sửa interceptor và thêm `detectChanges()`, bạn không còn biết thay đổi nào tạo ra kết quả.
+</Callout>
+
+## Luồng điều tra một lỗi Angular
+
+Dùng cùng một flow cho lỗi do người dùng báo, alert production hoặc regression ở môi trường thử nghiệm. Flow không thay thế kinh nghiệm, nhưng ngăn đội ngũ nhảy thẳng vào mã nguồn khi chưa biết lỗi nằm ở browser, mạng, API hay UI.
+
+```text
+Triệu chứng / alert
+        │
+        ▼
+Ghi URL, thời điểm, release, browser và tác động
+        │
+        ▼
+Tái hiện tối thiểu ── không được ──► giữ bằng chứng, so sánh môi trường
+        │
+        ▼
+Network + Console: request hay exception nào xuất hiện?
+        │
+        ▼
+Source map + breakpoint: nhánh TypeScript nào đã chạy?
+        │
+        ▼
+Kiểm tra state ──► template/DOM ──► change detection khi state đúng nhưng UI sai
+        │
+        ▼
+Sửa tại lớp sở hữu nguyên nhân + regression test
+        │
+        ▼
+Xác minh lại bước tái hiện, release và telemetry
+```
+
+### Bộ dữ liệu tối thiểu cho một ca lỗi
+
+Trước khi mở IDE, lưu các dữ liệu ít thay đổi sau. Chúng giúp người khác tái hiện mà không phải suy diễn từ một ảnh chụp mơ hồ.
+
+- URL hoặc route, query parameter và thao tác cuối cùng trước khi lỗi xuất hiện.
+- Kết quả mong đợi và kết quả thực tế, kèm thời điểm có múi giờ.
+- Release ID, commit hoặc version bundle đang chạy; browser, hệ điều hành và loại thiết bị nếu liên quan.
+- Tài khoản/quyền hoặc dữ liệu mẫu đã được ẩn danh; không sao chép token, mật khẩu hay nội dung nhạy cảm.
+- Console error, request bị lỗi, correlation ID từ backend và ảnh chụp giao diện nếu có.
+- Phạm vi tác động: một người dùng, một tenant, một browser hay mọi người sau release.
+
+### Thứ tự giảm không gian tìm kiếm
+
+Bắt đầu từ ranh giới dễ quan sát nhất rồi đi vào trong:
+
+1. **Route và đầu vào:** URL đúng không, guard/resolver có chặn không, feature flag hoặc quyền có thay đổi không?
+2. **Network và exception:** request có được gửi, response có đúng schema, Console có exception không?
+3. **Mã TypeScript:** breakpoint xác nhận branch, giá trị và thời điểm callback chạy.
+4. **State và template:** state hiện tại là gì, binding nào đọc nó, DOM có bị CSS che hoặc điều kiện loại bỏ không?
+5. **Cơ chế cập nhật UI:** chỉ xét change detection khi đã chứng minh state đúng nhưng view vẫn không phản ánh nó.
+
+Thứ tự này là một heuristic, tức quy tắc ưu tiên chứ không phải luật tuyệt đối. Nếu Console đã chỉ thẳng một exception có source map, đi thẳng đến exception thường nhanh hơn. Nói ngắn gọn: ưu tiên bằng chứng rẻ nhất có khả năng loại trừ nhiều giả thuyết nhất.
+
+## Tái hiện lỗi trước khi sửa
+
+Một bản sửa không tái hiện được rất khó review và khó bảo vệ bằng test. Mục tiêu ban đầu không phải sao chép toàn bộ production mà là tìm **lần tái hiện nhỏ nhất** vẫn tạo đúng triệu chứng.
+
+### Viết kịch bản tái hiện
+
+Viết các bước theo ngôn ngữ của người dùng, không phải theo tên component nội bộ.
+
+```text
+Tiền điều kiện: tài khoản có quyền xem đơn hàng, token đã hết hạn.
+1. Mở cửa sổ ẩn danh tại /orders?status=pending.
+2. Đăng nhập bằng tài khoản thử nghiệm.
+3. Chờ token test hết hạn hoặc dùng môi trường test trả 401.
+4. Tải lại trang.
+
+Kỳ vọng: hiển thị thông báo phiên hết hạn và chuyển tới /login.
+Thực tế: spinner hiển thị vô hạn, không có thông báo.
+```
+
+Kịch bản tốt nêu rõ tiền điều kiện, dữ liệu, thao tác, kỳ vọng và thực tế. Khi lỗi phụ thuộc thời gian, ghi thời gian chờ hoặc cách điều khiển đồng hồ. Khi lỗi chỉ xảy ra trên mobile, ghi kích thước viewport và thao tác chạm.
+
+### Cô lập biến số
+
+Loại bớt biến số theo từng lượt để biết điều kiện nào thực sự cần thiết:
+
+- Dùng tài khoản khác để tách lỗi quyền khỏi lỗi route.
+- Mở cửa sổ ẩn danh hoặc xóa riêng site data để kiểm tra local storage, cookie và cache; đừng xóa dữ liệu trước khi đã lưu bằng chứng.
+- Thay response bằng fixture trong môi trường development để xác nhận template xử lý schema nào.
+- Dùng Network throttling để kiểm tra race condition, timeout hoặc hủy request.
+- Tắt từng extension của browser khi chỉ một máy bị lỗi.
+
+<Callout type="warn" title="Không dùng production như sandbox">
+  Không sửa local storage, gọi endpoint ghi dữ liệu, bật breakpoint dài hoặc thử payload lạ trên dữ liệu production nếu chưa hiểu tác động. Hãy dùng môi trường thử nghiệm và dữ liệu được phép khi cần cô lập lỗi.
+</Callout>
+
+### Khi không tái hiện được ở máy cục bộ
+
+“Không tái hiện được” là kết quả điều tra, không phải lý do để đóng lỗi. So sánh có hệ thống giữa lần lỗi và máy cục bộ:
+
+| Nhóm khác biệt | Câu hỏi kiểm tra |
+| --- | --- |
+| Artefact | Release ID, commit, source map và cấu hình runtime có giống nhau không? |
+| Người dùng | Quyền, tenant, ngôn ngữ, feature flag và dữ liệu đầu vào có giống không? |
+| Trình duyệt | Phiên bản browser, viewport, extension, cookie và storage có khác không? |
+| Mạng | Proxy, CDN, vùng, latency, offline/retry hoặc header có khác không? |
+| Thời gian | Lỗi có xảy ra sau token expiry, qua nửa đêm, cache TTL hoặc một deploy không? |
+
+Khi đó, bổ sung telemetry tối thiểu cho lần xảy ra sau: release ID, route, loại lỗi, mã HTTP và correlation ID đã được lọc. Không thêm log toàn bộ object người dùng chỉ vì lần đầu chưa đủ dữ liệu.
+
+## Đọc lỗi JavaScript và stack trace
+
+Stack trace là lịch sử các hàm dẫn đến exception. Nó không tự chứng minh dòng đầu tiên nhìn thấy là nguyên nhân. Một lỗi `Cannot read properties of undefined` ở template có thể được ném tại lúc render, trong khi dữ liệu sai được tạo ra từ response trước đó.
+
+### Đọc stack từ trên xuống dưới
+
+1. Đọc **message** trước. Nó cho biết thao tác thất bại, ví dụ đọc `name` trên `undefined`.
+2. Tìm **frame đầu tiên thuộc mã của ứng dụng** sau khi source map đã hoạt động. Bỏ qua framework/minified frame cho đến khi cần đi sâu hơn.
+3. Mở frame đó và kiểm tra biến tại thời điểm dừng. Xác định input nào là `undefined` và nó đến từ đâu.
+4. Đi ngược call stack để tìm nơi tạo giá trị, rồi kiểm tra điều kiện hoặc response đã phá vỡ bất biến dữ liệu.
+5. Đọc `Caused by` hoặc lỗi promise trước đó nếu có. Exception bị bắt rồi ném lại có thể làm mất bối cảnh ban đầu.
+
+Ví dụ sau gây lỗi vì dữ liệu chưa được tải ở lượt render đầu tiên:
+
+```ts
+export class CustomerComponent {
+  customer?: { profile: { displayName: string } };
+}
+```
+
+```html
+<!-- Lỗi nếu customer chưa có giá trị. -->
+<h2>{{ customer.profile.displayName }}</h2>
+```
+
+Không nên chỉ thêm optional chaining một cách máy móc. Trước hết quyết định contract UI: khi chưa có dữ liệu, template phải hiện skeleton, loading hay thông báo lỗi? Sau đó biểu diễn contract đó rõ ràng.
+
+```html
+@if (customer; as currentCustomer) {
+  <h2>{{ currentCustomer.profile.displayName }}</h2>
+} @else {
+  <p aria-busy="true">Đang tải khách hàng…</p>
+}
+```
+
+### Breakpoint, exception pause và debugger
+
+Trong Chrome/Edge DevTools, bật **Pause on uncaught exceptions** trước khi tái hiện. Browser sẽ dừng đúng lúc lỗi chưa bị framework hoặc handler báo lỗi làm mờ stack. Nếu ứng dụng có handler bắt lỗi, bật thêm **Pause on caught exceptions** trong một lượt ngắn; tùy chọn này hữu ích nhưng có thể dừng rất nhiều trong thư viện.
+
+Đặt breakpoint ở một nhánh nghi ngờ, không đặt ở mọi method. Khi dừng, xem:
+
+- **Scope:** tham số, field component và biến cục bộ có giá trị gì?
+- **Call stack:** event, promise hay callback HTTP nào đã dẫn tới đây?
+- **Watch:** biểu thức nhỏ như `this.loading` hoặc `response?.items?.length`.
+- **Async stack traces:** giữ ngữ cảnh trước/sau `await`, promise hoặc timer khi DevTools hỗ trợ.
+
+Từ khóa `debugger;` hữu ích trong development khi cần điểm dừng ổn định do event tạo ra. Nó nên bị xóa trước khi merge, vì browser sẽ dừng bất kỳ người dùng nào đang mở DevTools.
+
+```ts
+save(): void {
+  if (!this.form.valid) {
+    debugger; // Chỉ dùng tạm khi điều tra validation.
+    return;
+  }
+
+  this.orders.create(this.form.getRawValue()).subscribe();
+}
+```
+
+<Callout type="idea" title="Ưu tiên breakpoint có điều kiện">
+  Nếu lỗi chỉ xảy ra với `orderId === 'A-1024'`, dùng conditional breakpoint thay vì dừng ở mọi lần render. Điều này giảm nhiễu và tránh phải thay đổi mã chỉ để in log.
+</Callout>
+
+## Source map và bundle production
+
+Production bundle tối ưu hóa và gộp nhiều file. Tên như `main-3F2A.js:1:38492` không đủ để sửa lỗi. **Source map** là tệp ánh xạ vị trí đã tối ưu hóa về TypeScript, template và source gốc, để DevTools hoặc hệ thống error reporting hiển thị stack có ý nghĩa.
+
+### Source map giải quyết vấn đề gì
+
+Khi source map khớp tuyệt đối với bundle, một frame production như sau:
+
+```text
+main-3F2A.js:1:38492
+```
+
+có thể được giải mã thành:
+
+```text
+src/app/orders/orders.component.ts:87:19
+OrdersComponent.loadOrders
+```
+
+“Khớp tuyệt đối” rất quan trọng. Source map từ commit khác, hoặc map cho bundle trước khi CDN thay file, có thể đưa bạn đến dòng hợp lệ nhưng sai version. Luôn đối chiếu release ID, tên/hash artefact và thời điểm deploy trước khi tin vào kết quả map.
+
+### Chính sách source map an toàn
+
+Source map giúp điều tra nhanh nhưng có trade-off bảo mật. Map có thể để lộ cấu trúc source, tên biến và đôi khi cả source content tùy cấu hình build. Chính sách thường dùng là tạo map cho release, rồi tải map lên error tracker có quyền truy cập thay vì phát công khai cho mọi browser.
+
+Quy trình cụ thể phụ thuộc Angular CLI, builder và nhà cung cấp monitoring, nhưng nguyên tắc không đổi:
+
+1. Build artefact với một release ID hoặc commit rõ ràng.
+2. Lưu bundle và source map của **chính artefact đó** ở kho an toàn hoặc upload vào error tracker.
+3. Cấu hình client và error tracker cùng release ID để quá trình giải mã chọn đúng map.
+4. Chỉ công khai map trên production khi đội đã chấp nhận rủi ro và hiểu dữ liệu map chứa gì.
+5. Kiểm tra một lỗi thử ở staging sau mỗi thay đổi pipeline source map.
+
+<Callout type="warn" title="Ẩn comment không đồng nghĩa bảo mật hoàn toàn">
+  Một số cấu hình tạo source map nhưng không gắn URL map vào bundle phát cho browser. Điều đó giảm khả năng tải map trực tiếp, nhưng map vẫn phải được bảo vệ ở nơi lưu trữ và đồng bộ chính xác với artefact. Đừng commit map, token upload hay source content nhạy cảm vào nơi công khai.
+</Callout>
+
+### Stack trace không map được
+
+Kiểm tra lần lượt các điểm sau khi error tracker hoặc DevTools vẫn hiện mã minified:
+
+- Release ID trong event có tồn tại và trùng release upload source map không.
+- Tên file, URL public path và content hash trong event có trùng artefact build không.
+- Pipeline có upload map trước khi xóa thư mục build không.
+- CDN/service worker có đang phục vụ JavaScript cũ trong khi event gắn version mới không.
+- Source map có bị proxy chặn, sai MIME type hoặc không thể đọc bởi công cụ nội bộ không.
+
+Không bật source map public như một hotfix mặc định. Nếu đang điều tra incident, có thể dùng artefact và map đã lưu ở CI để symbolicate nội bộ. Đây là lý do artefact bất biến và lưu trữ build output quan trọng trong [triển khai](/docs/testing-performance-deploy/deployment).
+
+## Browser DevTools: bắt đầu từ đúng panel
+
+Browser DevTools trả lời câu hỏi về browser thật. Chọn panel theo câu hỏi thay vì mở tất cả cùng lúc; ít panel hơn giúp ghi nhận bằng chứng chính xác hơn.
+
+### Console và Sources
+
+**Console** phù hợp để đọc exception, warning, promise rejection và log có ngữ cảnh. Bảo tồn log khi điều hướng nếu lỗi xảy ra trong redirect. Bật “Preserve log” một cách có chủ đích và tắt lại sau điều tra để tránh nhầm sự kiện cũ với lần tái hiện mới.
+
+**Sources** phù hợp để đặt breakpoint, xem source-mapped TypeScript, theo call stack và theo dõi biến. Dùng pretty-print chỉ như phương án cuối khi source map chưa có; mã đã minify dễ gây hiểu sai flow.
+
+Một `console.log` tạm có thể có ích, nhưng nên log cấu trúc nhỏ và nhãn cụ thể:
+
+```ts
+console.debug('[Orders] load result', {
+  count: response.items.length,
+  requestId: response.requestId,
+});
+```
+
+Tránh `console.log(response)` rồi đọc object sau đó. DevTools có thể hiển thị object theo reference hiện tại, khiến giá trị bạn thấy khác với thời điểm log. Nếu cần snapshot, log field nguyên thủy hoặc clone dữ liệu không nhạy cảm có chủ đích.
+
+### Elements và Storage
+
+Khi state đã đúng nhưng giao diện không giống kỳ vọng, mở **Elements**:
+
+- Phần tử có thật trong DOM không, hay điều kiện `@if` đã loại nó?
+- CSS nào đang đặt `display: none`, `visibility: hidden`, `opacity: 0`, kích thước `0` hoặc bị phần tử khác phủ lên?
+- Thuộc tính `disabled`, `aria-*`, class và text có đúng binding không?
+- Shadow DOM, breakpoint responsive hoặc style từ component khác có đổi kết quả không?
+
+Panel **Application/Storage** giúp kiểm tra cookie, local storage, session storage, IndexedDB, Cache Storage và service worker. Chỉ xem hoặc xóa dữ liệu của môi trường được phép. Cache cũ hoặc service worker cũ có thể làm HTML mới tải JavaScript cũ, một nguyên nhân thường gặp sau deploy.
+
+### Performance khi lỗi là chậm hoặc giật
+
+Không dùng Console để đoán nguyên nhân lag. Ghi một trace ngắn trong panel **Performance** lúc thực hiện thao tác bị chậm. Tìm long task, JavaScript tự chạy lâu, layout/recalculate style lặp lại và request chặn luồng.
+
+Angular DevTools profiler có thể bổ sung bức tranh component, nhưng browser Performance mới thấy cả parse script, layout, paint và third-party script. Đọc thêm [profiling hiệu năng](/docs/testing-performance-deploy/profiling-performance) khi triệu chứng là hiệu năng chứ không phải correctness.
+
+## Angular DevTools: component, injector và profiler
+
+Angular DevTools là extension hỗ trợ quan sát cây component Angular trên bản ứng dụng có thể debug. Extension thường cung cấp tab **Components** để xem component, directive, input, output, state/injector theo phiên bản Angular, và tab **Profiler** để xem lượt change detection.
+
+Cách dùng cho một lỗi UI:
+
+1. Chọn phần tử đang sai trong Elements, rồi chuyển sang Angular DevTools để tìm component sở hữu nó.
+2. So sánh `@Input`, field hoặc signal được hiển thị với dữ liệu mà bạn kỳ vọng từ Network.
+3. Kiểm tra component cha truyền giá trị gì và component con có phát output/event đúng không.
+4. Chỉ bật profiler khi cần biết lượt kiểm tra nào tốn thời gian hoặc component nào bị kiểm tra bất ngờ.
+
+<Callout type="info" title="DevTools là kính quan sát, không phải hợp đồng ứng dụng">
+  Tên panel và dữ liệu hiển thị thay đổi theo phiên bản Angular, build mode và extension. Một số ứng dụng production, iframe hoặc môi trường có Content Security Policy chặt có thể không cho extension quan sát đầy đủ. Khi đó, quay về source map, breakpoint, Network và telemetry thay vì suy luận rằng state không tồn tại.
+</Callout>
+
+Profiler đặc biệt hữu ích khi một tương tác nhỏ kích hoạt quá nhiều component hoặc khi một component có template nặng bị kiểm tra lặp lại. Profiler không tự nói “cần dùng `OnPush`”. Trước khi tối ưu, hãy chứng minh lượt kiểm tra đó nằm trên đường tương tác người dùng và tạo ra chi phí đáng kể.
+
+## Debug request bằng Network
+
+Network là nơi phân biệt nhanh “Angular không gọi API” với “API trả lỗi” và “Angular xử lý response sai”. Tái hiện trong lúc Network đang mở, lọc Fetch/XHR, bật Preserve log nếu có redirect và chọn request gắn với thao tác cụ thể.
+
+### Đọc một request đầy đủ
+
+Đừng dừng ở status code. Với request nghi ngờ, kiểm tra:
+
+| Phần | Câu hỏi cần trả lời |
+| --- | --- |
+| Initiator | Request được tạo từ click, router resolver, service, interceptor hay script nào? |
+| URL và method | Base URL, path parameter, query, method có đúng môi trường và ý định không? |
+| Request headers/body | Token, content type, locale, idempotency key và payload có đúng contract, đã che dữ liệu nhạy cảm chưa? |
+| Status và response | Status, error body và schema có khớp điều UI/service mong đợi không? |
+| Timing | Chậm ở DNS, kết nối, chờ server hay tải nội dung? Có request bị hủy không? |
+| Cache | Response đến từ memory/disk cache, service worker hay mạng? |
+
+Có thể dùng “Copy as fetch” để tạo request tái hiện trong môi trường được phép. Request sao chép có thể chứa token hoặc cookie; không dán nó vào ticket công khai, commit hoặc chat không an toàn.
+
+### Phân biệt lỗi mạng, HTTP và lỗi xử lý response
+
+| Dấu hiệu | Khả năng cao | Bước tiếp theo |
+| --- | --- | --- |
+| Không có request | Event không chạy, form invalid, guard/điều kiện chặn, subscription chưa được tạo. | Breakpoint ở handler và service. |
+| `status 0` / failed | Offline, DNS, CORS, certificate, trình duyệt chặn hoặc request bị hủy. | Đọc Console, thông tin failure và cấu hình mạng; không coi ngay là lỗi backend. |
+| `401` / `403` | Token, phiên, quyền hoặc CSRF không hợp lệ. | Kiểm tra luồng auth và quyền; không log token. |
+| `404` | Sai URL, base href, rewrite route hoặc resource không tồn tại. | Đối chiếu URL thực với routing/API contract. |
+| `4xx` validation | Payload hoặc rule nghiệp vụ không hợp lệ. | Hiển thị lỗi có thể hành động và kiểm tra serializer/form. |
+| `5xx` | Backend hoặc dependency phía server thất bại. | Lấy correlation ID, kiểm tra log backend và hành vi UI khi lỗi. |
+| `2xx` nhưng UI sai | Schema khác kỳ vọng, mapping sai, cache stale hoặc state/template lỗi. | Breakpoint sau response và kiểm tra state. |
+
+### Ví dụ điều tra màn hình tải mãi
+
+Giả sử người dùng bấm “Lưu” và spinner quay vô hạn. Network cho thấy `POST /api/orders` trả `422` cùng nội dung validation. Điều đó bác bỏ giả thuyết “server chậm” và chuyển trọng tâm sang nhánh lỗi của client.
+
+```ts
+save(): void {
+  this.saving.set(true);
+
+  this.orders.create(this.form.getRawValue()).subscribe({
+    next: () => {
+      this.saving.set(false);
+      this.router.navigateByUrl('/orders');
+    },
+    error: (error) => {
+      this.saving.set(false);
+      this.formError.set(toUserMessage(error));
+    },
+  });
+}
+```
+
+Điểm quan trọng không phải luôn viết `saving.set(false)` hai lần. Với logic phức tạp, có thể dùng `finalize` trong RxJS để dọn trạng thái cho cả thành công và thất bại. Điều quan trọng là trạng thái loading có đường thoát rõ ràng trong mọi nhánh, kể cả request bị hủy.
+
+## Debug state reactive
+
+State sai thường có hai dạng: giá trị chưa từng được ghi, hoặc đã được ghi đúng rồi bị ghi đè bởi một luồng khác. “Tôi thấy API trả dữ liệu” chỉ chứng minh ranh giới mạng; chưa chứng minh component đang đọc đúng state.
+
+### Làm rõ ai sở hữu và ai ghi state
+
+Vẽ một dòng dữ liệu nhỏ trước khi thêm log:
+
+```text
+HTTP response
+     │
+     ▼
+OrdersService map DTO
+     │
+     ▼
+OrdersStore ghi orders / loading / error
+     │
+     ▼
+OrdersComponent đọc state
+     │
+     ▼
+Template render danh sách hoặc empty state
+```
+
+Mỗi state nên có một chủ sở hữu rõ ràng. Nếu service, component và interceptor cùng có thể ghi `loading`, việc debug trở thành cuộc đua thời gian. Tách state theo ý nghĩa (`loading`, `data`, `error`) và ghi ở một boundary rõ ràng giúp call stack có giá trị hơn.
+
+Một snapshot debug tốt ghi thông tin nhỏ, không nhạy cảm:
+
+```ts
+effect(() => {
+  console.debug('[OrdersStore]', {
+    loading: this.loading(),
+    count: this.orders().length,
+    errorKind: this.error()?.kind ?? null,
+  });
+});
+```
+
+Chỉ dùng `effect` như công cụ quan sát tạm hoặc telemetry được thiết kế. Đừng dùng effect để “ép” state này sửa state khác, vì nó tạo dependency ngầm và khiến thứ tự cập nhật khó dự đoán.
+
+### Signals, RxJS và trạng thái bất biến
+
+Với signal, Angular biết template nào đã đọc signal. Khi cập nhật object hoặc array, tạo reference mới để thay đổi được biểu đạt rõ ràng:
+
+```ts
+this.orders.update((orders) =>
+  orders.map((order) =>
+    order.id === updated.id ? { ...order, ...updated } : order,
+  ),
+);
+```
+
+Mutation ngầm dễ làm bạn hiểu sai lịch sử state:
+
+```ts
+// Tránh: object giữ cùng reference và nơi khác có thể cùng nhìn thấy mutation.
+this.orders()[0].status = 'paid';
+```
+
+Với RxJS, kiểm tra thêm vòng đời subscription và toán tử biến đổi. `switchMap` hủy request cũ khi input mới đến; đó có thể là hành vi đúng, không phải mất dữ liệu. `shareReplay` có thể phát lại giá trị cũ; đó có thể là cache, không phải API trả sai. Viết kỳ vọng thời gian của stream trước khi sửa toán tử.
+
+<Callout type="warn" title="Đừng log mọi emission ở production">
+  Stream phát nhiều lần có thể tạo lượng log lớn và chứa payload nhạy cảm. Hãy log event đã chuẩn hóa với release, loại chuyển trạng thái và request ID; dùng sampling hoặc chỉ bật chẩn đoán cho môi trường được kiểm soát.
+</Callout>
+
+## Debug template và DOM
+
+Template là nơi Angular biến state thành DOM. Khi dữ liệu trong component đúng nhưng UI sai, cần tách ba khả năng: binding không đọc giá trị đó, điều kiện không render phần tử, hoặc phần tử đã render nhưng CSS/DOM làm nó vô hình hay không thể tương tác.
+
+### Kiểm tra điều kiện render và dữ liệu hiển thị
+
+Tạm thời hiển thị dữ liệu vô hại gần vùng đang lỗi, hoặc dừng ở breakpoint ngay trước khi template đọc state. Ví dụ:
+
+```html
+@if (orders().length > 0) {
+  <ul>
+    @for (order of orders(); track order.id) {
+      <li>{{ order.number }} — {{ order.status }}</li>
+    }
+  </ul>
+} @else if (loading()) {
+  <p aria-busy="true">Đang tải đơn hàng…</p>
+} @else {
+  <p>Chưa có đơn hàng.</p>
+}
+```
+
+Nếu `orders()` có phần tử nhưng nhánh empty vẫn render, kiểm tra xem template có đọc cùng instance/state với nơi bạn vừa quan sát không. Nếu `<li>` tồn tại trong Elements nhưng không nhìn thấy, lỗi nằm ở CSS/layout thay vì change detection.
+
+Dùng `track order.id` với danh sách động. Một khóa không ổn định hoặc trùng lặp có thể làm DOM item được tái sử dụng theo cách gây nhầm lẫn, đặc biệt khi item có state con như input đang nhập.
+
+### Lỗi form và event binding
+
+Khi click không gọi request, kiểm tra theo thứ tự:
+
+1. Phần tử có bị `disabled`, bị overlay che, hoặc CSS `pointer-events: none` không?
+2. Event handler có chạy không? Đặt breakpoint tại đầu `save()`.
+3. Form có invalid khiến handler return sớm không? Quan sát `form.invalid` và từng control lỗi gì.
+4. Button có nằm trong `<form>` và có hành vi submit/refresh ngoài ý muốn không?
+5. Event có bị component cha xử lý, `stopPropagation()` hoặc directive thay đổi không?
+
+```html
+<form [formGroup]="form" (ngSubmit)="save()">
+  <input formControlName="quantity" type="number" />
+  @if (form.controls.quantity.invalid && form.controls.quantity.touched) {
+    <p role="alert">Số lượng phải lớn hơn 0.</p>
+  }
+  <button type="submit" [disabled]="form.invalid || saving()">Lưu</button>
+</form>
+```
+
+Thông báo validation cần nói rõ lý do bị chặn. Một button vô hiệu hóa không giải thích được nguyên nhân vừa là vấn đề UX, vừa làm debug của người dùng và đội hỗ trợ khó hơn.
+
+## Debug change detection
+
+Change detection là quá trình Angular đồng bộ giá trị template với DOM. Không phải mọi UI cũ đều là lỗi change detection. Chỉ điều tra lớp này sau khi bạn đã chứng minh state đúng, binding đúng và DOM/CSS không phải nguyên nhân.
+
+### Dấu hiệu cần nghi ngờ change detection
+
+Nghi ngờ cơ chế cập nhật UI khi đồng thời đúng cả ba điều sau:
+
+- Breakpoint hoặc Angular DevTools cho thấy state trong component đã có giá trị mới.
+- Template đúng là đang đọc state hoặc input đó.
+- DOM chỉ cập nhật sau một tương tác khác, refresh thủ công hoặc một event không liên quan.
+
+Các dấu hiệu này vẫn chưa cho phép gọi `detectChanges()` ngay. Trước hết kiểm tra có mutation object, callback chạy ngoài boundary Angular, hoặc component con nhận input reference không đổi hay không.
+
+### OnPush, reference và signal
+
+`ChangeDetectionStrategy.OnPush` giảm lượt kiểm tra không cần thiết, nhưng yêu cầu đường cập nhật rõ ràng hơn. Component OnPush sẽ được đánh dấu kiểm tra khi nhận input reference mới, xử lý event trong view, hoặc khi một signal đã được template của nó đọc thay đổi, cùng các cơ chế Angular liên quan.
+
+Ví dụ component cha mutate object thay vì tạo object mới:
+
+```ts
+// Dễ tạo UI cũ ở component con OnPush vì reference giữ nguyên.
+this.selectedOrder.status = 'paid';
+
+// Biểu đạt thay đổi rõ ràng: component con nhận reference mới.
+this.selectedOrder = { ...this.selectedOrder, status: 'paid' };
+```
+
+Không nên bỏ `OnPush` chỉ để che một mutation. Giữ cập nhật bất biến giúp dữ liệu dễ theo dõi, dễ memoize và ít side effect hơn. Trade-off là có thêm object ngắn hạn; với đa số UI nghiệp vụ, tính rõ ràng này đáng giá hơn tối ưu sớm.
+
+Signal không thay thế quy tắc dữ liệu bất biến bên trong object. Nếu template đọc `order()` rồi code mutate thuộc tính của object đó ngoài luồng state, bạn vẫn có lịch sử thay đổi khó suy luận. Hãy dùng `.set()` hoặc `.update()` với giá trị mới.
+
+### Zone, bất đồng bộ và zoneless
+
+Nhiều ứng dụng Angular truyền thống dùng Zone.js để Angular biết các tác vụ bất đồng bộ như event, timer và promise đã hoàn tất. Ứng dụng mới có thể chọn zoneless hoặc có thư viện chạy callback ngoài Angular. Điều này làm “callback đã chạy nhưng UI chưa cập nhật” trở thành giả thuyết cần kiểm chứng, không phải quy tắc chung.
+
+Trong zoneless, ưu tiên các primitive Angular được thiết kế để thông báo thay đổi, như signal, `AsyncPipe` hoặc API framework phù hợp với phiên bản đang dùng. Trong mã tích hợp thư viện bên thứ ba, đưa thay đổi state về boundary Angular rõ ràng thay vì rải lệnh ép render.
+
+`ChangeDetectorRef.markForCheck()` có thể phù hợp khi bạn hiểu tại sao component cần được đánh dấu. `detectChanges()` chạy kiểm tra đồng bộ ngay và dễ che dấu kiến trúc state sai hoặc tạo lỗi thời điểm cập nhật. Hãy coi hai API này là công cụ chính xác, không phải nút “làm mới UI”.
+
+<Callout type="warn" title="Cẩn thận với ExpressionChangedAfterItHasBeenCheckedError">
+  Lỗi này báo rằng binding đổi trong lúc Angular đang kiểm tra cùng một lượt render. Đừng chữa bằng `setTimeout()` mặc định. Hãy tìm nơi state bị đổi quá muộn trong lifecycle, rồi chuyển thay đổi sang thời điểm hoặc mô hình dữ liệu phù hợp.
+</Callout>
+
+## Ví dụ xuyên suốt: đơn hàng không hiển thị
+
+Phần này đi hết flow bằng một lỗi nhỏ: API trả đơn hàng thành công nhưng trang vẫn hiển thị “Chưa có đơn hàng”. Ví dụ cố ý đơn giản để thấy ranh giới giữa response, mapping, state và template.
+
+### Triệu chứng và giả thuyết
+
+Người dùng mở `/orders`. Network hiển thị `GET /api/orders` trả `200` với một item. UI lại hiện empty state. Giả thuyết ban đầu là service đang đọc sai field: backend trả `data`, nhưng client map từ `items`.
+
+```json
+{
+  "data": [{ "id": "o-100", "number": "DH-100", "status": "pending" }]
+}
+```
+
+Mã lỗi:
+
+```ts
+interface OrdersResponse {
+  items: Order[];
+}
+
+load(): void {
+  this.http.get<OrdersResponse>('/api/orders').subscribe((response) => {
+    this.orders.set(response.items ?? []);
+  });
+}
+```
+
+Sử dụng `?? []` làm UI ổn định, nhưng ở đây nó che contract mismatch: `response.items` là `undefined`, nên UI trông giống trường hợp không có đơn hàng thật.
+
+### Thu thập bằng chứng
+
+Thực hiện lần lượt:
+
+1. Trong Network, xác nhận status `200` và body thực sự có `data` chứa một item.
+2. Đặt breakpoint trong callback `subscribe`; `response.items` là `undefined` còn `response.data` là mảng.
+3. Quan sát `this.orders()` sau `.set`; giá trị là `[]`.
+4. Template đọc đúng `orders()` và Elements không có `<li>`, nên không cần điều tra CSS hoặc change detection.
+
+Bằng chứng này xác nhận mapping sai và bác bỏ các giả thuyết API rỗng, template sai hoặc UI chưa refresh.
+
+### Sửa đúng lớp và thêm regression test
+
+Sửa ở ranh giới API bằng DTO rõ ràng. Không để component phải biết mọi biến thể response của backend.
+
+```ts
+interface OrdersDtoResponse {
+  data: Array<{ id: string; number: string; status: string }>;
+}
+
+interface Order {
+  id: string;
+  number: string;
+  status: 'pending' | 'paid' | 'cancelled';
+}
+
+function toOrders(response: OrdersDtoResponse): Order[] {
+  return response.data.map((item) => ({
+    id: item.id,
+    number: item.number,
+    status: item.status as Order['status'],
+  }));
+}
+```
+
+Sau đó, service gọi `toOrders` và component chỉ nhận `Order[]`. Thêm unit test cho mapper hoặc service với fixture response thật đã ẩn danh, rồi thêm component test xác nhận một `Order` được render thành số đơn hàng. Nếu backend đổi contract, test mapper sẽ chỉ ra ranh giới bị phá vỡ sớm hơn UI production.
+
+<Callout type="idea" title="Đừng làm trống dữ liệu để che lỗi contract">
+  Giá trị fallback như `[]` hay `null` phù hợp cho dữ liệu thực sự tùy chọn. Với response bắt buộc phải có field, hãy validate hoặc báo lỗi có ngữ cảnh. Nếu không, contract mismatch sẽ giả dạng empty state hợp lệ.
+</Callout>
+
+## Logging có chủ đích, không làm lộ dữ liệu
+
+Logging tốt làm một sự cố có thể nối giữa frontend và backend. Một event client thường chỉ cần: release ID, route, loại hành động, loại lỗi, mã HTTP, thời lượng và correlation ID. Các trường này đủ để nhóm sự cố và tìm log backend mà không gửi nội dung form.
+
+```ts
+type ClientDiagnostic = {
+  release: string;
+  route: string;
+  operation: 'load-orders' | 'create-order';
+  outcome: 'success' | 'http-error' | 'unexpected-error';
+  status?: number;
+  requestId?: string;
+  durationMs?: number;
+};
+```
+
+Quy ước trước danh sách dữ liệu cấm: access token, cookie, `Authorization`, mật khẩu, số thẻ, địa chỉ đầy đủ, body form và response nguyên vẹn. Một request ID do backend phát hành thường hữu ích hơn toàn bộ body response.
+
+Trong development, xóa log điều tra tạm thời trước khi merge hoặc đặt chúng sau cờ debug được kiểm soát. Trong production, gửi event qua hệ thống monitoring có chính sách lọc, retention, quyền truy cập và sampling. Chi tiết thiết kế tín hiệu nằm ở [Monitoring](/docs/production-troubleshooting/monitoring).
+
+## Sai lầm phổ biến và trade-off
+
+| Cách làm | Vì sao không đủ | Thay vào đó |
+| --- | --- | --- |
+| Đoán lỗi từ stack minified | Không biết source/release thật. | Đối chiếu release, dùng source map khớp artefact. |
+| Thêm `console.log` ở mọi nơi | Nhiễu, chậm và có nguy cơ lộ dữ liệu. | Log cấu trúc nhỏ, có nhãn, chỉ tại boundary nghi ngờ. |
+| Gọi `detectChanges()` khi UI sai | Có thể che mutation hoặc ownership state sai. | Chứng minh state, template, DOM trước; dùng API change detection có chủ đích. |
+| Xóa toàn bộ cache ngay | Làm mất bằng chứng và không biết cache có phải nguyên nhân. | Ghi lại phiên bản/cache trước, rồi cô lập từng lớp cache. |
+| Chỉ kiểm tra status `200` | `200` vẫn có schema sai, dữ liệu cũ hoặc UI mapping sai. | Đọc response, mapper, state và template. |
+| Sửa nhiều file trong hotfix | Không biết thay đổi nào có tác dụng, tăng rủi ro regression. | Giảm tác động trước, sửa nhỏ theo giả thuyết đã xác nhận. |
+| Giữ source map public mặc định | Điều tra tiện hơn nhưng có thể phơi bày source. | Lưu/upload map riêng tư theo release khi yêu cầu bảo mật cao. |
+
+Không có lựa chọn nào miễn phí. Source map riêng tư tăng độ phức tạp pipeline; state bất biến tạo thêm allocation; telemetry có chi phí vận hành. Đổi lại, chúng làm kết quả điều tra đáng tin hơn. Hãy chọn theo tác động, dữ liệu cần bảo vệ và khả năng vận hành của đội.
+
+## Checklist trước khi đóng một lỗi
+
+- [ ] Có bước tái hiện hoặc giải thích rõ điều kiện không thể tái hiện.
+- [ ] Triệu chứng, phạm vi ảnh hưởng, release và mốc thời gian đã được ghi lại.
+- [ ] Có bằng chứng cho nguyên nhân đã chọn và bằng chứng bác bỏ các giả thuyết quan trọng khác.
+- [ ] Đã kiểm tra ranh giới phù hợp: Network, exception/source map, state, template/DOM hoặc change detection.
+- [ ] Bản sửa nằm ở lớp sở hữu nguyên nhân, không chỉ che triệu chứng.
+- [ ] Có regression test ở lớp nhỏ nhất đủ chứng minh lỗi: mapper/service, component hoặc E2E khi cần.
+- [ ] Đã kiểm tra dữ liệu nhạy cảm không xuất hiện trong log, ticket hoặc ảnh chụp.
+- [ ] Đã xác minh lại chính kịch bản tái hiện sau deploy và theo dõi release mới nếu lỗi từng ở production.
+- [ ] Có guardrail mới: test, alert, dashboard, runbook, validation hoặc checklist.
+
+<Callout type="info" title="Khi nào nên dừng điều tra">
+  Nếu chưa đủ quyền truy cập hoặc dữ liệu để xác nhận nguyên nhân, hãy ghi rõ giả thuyết, bằng chứng hiện có, tác động và phép đo còn thiếu. Nếu người dùng đang bị chặn, ưu tiên rollback hoặc feature flag an toàn hơn một hotfix dựa trên suy đoán.
+</Callout>
+
+## Tóm tắt
+
+Một phiên debug Angular đáng tin cậy đi theo thứ tự: tái hiện triệu chứng, chọn giả thuyết có thể bác bỏ, kiểm tra Network và exception, dùng source map để vào mã nguồn, rồi lần theo state đến template và DOM. Change detection là lớp cần kiểm tra có điều kiện, không phải phản xạ đầu tiên.
+
+Kết thúc điều tra không phải khi “trang trông có vẻ đúng”, mà khi bước tái hiện cũ đã qua, nguyên nhân có bằng chứng, regression test bảo vệ hành vi và release mới được quan sát an toàn.
+
+<Cards>
+  <Card title="Thiết lập monitoring" href="/docs/production-troubleshooting/monitoring" description="Thiết kế tín hiệu, release ID và alert có thể hành động." />
+  <Card title="Lỗi Angular thường gặp" href="/docs/production-troubleshooting/loi-thuong-gap" description="Tra cứu lỗi DI, template, router, build và cấu hình." />
+  <Card title="Kiểm thử component" href="/docs/testing-performance-deploy/component-testing" description="Thêm regression test gần với hành vi UI bị lỗi." />
+  <Card title="Profiling hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="Phân tích long task, render và đường tương tác chậm." />
+</Cards>

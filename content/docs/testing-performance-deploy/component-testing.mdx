@@ -1,10 +1,390 @@
 ---
 title: Component testing
-description: Kiểm thử component, template và tương tác người dùng.
+description: Kiểm thử component Angular từ TestBed và fixture đến input, output, DOM, tương tác và khả năng truy cập.
 ---
 
-Trang này sẽ trình bày **Component testing** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang">
+  Component test kiểm tra contract mà người dùng và component con nhìn thấy: dữ liệu vào, UI được render, sự kiện đi ra và hành vi sau tương tác. Đây không phải là bài kiểm thử cho toàn bộ ứng dụng hoặc backend.
 </Callout>
+
+## Mục lục
+
+- [Component test kiểm tra gì?](#component-test-kiểm-tra-gì)
+  - [Ranh giới đúng của bài test](#ranh-giới-đúng-của-bài-test)
+  - [Chọn mức kiểm thử](#chọn-mức-kiểm-thử)
+- [TestBed và ComponentFixture hoạt động thế nào?](#testbed-và-componentfixture-hoạt-động-thế-nào)
+  - [Chu trình arrange-act-assert](#chu-trình-arrange-act-assert)
+  - [Thay đổi trạng thái và phát hiện thay đổi](#thay-đổi-trạng-thái-và-phát-hiện-thay-đổi)
+- [Ví dụ nền tảng: một component có input và output](#ví-dụ-nền-tảng-một-component-có-input-và-output)
+- [Kiểm thử input và output](#kiểm-thử-input-và-output)
+  - [Đặt input qua component reference](#đặt-input-qua-component-reference)
+  - [Quan sát output thay vì gọi hàm nội bộ](#quan-sát-output-thay-vì-gọi-hàm-nội-bộ)
+- [Đọc DOM và viết assertion có ý nghĩa](#đọc-dom-và-viết-assertion-có-ý-nghĩa)
+  - [Chọn phần tử theo ngữ nghĩa](#chọn-phần-tử-theo-ngữ-nghĩa)
+  - [Trạng thái bất đồng bộ](#trạng-thái-bất-đồng-bộ)
+- [Tương tác người dùng và Component Harness](#tương-tác-người-dùng-và-component-harness)
+  - [Phát sự kiện DOM](#phát-sự-kiện-dom)
+  - [Harness cho component phức tạp](#harness-cho-component-phức-tạp)
+- [Accessibility trong component test](#accessibility-trong-component-test)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Component test kiểm tra gì?
+
+Component test đặt một component vào môi trường Angular nhỏ nhất cần thiết, cấp dữ liệu cho nó và quan sát kết quả có thể thấy từ bên ngoài. Kết quả đó thường là DOM, một `output`, thuộc tính accessibility hoặc lời gọi tới dependency công khai. Ví dụ, khi người dùng bấm **Lưu**, bài test nên xác nhận nút bị vô hiệu hóa trong lúc lưu và `saved` phát ra sau khi thành công; không cần biết component lưu biến cờ nội bộ bằng tên nào.
+
+Một bài test tốt mô tả **contract**, tức cam kết có thể quan sát được. Contract bền hơn chi tiết cài đặt: đổi từ một phương thức sang `computed`, hoặc tách template thành component con, không nên làm hỏng test nếu trải nghiệm người dùng không đổi.
+
+### Ranh giới đúng của bài test
+
+Một component test thường sở hữu các phần sau:
+
+- **Template và binding:** text, class, thuộc tính, nhánh `@if` hoặc `@for`, trạng thái disabled.
+- **Public API:** `input`, `output`, public method được kích hoạt bởi UI.
+- **Tương tác cục bộ:** click, gõ phím, thay đổi form control, focus và keyboard navigation.
+- **Tích hợp hẹp:** component con thật khi nó thiết yếu cho contract; service được fake hoặc spy khi mục tiêu không phải là service đó.
+
+Không nên để nó sở hữu router thật, HTTP thật, cơ sở dữ liệu, nhiều feature module hoặc toàn bộ luồng đăng nhập. Các phần đó làm test chậm, dễ hỏng vì nguyên nhân ngoài component và phù hợp hơn với integration/E2E test.
+
+<Callout type="idea" title="Quy tắc đọc test">
+  Nếu assertion chỉ nói về một private field, hoặc chỉ xác nhận một method nội bộ đã được gọi, hãy hỏi: người dùng có nhận ra khác biệt nếu implementation đổi không? Nếu câu trả lời là không, hãy kiểm thử DOM hay output thay thế.
+</Callout>
+
+### Chọn mức kiểm thử
+
+| Câu hỏi | Mức phù hợp | Ví dụ assertion |
+| --- | --- | --- |
+| Template phản ánh input đúng không? | Component test | `button.disabled` là `true` khi `pending` là `true` |
+| Service biến response thành model đúng không? | Service/unit test | Observable phát model đã map |
+| Điều hướng và API hoạt động qua trình duyệt thật không? | E2E test | Đăng nhập rồi thấy dashboard |
+| Component Material tuân thủ hành vi widget không? | Component test + harness | Chọn option rồi đọc giá trị của control |
+
+Một component test có thể đi sâu vào template, nhưng không cần cố tái hiện tất cả hệ thống. Ưu tiên một fixture nhỏ, dependency rõ ràng và một lý do nghiệp vụ cho mỗi assertion.
+
+## TestBed và ComponentFixture hoạt động thế nào?
+
+`TestBed` là test module của Angular. Nó tạo injector, biên dịch template khi cần và lắp các dependency mà component yêu cầu. Với standalone component hiện đại, đưa component vào `imports`; không đưa nó vào `declarations` như NgModule cũ.
+
+`TestBed.createComponent()` trả về `ComponentFixture<T>`. Fixture là cầu nối giữa instance TypeScript và view đã render:
+
+- `fixture.componentInstance` là instance component để đọc trạng thái khi thật sự cần.
+- `fixture.componentRef` cho phép đặt input bằng API Angular.
+- `fixture.nativeElement` là phần tử host thật để query DOM.
+- `fixture.debugElement` cung cấp `DebugElement`, hữu ích khi cần injector hoặc query theo Angular.
+- `fixture.detectChanges()` chạy change detection để template phản ánh trạng thái hiện tại.
+- `fixture.whenStable()` hoàn thành khi các tác vụ async mà Angular theo dõi đã ổn định.
+
+### Chu trình arrange-act-assert
+
+Mỗi test nên đi theo ba pha dễ nhìn:
+
+1. **Arrange:** cấu hình `TestBed`, tạo fixture, chuẩn bị input và fake dependency.
+2. **Act:** render, click, gõ phím hoặc gọi API công khai.
+3. **Assert:** đọc DOM/output và khẳng định kết quả hướng người dùng.
+
+Ví dụ tối giản với Jasmine/Karma. Cú pháp assertion có thể là Jest hoặc Vitest trong dự án khác, nhưng vòng đời fixture không đổi.
+
+```ts
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { SaveButtonComponent } from './save-button.component';
+
+describe('SaveButtonComponent', () => {
+  let fixture: ComponentFixture<SaveButtonComponent>;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [SaveButtonComponent],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(SaveButtonComponent);
+  });
+
+  it('renders the provided label', () => {
+    fixture.componentRef.setInput('label', 'Lưu hồ sơ');
+    fixture.detectChanges();
+
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    expect(button.textContent?.trim()).toBe('Lưu hồ sơ');
+  });
+});
+```
+
+### Thay đổi trạng thái và phát hiện thay đổi
+
+Tạo fixture **không đồng nghĩa** template đã được cập nhật theo thay đổi mới. Khi test thay đổi input, fake service hoặc thuộc tính instance, gọi `fixture.detectChanges()` trước khi đọc DOM. Nếu hành động tạo Promise, timer hoặc luồng async khác, chờ trạng thái ổn định trước assertion.
+
+```ts
+it('shows the loaded name', async () => {
+  fixture.componentInstance.loadProfile();
+  fixture.detectChanges();
+
+  await fixture.whenStable();
+  fixture.detectChanges();
+
+  expect(fixture.nativeElement.textContent).toContain('Nguyễn An');
+});
+```
+
+Đừng gọi `detectChanges()` một cách máy móc sau từng dòng. Hãy gọi sau thời điểm trạng thái mà template phụ thuộc đã đổi. Cách này giúp test thể hiện rõ quan hệ nguyên nhân–kết quả và tránh che mất một render bị thiếu trong code sản phẩm.
+
+<Callout type="warn" title="Cẩn thận với async ngoài Angular">
+  `whenStable()` chỉ biết các tác vụ được Angular/Zone theo dõi. Nếu fake của bạn dùng timer giả, scheduler riêng hoặc API không được Zone theo dõi, hãy điều khiển scheduler đó một cách tường minh thay vì mong `whenStable()` tự chờ.
+</Callout>
+
+## Ví dụ nền tảng: một component có input và output
+
+Component sau có một contract nhỏ: nhận nhãn nút và trạng thái đang lưu, đồng thời phát `saved` khi nút được bấm. Nó dùng semantic `<button>` nên trình đọc màn hình và keyboard đã có hành vi chuẩn.
+
+```ts
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+
+@Component({
+  selector: 'app-save-button',
+  standalone: true,
+  template: `
+    <button
+      type="button"
+      [disabled]="pending"
+      [attr.aria-busy]="pending"
+      (click)="requestSave()"
+    >
+      {{ label }}
+    </button>
+  `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class SaveButtonComponent {
+  @Input({ required: true }) label = '';
+  @Input() pending = false;
+  @Output() saved = new EventEmitter<void>();
+
+  requestSave(): void {
+    if (!this.pending) {
+      this.saved.emit();
+    }
+  }
+}
+```
+
+`OnPush` không biến component test thành loại test khác. Nó chỉ làm việc đặt input qua `componentRef.setInput()` càng có giá trị: Angular biết input đã đổi và sẽ đánh dấu view tương ứng. Sau đó, `detectChanges()` vẫn là điểm render rõ ràng trong test.
+
+## Kiểm thử input và output
+
+### Đặt input qua component reference
+
+`fixture.componentRef.setInput(name, value)` mô phỏng việc Angular truyền input từ component cha. Nó là lựa chọn ưu tiên hơn việc gán thẳng `fixture.componentInstance.pending`, nhất là với input signal hoặc component dùng `OnPush`.
+
+```ts
+it('disables the button while a save is pending', () => {
+  fixture.componentRef.setInput('label', 'Lưu');
+  fixture.componentRef.setInput('pending', true);
+  fixture.detectChanges();
+
+  const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+  expect(button.disabled).toBeTrue();
+  expect(button.getAttribute('aria-busy')).toBe('true');
+});
+```
+
+Gán trực tiếp instance vẫn hữu ích cho trạng thái không phải input trong test đơn giản, nhưng nó bỏ qua một phần đường đi thực tế. Nếu contract nói về API đầu vào, hãy ưu tiên `setInput`.
+
+### Quan sát output thay vì gọi hàm nội bộ
+
+Subscribe vào output trước khi kích hoạt UI. Sau đó phát click như người dùng và xác nhận giá trị nhận được. Test này chứng minh cả binding `(click)` lẫn contract `saved`; gọi `requestSave()` trực tiếp thì không chứng minh template được nối đúng.
+
+```ts
+it('emits saved when an enabled button is clicked', () => {
+  const emitted: void[] = [];
+  fixture.componentRef.setInput('label', 'Lưu');
+  fixture.componentRef.setInput('pending', false);
+  fixture.componentInstance.saved.subscribe(() => emitted.push());
+  fixture.detectChanges();
+
+  (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
+
+  expect(emitted).toHaveSize(1);
+});
+
+it('does not emit while pending', () => {
+  const saved = jasmine.createSpy('saved');
+  fixture.componentRef.setInput('label', 'Lưu');
+  fixture.componentRef.setInput('pending', true);
+  fixture.componentInstance.saved.subscribe(saved);
+  fixture.detectChanges();
+
+  (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
+
+  expect(saved).not.toHaveBeenCalled();
+});
+```
+
+Nếu ứng dụng dùng API `output()` thay cho `@Output()`, nguyên tắc không đổi: lắng nghe output công khai, kích hoạt hành vi qua UI và assertion payload mà component cha sẽ nhận. Không cần test implementation của emitter.
+
+## Đọc DOM và viết assertion có ý nghĩa
+
+### Chọn phần tử theo ngữ nghĩa
+
+`querySelector` nhanh và phù hợp với DOM nhỏ. Tuy nhiên, selector như `.button-2 > span` phụ thuộc cấu trúc và CSS. Hãy ưu tiên phần tử có vai trò, name hoặc attribute đại diện cho contract: `button`, `[aria-label="Đóng"]`, `[data-testid="invoice-total"]`.
+
+```ts
+const host = fixture.nativeElement as HTMLElement;
+const button = host.querySelector('button[aria-label="Lưu hồ sơ"]');
+
+expect(button).withContext('nút Lưu hồ sơ phải hiện diện').not.toBeNull();
+```
+
+`data-testid` là lối thoát hợp lý khi không có semantic selector ổn định, ví dụ biểu đồ canvas hoặc một giá trị trùng lặp. Đừng dùng nó để né việc đặt accessible name cho control. Một `<button>` không có nhãn vẫn khó dùng với người dùng hỗ trợ, dù test tìm được bằng `data-testid`.
+
+Khi DOM có Angular directive hoặc cần injector của phần tử, dùng `DebugElement` và `By.css`:
+
+```ts
+import { By } from '@angular/platform-browser';
+
+const saveDe = fixture.debugElement.query(By.css('button[type="button"]'));
+expect(saveDe.nativeElement.disabled).toBeFalse();
+```
+
+Đây vẫn là assertion theo UI. Không nên chuyển mọi query sang `DebugElement` nếu native DOM đã đủ rõ; native DOM gần với thứ mà trình duyệt và accessibility tree nhìn thấy hơn.
+
+### Trạng thái bất đồng bộ
+
+Đối với UI dựa trên Promise, hãy mock dependency để kiểm soát thời điểm hoàn thành. Ví dụ dưới đây dùng `deferred` để kiểm tra chính xác trạng thái loading trước và sau khi service resolve.
+
+```ts
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => (resolve = done));
+  return { promise, resolve };
+}
+
+it('shows a loading state until the profile arrives', async () => {
+  const profile = deferred<{ name: string }>();
+  profileApi.get.and.returnValue(profile.promise);
+
+  fixture.componentInstance.loadProfile();
+  fixture.detectChanges();
+  expect(fixture.nativeElement.querySelector('[role="status"]')?.textContent)
+    .toContain('Đang tải');
+
+  profile.resolve({ name: 'Nguyễn An' });
+  await fixture.whenStable();
+  fixture.detectChanges();
+
+  expect(fixture.nativeElement.textContent).toContain('Nguyễn An');
+  expect(fixture.nativeElement.querySelector('[role="status"]')).toBeNull();
+});
+```
+
+`profileApi` ở đây là spy được cung cấp qua `TestBed` thay vì HTTP thật. Trade-off là test không xác nhận URL hay serialization của request; hãy đặt assertion đó ở service test hoặc HTTP integration test.
+
+## Tương tác người dùng và Component Harness
+
+### Phát sự kiện DOM
+
+Với control native, gọi `.click()`, đặt `input.value` rồi dispatch `input`, hoặc dispatch `KeyboardEvent` là đủ. Tạo event có `bubbles: true` để hành vi delegation trong DOM được kích hoạt giống trình duyệt.
+
+```ts
+it('filters when the user types', () => {
+  fixture.detectChanges();
+  const input = fixture.nativeElement.querySelector('input') as HTMLInputElement;
+
+  input.value = 'angular';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  fixture.detectChanges();
+
+  expect(fixture.nativeElement.textContent).toContain('Kết quả: angular');
+});
+
+it('opens the menu with Enter', () => {
+  const trigger = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+  trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  fixture.detectChanges();
+
+  expect(fixture.nativeElement.querySelector('[role="menu"]')).not.toBeNull();
+});
+```
+
+Gọi `element.click()` thường tốt hơn gọi handler TypeScript trực tiếp vì nó kiểm tra event binding. Tuy vậy, jsdom/headless browser không mô phỏng mọi hành vi mặc định của trình duyệt. Focus thực, drag-and-drop, layout hay shortcut toàn cục có thể cần test trình duyệt hoặc E2E.
+
+### Harness cho component phức tạp
+
+Angular CDK Component Harness là API kiểm thử theo hành vi dành cho các widget phức tạp, đặc biệt là Angular Material. Harness ẩn markup nội bộ: thay vì query class của `mat-select`, test tìm `MatSelectHarness`, mở nó và chọn option như người dùng. Khi Material đổi DOM, harness giữ test ổn định hơn.
+
+```ts
+import { TestbedHarnessEnvironment } from '@angular/cdk/testing/testbed';
+import { MatSelectHarness } from '@angular/material/select/testing';
+
+it('selects the high priority option', async () => {
+  const loader = TestbedHarnessEnvironment.loader(fixture);
+  const select = await loader.getHarness(MatSelectHarness.with({ selector: '#priority' }));
+
+  await select.open();
+  await select.clickOptions({ text: 'Cao' });
+
+  expect(await select.getValueText()).toBe('Cao');
+});
+```
+
+Harness là trade-off có chủ đích: setup và API async dài hơn một `querySelector`, nhưng ít biết về DOM private của thư viện. Với component tự viết, chỉ tạo custom harness khi nhiều test hoặc nhiều dự án tiêu thụ component đó; một widget nhỏ không cần thêm lớp trừu tượng.
+
+## Accessibility trong component test
+
+Accessibility không phải một assertion trang trí. Khi test kiểm tra semantic HTML và trạng thái ARIA, nó bảo vệ contract cho keyboard, screen reader và cả người dùng chuột. Bắt đầu bằng semantic native control; ARIA chỉ bổ sung khi semantic không diễn tả được trạng thái.
+
+Các kiểm tra có giá trị cao:
+
+- Nút có accessible name từ text nhìn thấy hoặc `aria-label`.
+- Input có `<label for="…">` liên kết với `id`, không chỉ có placeholder.
+- Lỗi validation được đọc được, ví dụ input tham chiếu `aria-describedby` đến phần tử báo lỗi.
+- Popup/menu có role và trạng thái như `aria-expanded` phản ánh UI thực.
+- Tương tác keyboard phổ biến, như `Enter`, `Space`, `Escape`, được test nếu component tự cài đặt chúng.
+
+```ts
+it('connects the email field to its label and validation message', () => {
+  fixture.componentInstance.submitEmptyForm();
+  fixture.detectChanges();
+
+  const label = fixture.nativeElement.querySelector('label[for="email"]');
+  const input = fixture.nativeElement.querySelector('#email') as HTMLInputElement;
+  const error = fixture.nativeElement.querySelector('#email-error');
+
+  expect(label?.textContent?.trim()).toBe('Email');
+  expect(input.getAttribute('aria-describedby')).toContain('email-error');
+  expect(error?.getAttribute('role')).toBe('alert');
+});
+```
+
+Test thuộc tính không thay thế kiểm tra accessibility tự động hoặc thử nghiệm với người dùng. Nếu dự án đã tích hợp `axe-core`, chạy axe trên fixture là lớp phòng vệ tốt để phát hiện role/name/contrast phổ biến. Dù vậy, kết quả axe sạch không chứng minh keyboard flow dễ dùng hay nội dung dễ hiểu.
+
+<Callout type="warn" title="Đừng snapshot thay cho assertion hành vi">
+  Snapshot toàn bộ HTML dễ thay đổi vì class, thứ tự attribute hoặc markup từ thư viện. Nó thường không nói rõ điều quan trọng bị hỏng. Hãy assertion label, role, trạng thái disabled, text lỗi và output cụ thể; chỉ dùng snapshot nhỏ khi nó thực sự giúp review một cấu trúc ổn định.
+</Callout>
+
+## Lỗi thường gặp và trade-off
+
+| Lỗi | Vì sao gây hại | Cách thay thế |
+| --- | --- | --- |
+| Test private method hoặc private field | Khóa test vào implementation, refactor vô hại cũng làm fail | Kích hoạt qua UI và kiểm tra DOM/output |
+| Dùng service, router, HTTP thật trong mọi test | Chậm, flaky và khó xác định lỗi | Fake/spy dependency; kiểm thử integration ở tầng phù hợp |
+| Quên `detectChanges()` | Assertion đọc view cũ hoặc view chưa render | Render sau thay đổi có ảnh hưởng đến template |
+| Đặt input bằng gán trực tiếp mọi lúc | Bỏ qua đường truyền input thực tế | Dùng `fixture.componentRef.setInput()` cho public input |
+| Query bằng class CSS hoặc vị trí DOM | Test gãy khi đổi style/markup dù UX giữ nguyên | Chọn role, text, label, attribute semantic hoặc harness |
+| Chờ bằng `setTimeout` tùy tiện | Làm test chậm và vẫn flaky | Kiểm soát Promise/Observable/timer, rồi chờ đúng cơ chế |
+| Chỉ test click chuột | Bỏ sót keyboard và trạng thái ARIA | Test phím cần thiết cùng semantic/ARIA |
+
+Tách component con là một trade-off khác. Shallow test bằng stub giúp cô lập component cha và chạy nhanh, nhưng có thể bỏ lỡ lỗi contract giữa cha-con. Render component con thật khi API của nó là phần trải nghiệm quan trọng; stub khi component con đã có bộ test riêng và không liên quan đến mục tiêu hiện tại.
+
+## Checklist và tóm tắt
+
+Trước khi hoàn tất một component test, kiểm tra nhanh:
+
+- [ ] Test nêu contract nhìn thấy từ bên ngoài, không nêu chi tiết private.
+- [ ] Fixture chỉ import/cung cấp dependency cần cho kịch bản.
+- [ ] Input được đặt bằng `componentRef.setInput()` khi có thể.
+- [ ] `detectChanges()` chạy sau thay đổi cần render.
+- [ ] Tương tác đi qua DOM hoặc harness, không gọi handler nội bộ trừ khi đó là mục tiêu riêng.
+- [ ] Assertion mô tả UI, output, trạng thái async hoặc accessibility có ý nghĩa.
+- [ ] Async được điều khiển xác định; không có thời gian chờ tùy tiện.
+- [ ] Selector ưu tiên semantic/accessibility; widget phức tạp cân nhắc harness.
+
+Nói ngắn gọn: bắt đầu từ contract của người dùng, dựng fixture nhỏ với `TestBed`, đặt input qua API Angular, rồi tương tác như người dùng và quan sát DOM/output. Khi test cần biết quá nhiều về class nội bộ hoặc toàn bộ ứng dụng để chạy, ranh giới của nó đang quá rộng.

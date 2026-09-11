@@ -1,24 +1,209 @@
 ---
 title: HTTP, API & Xác thực
-description: Tích hợp backend, quản lý phiên và xử lý dữ liệu mạng.
+description: Lộ trình tích hợp backend Angular: gửi HTTP, xử lý lỗi, xác thực, cache và cập nhật thời gian thực.
 ---
 
-Đây là trang khung cho nhóm **HTTP, API & Xác thực**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+<Callout type="info" title="Bạn sẽ học được gì?">
+  Sau nhóm bài này, bạn có thể thiết kế một lớp giao tiếp API rõ ràng cho ứng
+  dụng Angular: gửi request có kiểu dữ liệu, gắn thông tin xác thực, xử lý lỗi
+  nhất quán, tránh request dư thừa và chọn đúng cơ chế realtime.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Mục tiêu và đầu vào](#mục-tiêu-và-đầu-vào)
+  - [Bạn cần biết trước](#bạn-cần-biết-trước)
+  - [Đích đến](#đích-đến)
+- [Bức tranh client, API và xác thực](#bức-tranh-client-api-và-xác-thực)
+  - [Luồng request thông thường](#luồng-request-thông-thường)
+  - [Luồng đăng nhập và phiên làm việc](#luồng-đăng-nhập-và-phiên-làm-việc)
+- [Thứ tự học các bài con](#thứ-tự-học-các-bài-con)
+- [Lộ trình thực hành](#lộ-trình-thực-hành)
+  - [Mốc 1: Đọc dữ liệu an toàn](#mốc-1-đọc-dữ-liệu-an-toàn)
+  - [Mốc 2: Đăng nhập và bảo vệ request](#mốc-2-đăng-nhập-và-bảo-vệ-request)
+  - [Mốc 3: Hoàn thiện trải nghiệm dữ liệu](#mốc-3-hoàn-thiện-trải-nghiệm-dữ-liệu)
+- [Nguyên tắc trước khi đưa lên production](#nguyên-tắc-trước-khi-đưa-lên-production)
+- [Đi tới từng bài](#đi-tới-từng-bài)
 
-## Phạm vi dự kiến
+## Mục tiêu và đầu vào
 
-Tích hợp backend, quản lý phiên và xử lý dữ liệu mạng. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+HTTP là cách ứng dụng Angular trao đổi dữ liệu với backend qua các request như `GET`, `POST`, `PUT`, `PATCH` và `DELETE`. API là hợp đồng giữa hai phía: client gửi đúng URL, method, headers và body; server trả status code cùng dữ liệu hoặc lỗi theo định dạng đã thỏa thuận. Xác thực (_authentication_) trả lời câu hỏi “người dùng là ai?”, còn phân quyền (_authorization_) quyết định “người dùng đó được làm gì?”.
 
-## Các bài trong nhóm
+Nhóm bài này tập trung vào phía client Angular. Mục tiêu không phải là thay thế trách nhiệm bảo mật của server: backend vẫn phải kiểm tra token, quyền truy cập và dữ liệu đầu vào cho mọi request.
 
-- **[HttpClient](/docs/http-api-auth/http-client)** — Gửi request, ánh xạ response và cấu hình tùy chọn HTTP.
-- **[Interceptors](/docs/http-api-auth/interceptors)** — Can thiệp request/response cho auth, logging và metadata.
-- **[Xử lý lỗi API](/docs/http-api-auth/xu-ly-loi-api)** — Chuẩn hóa lỗi, retry có kiểm soát và phản hồi trên giao diện.
-- **[Authentication](/docs/http-api-auth/authentication)** — Thiết kế luồng đăng nhập, token và bảo vệ phiên người dùng.
-- **[Cache dữ liệu](/docs/http-api-auth/cache-du-lieu)** — Giảm request lặp lại và quản lý tính mới của dữ liệu.
-- **[Realtime](/docs/http-api-auth/realtime)** — Tích hợp WebSocket hoặc Server-Sent Events với Angular.
+### Bạn cần biết trước
+
+- Đã tạo được một ứng dụng Angular và hiểu component, service, dependency injection.
+- Biết TypeScript cơ bản: interface, generic và `Observable` ở mức đọc được ví dụ.
+- Có một API mẫu, hoặc dùng mock server, trả về JSON. Ví dụ: `GET /api/products` trả về danh sách sản phẩm.
+- Hiểu rằng trình duyệt áp dụng CORS (quy tắc cho phép một web origin gọi origin khác). CORS được cấu hình ở server, không thể được “sửa” bằng Angular.
+
+### Đích đến
+
+Khi hoàn thành, bạn nên có thể:
+
+- tạo service API có kiểu dữ liệu rõ ràng thay vì gọi HTTP rải rác trong component;
+- đính kèm header, query params và token theo một quy ước tập trung;
+- phân biệt lỗi mạng, lỗi hết hạn phiên, lỗi validation và lỗi nghiệp vụ;
+- kiểm soát retry, cache và cập nhật realtime dựa trên tính chất dữ liệu;
+- kiểm thử các luồng thành công, thất bại và hết hạn phiên trước khi phát hành.
+
+<Callout type="idea" title="Cách học hiệu quả">
+  Đừng chỉ đọc từng API của Angular. Hãy dùng cùng một ứng dụng nhỏ xuyên suốt
+  nhóm bài, chẳng hạn trang quản lý công việc có đăng nhập. Mỗi bài sẽ bổ sung
+  một lát cắt có thể kiểm tra được vào ứng dụng đó.
+</Callout>
+
+## Bức tranh client, API và xác thực
+
+Một request tốt đi qua các lớp có trách nhiệm riêng: component thể hiện trạng thái cho người dùng, service mô tả nghiệp vụ và `HttpClient` thực hiện giao tiếp mạng. Interceptor là điểm tập trung để thêm hoặc quan sát hành vi chung như token, correlation ID hay chuyển đổi lỗi.
+
+### Luồng request thông thường
+
+```text
+┌─────────────┐    gọi service     ┌─────────────┐    HttpClient    ┌──────────────┐
+│ Component / │ ─────────────────► │ API service │ ───────────────► │ Interceptor  │
+│ Signal store│                    │  typed DTO  │                   │ chuỗi xử lý  │
+└──────┬──────┘                    └─────────────┘                   └──────┬───────┘
+       │                                                                     │ request
+       │ render state                                                        ▼
+       │                                                           ┌──────────────────┐
+       │                                                           │ Backend API      │
+       │                                                           │ auth + nghiệp vụ │
+       │                                                           └────────┬─────────┘
+       │                                                                    │ response/error
+       ▼                                                                    ▼
+┌─────────────┐   dữ liệu hoặc lỗi chuẩn hóa   ┌─────────────────────────────┐
+│ Giao diện   │ ◄───────────────────────────── │ Interceptor / error handler │
+└─────────────┘                                └─────────────────────────────┘
+```
+
+1. Component kích hoạt một hành động, ví dụ người dùng mở danh sách công việc.
+2. API service gọi `HttpClient` và mô tả kiểu dữ liệu mong đợi, ví dụ `Task[]`.
+3. Interceptor có thể thêm header chung, như `Authorization`, rồi chuyển request đi.
+4. Backend xác thực, kiểm tra quyền và xử lý nghiệp vụ. Không có token hợp lệ thì server trả `401`; không đủ quyền thì trả `403`.
+5. Response quay về qua interceptor. Ứng dụng ánh xạ dữ liệu vào state hoặc chuyển lỗi thành thông báo phù hợp.
+
+`DTO` (_Data Transfer Object_) là kiểu dữ liệu trao đổi với API. Không nhất thiết DTO phải trùng hoàn toàn với model hiển thị của giao diện. Tách hai kiểu khi API dùng tên trường hoặc định dạng không phù hợp trực tiếp với UI.
+
+### Luồng đăng nhập và phiên làm việc
+
+```text
+Người dùng                 Angular client                Auth API / Backend
+     │                            │                               │
+     │ gửi email + mật khẩu       │                               │
+     ├───────────────────────────►│ POST /auth/login              │
+     │                            ├──────────────────────────────►│
+     │                            │  access token / cookie phiên  │
+     │                            │◄──────────────────────────────┤
+     │                            │                               │
+     │ mở trang cần đăng nhập     │                               │
+     ├───────────────────────────►│ GET /api/tasks + credentials  │
+     │                            ├──────────────────────────────►│
+     │                            │ dữ liệu, 401 hoặc 403          │
+     │                            │◄──────────────────────────────┤
+     │ xem kết quả / đăng nhập lại│                               │
+     │◄───────────────────────────┤                               │
+```
+
+Có hai hướng phổ biến để client mang thông tin phiên: token trong header `Authorization: Bearer <token>`, hoặc cookie phiên do server quản lý. Cả hai đều cần thiết kế từ backend. Với cookie, cần cân nhắc `HttpOnly`, `Secure`, `SameSite`, CORS và lựa chọn `withCredentials`. Với token, cần giới hạn thời gian sống, xử lý hết hạn và tránh lưu bí mật lâu dài ở nơi mã JavaScript có thể đọc khi không cần thiết.
+
+<Callout type="warn" title="Không tin client để bảo mật">
+  Guard route và việc ẩn nút chỉ cải thiện trải nghiệm người dùng. Chúng không
+  thay thế việc backend xác thực token và kiểm tra quyền cho từng endpoint.
+</Callout>
+
+## Thứ tự học các bài con
+
+Học theo thứ tự dưới đây để xây nền giao tiếp mạng trước, rồi mới thêm các chính sách dùng chung và tối ưu hóa.
+
+| Thứ tự | Bài học                                              | Vì sao học ở thời điểm này?                                                      | Kết quả cần đạt                                   |
+| ------ | ---------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------- |
+| 1      | [HttpClient](/docs/http-api-auth/http-client)        | Đây là điểm bắt đầu để gửi request và đọc response có kiểu.                      | Viết được service đọc, tạo và cập nhật dữ liệu.   |
+| 2      | [Interceptors](/docs/http-api-auth/interceptors)     | Khi đã có request, bạn cần một nơi chung để thêm header và quan sát luồng.       | Gắn metadata hoặc token mà không lặp code.        |
+| 3      | [Xử lý lỗi API](/docs/http-api-auth/xu-ly-loi-api)   | Mọi request thực tế đều có thể thất bại; lỗi cần được phân loại trước khi retry. | Hiển thị lỗi hữu ích và không retry sai loại lỗi. |
+| 4      | [Authentication](/docs/http-api-auth/authentication) | Bây giờ có đủ nền để kết nối đăng nhập, phiên và request được bảo vệ.            | Xử lý login, logout, 401 và quyền truy cập.       |
+| 5      | [Cache dữ liệu](/docs/http-api-auth/cache-du-lieu)   | Sau khi dữ liệu đúng và an toàn, tối ưu request lặp lại.                         | Chọn được dữ liệu nào cache và khi nào làm mới.   |
+| 6      | [Realtime](/docs/http-api-auth/realtime)             | Realtime bổ sung độ phức tạp về kết nối và state; chỉ dùng khi polling không đủ. | Tích hợp WebSocket hoặc SSE với vòng đời rõ ràng. |
+
+Nếu dự án đã có đăng nhập, bạn vẫn nên đọc `HttpClient`, `Interceptors` và `Xử lý lỗi API` trước. Authentication bền vững phụ thuộc vào các nền tảng này.
+
+## Lộ trình thực hành
+
+Ví dụ xuyên suốt là ứng dụng quản lý công việc. Backend cung cấp `POST /auth/login`, `GET /api/tasks`, `POST /api/tasks` và một kênh thông báo khi công việc thay đổi. Mỗi mốc tạo ra một phiên bản có thể chạy và kiểm tra độc lập.
+
+### Mốc 1: Đọc dữ liệu an toàn
+
+- Tạo `TaskApiService` chỉ phụ trách gọi endpoint công việc.
+- Dùng `HttpClient` lấy `Task[]`; hiển thị trạng thái loading, empty, success và error ở component.
+- Kiểm tra bằng DevTools: URL, method, query params, status code và payload có đúng hợp đồng API không.
+- Mô phỏng API trả `500` hoặc mất mạng để quan sát giao diện không bị kẹt ở trạng thái loading.
+
+Hoàn thành mốc này khi component không cần biết URL cụ thể hoặc tự parse response HTTP.
+
+### Mốc 2: Đăng nhập và bảo vệ request
+
+- Tạo form đăng nhập, gửi thông tin đến endpoint auth và giữ trạng thái phiên theo cơ chế backend đã chọn.
+- Thêm interceptor để gắn token hoặc credentials đúng với endpoint cần bảo vệ.
+- Khi nhận `401`, xóa trạng thái phiên cũ, lưu URL người dùng đang truy cập nếu cần, rồi điều hướng về đăng nhập.
+- Thử ba trường hợp: không đăng nhập, token hết hạn và người dùng không có quyền (`403`).
+
+Hoàn thành mốc này khi không có component nào phải tự thêm header xác thực, và thông báo `401` khác với `403`.
+
+### Mốc 3: Hoàn thiện trải nghiệm dữ liệu
+
+- Chỉ retry lỗi tạm thời như lỗi mạng hoặc `5xx` phù hợp; không retry mặc định với `401`, `403` hay validation `4xx`.
+- Cache danh sách công việc nếu người dùng mở lại cùng màn hình. Làm mới cache sau khi tạo hoặc sửa công việc.
+- Chọn polling, Server-Sent Events (SSE) hoặc WebSocket theo nhu cầu. Ví dụ, bảng công việc cập nhật thưa có thể dùng SSE; cộng tác hai chiều thường cần WebSocket.
+- Đóng subscription và kết nối khi component hoặc phiên người dùng kết thúc để tránh rò rỉ tài nguyên.
+
+Hoàn thành mốc này khi ứng dụng phản hồi rõ ràng lúc mạng chậm, dữ liệu không cũ sau thao tác ghi và kết nối realtime có vòng đời kiểm soát được.
+
+## Nguyên tắc trước khi đưa lên production
+
+- **Hợp đồng API:** thống nhất status code, schema lỗi, phân trang, lọc và version API với backend trước khi UI phụ thuộc vào chúng.
+- **Bảo mật:** dùng HTTPS; không ghi token, mật khẩu hoặc response nhạy cảm vào log; backend luôn kiểm tra quyền.
+- **Khả năng quan sát:** gắn request ID khi hệ thống hỗ trợ, để liên kết lỗi người dùng báo với log phía server mà không lộ dữ liệu nhạy cảm.
+- **Khả năng phục hồi:** đặt timeout, retry có giới hạn và thông báo có hành động tiếp theo. Mạng không ổn định là trạng thái bình thường, không phải ngoại lệ hiếm gặp.
+- **Kiểm thử:** kiểm tra service, interceptor và các tình huống 401/403/422/5xx. Với flow quan trọng như login hoặc thanh toán, thêm kiểm thử end-to-end.
+
+<Callout type="idea" title="Quy tắc chọn giải pháp">
+  Bắt đầu bằng request HTTP đơn giản và một hợp đồng lỗi rõ ràng. Chỉ thêm
+  cache, retry hoặc realtime khi bạn xác định được vấn đề cụ thể về độ trễ, tải
+  hệ thống hoặc yêu cầu cập nhật dữ liệu.
+</Callout>
+
+## Đi tới từng bài
+
+<Cards>
+  <Card
+    title="1. HttpClient"
+    href="/docs/http-api-auth/http-client"
+    description="Gửi request, ánh xạ response và cấu hình tùy chọn HTTP."
+  />
+  <Card
+    title="2. Interceptors"
+    href="/docs/http-api-auth/interceptors"
+    description="Can thiệp request và response cho auth, logging và metadata."
+  />
+  <Card
+    title="3. Xử lý lỗi API"
+    href="/docs/http-api-auth/xu-ly-loi-api"
+    description="Chuẩn hóa lỗi, retry có kiểm soát và phản hồi trên giao diện."
+  />
+  <Card
+    title="4. Authentication"
+    href="/docs/http-api-auth/authentication"
+    description="Thiết kế đăng nhập, token và bảo vệ phiên người dùng."
+  />
+  <Card
+    title="5. Cache dữ liệu"
+    href="/docs/http-api-auth/cache-du-lieu"
+    description="Giảm request lặp lại và quản lý tính mới của dữ liệu."
+  />
+  <Card
+    title="6. Realtime"
+    href="/docs/http-api-auth/realtime"
+    description="Tích hợp WebSocket hoặc Server-Sent Events với Angular."
+  />
+</Cards>

@@ -1,10 +1,790 @@
 ---
 title: Cache dữ liệu
-description: Giảm request lặp lại và quản lý tính mới của dữ liệu.
+description: Thiết kế cache API trong Angular với cache key, TTL, stale-while-revalidate, deduplication và invalidation nhất quán.
 ---
 
-Trang này sẽ trình bày **Cache dữ liệu** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi">
+  Cache làm giảm request lặp lại, nhưng không làm dữ liệu tự động đúng. Trang này tập trung vào dữ liệu đọc từ API trong Angular: chọn lớp cache, xác định thời hạn, tránh request trùng và làm mới dữ liệu sau thay đổi. Cache không thay thế authorization, validation ở server hoặc nguồn dữ liệu thật.
 </Callout>
+
+## Mục lục
+
+- [Tại sao cache API?](#tại-sao-cache-api)
+  - [Cache giải quyết gì và không giải quyết gì?](#cache-giải-quyết-gì-và-không-giải-quyết-gì)
+  - [Đặt mục tiêu tính mới trước khi viết code](#đặt-mục-tiêu-tính-mới-trước-khi-viết-code)
+- [Cache nằm ở lớp nào?](#cache-nằm-ở-lớp-nào)
+  - [HTTP cache của trình duyệt và CDN](#http-cache-của-trình-duyệt-và-cdn)
+  - [Cache trong Angular](#cache-trong-angular)
+  - [Cache key, phạm vi và dữ liệu nhạy cảm](#cache-key-phạm-vi-và-dữ-liệu-nhạy-cảm)
+- [TTL và chính sách hết hạn](#ttl-và-chính-sách-hết-hạn)
+  - [Fresh, stale và expired](#fresh-stale-và-expired)
+  - [Chọn TTL theo loại dữ liệu](#chọn-ttl-theo-loại-dữ-liệu)
+  - [ETag và request có điều kiện](#etag-và-request-có-điều-kiện)
+- [Stale-while-revalidate](#stale-while-revalidate)
+  - [Luồng đọc hai giai đoạn](#luồng-đọc-hai-giai-đoạn)
+  - [Khi không nên trả stale](#khi-không-nên-trả-stale)
+- [Deduplication: gộp request đang bay](#deduplication-gộp-request-đang-bay)
+  - [Vì sao `shareReplay` một mình chưa đủ?](#vì-sao-sharereplay-một-mình-chưa-đủ)
+  - [Cache service có TTL, SWR và deduplication](#cache-service-có-ttl-swr-và-deduplication)
+- [Invalidation sau thay đổi dữ liệu](#invalidation-sau-thay-đổi-dữ-liệu)
+  - [Xóa, cập nhật trực tiếp hay làm mới?](#xóa-cập-nhật-trực-tiếp-hay-làm-mới)
+  - [Đặt invalidation cạnh mutation](#đặt-invalidation-cạnh-mutation)
+- [Consistency và các giới hạn không thể tránh](#consistency-và-các-giới-hạn-không-thể-tránh)
+  - [Các mức kỳ vọng nhất quán](#các-mức-kỳ-vọng-nhất-quán)
+  - [Race condition và phiên bản dữ liệu](#race-condition-và-phiên-bản-dữ-liệu)
+  - [Cache theo người dùng, tenant và đăng xuất](#cache-theo-người-dùng-tenant-và-đăng-xuất)
+- [Đặt cache ở interceptor hay service?](#đặt-cache-ở-interceptor-hay-service)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+- [Đọc tiếp](#đọc-tiếp)
+
+## Tại sao cache API?
+
+Mỗi lần component gọi `HttpClient.get()`, Angular tạo một cold `Observable`: mỗi
+consumer `subscribe()` có thể dẫn đến một HTTP request mới. Ví dụ, quay lại trang
+danh sách công việc trong vài giây có thể tải lại cùng `GET /api/tasks`, dù danh
+sách chưa hề đổi. Cache giữ lại kết quả đã biết để request sau có thể dùng lại kết
+quả đó theo một chính sách rõ ràng.
+
+Lợi ích chính là giảm độ trễ mà người dùng cảm nhận, giảm băng thông và giảm tải
+cho API. Nó cũng giúp giao diện giữ được dữ liệu trong lúc điều hướng. Đổi lại,
+cache tạo thêm một bản sao dữ liệu. Bản sao này có thể cũ, thuộc sai người dùng
+hoặc bị ghi đè sai nếu không có key và invalidation đúng.
+
+### Cache giải quyết gì và không giải quyết gì?
+
+Cache phù hợp nhất với dữ liệu **đọc nhiều, thay đổi ít hoặc chấp nhận trễ**. Ví
+dụ, danh mục quốc gia, cấu hình tính năng công khai hoặc chi tiết sản phẩm có thể
+dùng lại trong một khoảng thời gian. Một trang dashboard có năm widget cùng cần
+hồ sơ người dùng cũng nên chỉ tạo một request đang bay.
+
+Cache không làm request nhanh hơn khi phải gọi mạng lần đầu. Nó cũng không bảo đảm
+client đang thấy trạng thái mới nhất trên server. `POST`, `PATCH` và `DELETE` vẫn
+phải đến server; cache chỉ cần phản ứng với kết quả của các mutation đó.
+
+<Callout type="warn" title="Không cache để che lỗi hiệu năng">
+  Nếu endpoint chậm vì truy vấn cơ sở dữ liệu, N+1 request hoặc payload quá lớn, cache ở client chỉ làm triệu chứng ít lộ hơn. Đo thời gian API, tối ưu backend và payload trước; sau đó cache các dữ liệu có chính sách tính mới phù hợp.
+</Callout>
+
+### Đặt mục tiêu tính mới trước khi viết code
+
+Câu hỏi quan trọng không phải “có cache được không?” mà là “người dùng có thể thấy
+dữ liệu cũ bao lâu?”. Mỗi resource nên có một câu trả lời nghiệp vụ cụ thể.
+
+| Dữ liệu | Ví dụ chấp nhận được | Chính sách khởi đầu |
+| --- | --- | --- |
+| Gần như bất biến | Danh sách quốc gia | TTL dài, có thể lưu bền trên thiết bị. |
+| Thay đổi thưa | Cấu hình tính năng, hồ sơ công khai | TTL vài phút và revalidate nền. |
+| Thay đổi theo thao tác người dùng | Danh sách task của phiên hiện tại | TTL ngắn; invalidate sau mutation. |
+| Nhạy cảm hoặc có hiệu lực tức thời | Số dư, quyền truy cập, trạng thái thanh toán | Không trả stale; thường `no-store` hoặc revalidate mỗi lần. |
+
+`TTL` (_time to live_) là thời gian một entry được coi là mới kể từ lúc nhận
+response. TTL không phải bằng chứng dữ liệu đúng; nó chỉ là ngân sách độ cũ mà
+sản phẩm chấp nhận. Ví dụ, TTL 60 giây nói rằng UI có thể dùng response tối đa 60
+giây mà không kiểm tra lại server.
+
+## Cache nằm ở lớp nào?
+
+Một ứng dụng có thể có nhiều cache cùng hoạt động. Mỗi lớp có key, thời gian sống
+và phạm vi khác nhau. Chọn lớp dựa trên nơi có đủ ngữ cảnh để trả lời: dữ liệu này
+thuộc ai, có được stale không và mutation nào làm nó cũ?
+
+```text
+┌─────────────┐      ┌──────────────────┐      ┌──────────────────┐
+│ Component / │─────►│ TaskApi + cache  │─────►│ HttpClient /     │
+│ facade      │◄─────│ domain policy    │◄─────│ interceptor      │
+└─────────────┘      └─────────┬────────┘      └─────────┬────────┘
+                               │                         │
+                        memory / IndexedDB         HTTP cache / SW
+                               │                         │
+                               └──────────┬──────────────┘
+                                          ▼
+                               ┌──────────────────┐
+                               │ CDN / API server │
+                               └──────────────────┘
+```
+
+Không cần bật mọi lớp. Với một ứng dụng nội bộ nhỏ, cache trong memory ở service
+có thể đủ. Với nội dung công khai có nhiều người dùng, header HTTP và CDN thường
+mang lại lợi ích lớn hơn mà không phải tự quản lý từng entry trong Angular.
+
+### HTTP cache của trình duyệt và CDN
+
+API có thể gửi header HTTP chuẩn để trình duyệt, service worker hoặc CDN quyết
+định tái sử dụng response. Ví dụ này cho biết response được dùng lại trong 60
+giây; sau đó client có thể dùng stale thêm 300 giây trong lúc xác minh lại.
+
+```http
+Cache-Control: private, max-age=60, stale-while-revalidate=300
+ETag: "task-list-v42"
+Vary: Accept-Language
+```
+
+`private` nói response không được shared cache như CDN dùng chung cho nhiều người
+dùng. `public` chỉ phù hợp khi response thực sự công khai hoặc cache key ở CDN đã
+bao gồm mọi biến thể liên quan. `Vary` khai báo header nào làm response thay đổi;
+ví dụ response theo ngôn ngữ cần `Vary: Accept-Language` để không trả nội dung
+Việt cho request tiếng Anh.
+
+Khi response hết thời gian fresh, cache HTTP có thể gửi lại validator thay vì tải
+cả body:
+
+```http
+GET /api/tasks HTTP/1.1
+If-None-Match: "task-list-v42"
+```
+
+Nếu bản trên server không đổi, server trả `304 Not Modified` và body đã cache vẫn
+được dùng. Header HTTP là hợp đồng giữa client, proxy và server. Angular không
+nên tự diễn giải `Cache-Control` để tạo một chính sách khác trừ khi nhóm đã chủ
+đích thiết kế điều đó.
+
+<Callout type="idea" title="Bắt đầu từ header khi server kiểm soát được">
+  Với `GET` công khai hoặc có cache semantics rõ, để API/CDN phát `Cache-Control`, `ETag` và `Vary` đúng thường đáng tin cậy hơn một cache JavaScript tự phát. Cache ứng dụng vẫn hữu ích cho state theo màn hình và deduplication trong một phiên.
+</Callout>
+
+### Cache trong Angular
+
+Cache trong memory của một service sống cho đến khi tab reload. Nó nhanh, không
+đụng I/O và tự mất khi phiên browser kết thúc. Đây là lựa chọn an toàn mặc định
+cho dữ liệu user-specific vì không để dữ liệu tồn tại trên ổ đĩa.
+
+`sessionStorage`, `localStorage` và IndexedDB sống lâu hơn reload. Chỉ dùng chúng
+khi có lý do rõ như offline-first hoặc dataset lớn. Dữ liệu ở đây có thể bị mã
+JavaScript cùng origin đọc; không đặt access token, refresh token, mật khẩu hay
+response nhạy cảm vào đó. Persistence cũng phải có schema version, TTL và cơ chế
+xóa khi người dùng logout.
+
+Service worker có thể cache asset và một số API response để offline. Nó mạnh hơn
+cache memory nhưng khó quan sát hơn: response có thể đến từ worker ngay cả khi
+Angular vừa reload. Chỉ dùng khi nhóm sở hữu chiến lược offline, quota storage,
+update worker và fallback khi dữ liệu không có trên thiết bị.
+
+Với SSR, Angular có thể chuyển một số HTTP response từ server render sang client
+để client không gọi lại ngay khi hydrate. Đây là cache rất ngắn hạn cho lần render
+đầu, không phải cache domain dài hạn. Đừng dựa vào nó để thay invalidation sau
+mutation hay chính sách theo người dùng.
+
+### Cache key, phạm vi và dữ liệu nhạy cảm
+
+Cache key phải nhận diện **đúng biến thể của resource**. URL đã có query params
+là điểm bắt đầu, nhưng chưa đủ nếu response còn phụ thuộc vào tenant, locale, vai
+trò hoặc phiên người dùng. Hai request giống URL mà trả dữ liệu khác nhau không
+được chia sẻ một entry.
+
+```ts
+function taskListKey(input: {
+  userId: string;
+  tenantId: string;
+  locale: string;
+  page: number;
+  filter: 'all' | 'open' | 'done';
+}): string {
+  return [
+    'tasks',
+    `user=${input.userId}`,
+    `tenant=${input.tenantId}`,
+    `locale=${input.locale}`,
+    `page=${input.page}`,
+    `filter=${input.filter}`,
+  ].join('|');
+}
+```
+
+Không đưa bearer token thô vào key hoặc log. Dùng ID phiên, user ID hoặc tenant ID
+không nhạy cảm đã có trong state, rồi xóa toàn bộ namespace khi phiên đổi. Với
+cache HTTP, server phải phát `Vary` hoặc `Cache-Control: private` tương ứng. Một
+cache key thiếu `tenantId` là lỗi cô lập dữ liệu, không chỉ là lỗi hiển thị.
+
+Giữ key có cấu trúc giúp invalidation theo nhóm dễ đọc: `tasks|user=u1|...` cho
+phép xóa mọi danh sách task của `u1`, trong khi key hash mù sẽ cần index phụ. Nếu
+key chứa dữ liệu riêng tư như email hoặc query tìm kiếm, tránh gửi nó vào telemetry
+hoặc persistence không được bảo vệ.
+
+## TTL và chính sách hết hạn
+
+Một entry nên giữ ít nhất thời điểm nhận response và hai mốc: hết hạn fresh và hết
+hạn stale. Nhờ vậy code có thể phân biệt “dùng ngay”, “hiện tạm rồi tải lại” và
+“không được dùng nữa”.
+
+### Fresh, stale và expired
+
+Giả sử task list được tải lúc `10:00:00`, có `freshForMs = 30_000` và
+`staleForMs = 120_000`:
+
+| Thời điểm | Trạng thái | Hành động mặc định |
+| --- | --- | --- |
+| Trước `10:00:30` | **fresh** | Trả cache ngay, không cần mạng. |
+| Từ `10:00:30` đến trước `10:02:30` | **stale nhưng dùng được** | Có thể trả cache ngay và revalidate nền. |
+| Từ `10:02:30` | **expired** | Bỏ entry; chờ response mới hoặc hiện loading. |
+
+Dùng đồng hồ client chỉ cho UX. Người dùng có thể đổi giờ hệ thống, tab có thể bị
+suspend, và server mới là nguồn thời gian đáng tin cho hợp đồng bảo mật. Đừng dùng
+TTL phía client để quyết định quyền truy cập, hạn token hoặc hiệu lực thanh toán.
+
+### Chọn TTL theo loại dữ liệu
+
+TTL dài giảm request nhưng tăng xác suất stale. TTL ngắn cải thiện tính mới nhưng
+có thể khiến điều hướng lặp lại tốn mạng. Bắt đầu từ tác động của dữ liệu cũ thay
+vì một con số áp dụng toàn ứng dụng:
+
+- **Metadata công khai:** vài giờ hoặc vài ngày; version trong URL hay ETag giúp
+  cập nhật khi deploy.
+- **Danh sách theo người dùng:** vài chục giây đến vài phút, cộng invalidation sau
+  thao tác tạo/sửa/xóa.
+- **Màn hình cộng tác:** TTL rất ngắn, polling, SSE hoặc WebSocket tùy yêu cầu.
+- **Quyền, tồn kho, giá thanh toán:** đọc lại trước thao tác quan trọng và để server
+  xác nhận lần cuối.
+
+Có thể thêm jitter nhỏ vào TTL khi nhiều entry được tạo cùng lúc. Ví dụ, nếu 10.000
+client cùng nhận config lúc deploy và tất cả hết TTL ở phút thứ năm, API có thể bị
+một đợt request dồn. Jitter làm thời điểm revalidate lệch nhau, nhưng không thay
+thế rate limit hoặc cache ở server.
+
+### ETag và request có điều kiện
+
+TTL quyết định **khi nào hỏi lại**. `ETag` hoặc `Last-Modified` giúp server trả lời
+**có gì thay đổi không** với chi phí body thấp. Client có thể lưu ETag cùng entry
+và gửi `If-None-Match` khi entry stale.
+
+```text
+Angular cache                 API
+     │ GET /api/tasks, If-None-Match: "v42"
+     ├──────────────────────────────────────►
+     │              304 Not Modified
+     ◄──────────────────────────────────────┤
+     │ gia hạn TTL, giữ body cũ              │
+```
+
+Nếu server trả `200 OK` với ETag mới, thay body và ETag trong cache. Nếu trả `304`,
+không thay body nhưng cập nhật `fetchedAt`; đây là một lần xác nhận tính mới thành
+công. Không tự tạo ETag bằng cách hash JSON ở client rồi coi đó là version server:
+client không biết mọi thay đổi và không kiểm soát serialization của server.
+
+`ETag` còn có thể hỗ trợ ghi có điều kiện: `If-Match` buộc server chỉ nhận `PATCH`
+khi resource vẫn ở version người dùng đã đọc. Cơ chế này xử lý xung đột ghi ở
+server; cache client vẫn cần invalidation hoặc cập nhật sau response thành công.
+
+## Stale-while-revalidate
+
+**Stale-while-revalidate** (SWR) tách trải nghiệm nhanh khỏi việc kiểm tra tính
+mới. Khi có entry stale nhưng chưa expired, UI nhận bản cũ ngay. Đồng thời một
+request nền lấy phiên bản mới. Nếu response khác, UI cập nhật lần hai.
+
+### Luồng đọc hai giai đoạn
+
+```text
+Người dùng mở /tasks
+        │
+        ▼
+┌───────────────────┐     fresh      ┌────────────────────────┐
+│ Cache có entry?   │ ─────────────► │Trả entry, không gọi API│
+└─────────┬─────────┘                └────────────────────────┘
+          │ stale, còn dùng được
+          ▼
+┌───────────────────┐     ngay       ┌────────────────────────┐
+│ Trả entry stale   │ ─────────────► │ UI render dữ liệu cũ   │
+└─────────┬─────────┘                └────────────────────────┘
+          │ đồng thời
+          ▼
+┌───────────────────┐     mới        ┌────────────────────────┐
+│ Revalidate API    │ ─────────────► │ Cập nhật cache và UI    
+└───────────────────┘                └────────────────────────┘
+```
+
+UI cần biểu đạt đúng trạng thái này. Spinner toàn trang khi đã có dữ liệu thường
+gây nhấp nháy; một nhãn “Đang cập nhật…” nhỏ phù hợp hơn. Nếu revalidate lỗi mạng,
+giữ entry stale và hiển thị lỗi không chặn khi sản phẩm cho phép. Không âm thầm kéo
+dài stale window sau mỗi lỗi vô hạn, vì UI cuối cùng có thể hiển thị dữ liệu rất cũ
+mà không ai biết.
+
+### Khi không nên trả stale
+
+Không dùng SWR chỉ vì nó tạo cảm giác nhanh. Dữ liệu stale không phù hợp nếu quyết
+định của người dùng hoặc an toàn phụ thuộc vào giá trị hiện tại:
+
+- số dư, hạn mức, giá cuối lúc checkout hoặc tồn kho trước khi đặt hàng;
+- quyền truy cập, trạng thái khóa tài khoản hoặc consent vừa thay đổi;
+- màn hình điều phối cần cùng trạng thái gần thời gian thực;
+- response vừa bị invalidated sau mutation mà người dùng đang thực hiện.
+
+Trong các trường hợp này, có thể vẫn hiển thị giá trị cũ như placeholder có ghi rõ
+“dữ liệu trước đó”, nhưng phải disable hành động phụ thuộc nó cho đến khi response
+mới về. Server vẫn kiểm tra điều kiện thật khi nhận command; client không phải
+điểm đảm bảo consistency.
+
+## Deduplication: gộp request đang bay
+
+`Deduplication` chỉ gộp các request **chưa hoàn tất** có cùng ý nghĩa. Ví dụ, ba
+widget cùng đọc `GET /api/me` trong cùng render không nên gửi ba request. Điều này
+khác cache kết quả: sau khi request hoàn tất, TTL quyết định có dùng lại body hay
+không.
+
+### Vì sao `shareReplay` một mình chưa đủ?
+
+`shareReplay(1)` chia sẻ một Observable instance giữa nhiều subscriber. Nhưng nếu
+mỗi lời gọi `getProfile()` tạo một Observable mới từ `http.get()`, từng instance
+vẫn gửi một request riêng.
+
+```ts
+// Không deduplicate nếu getProfile() tạo Observable mới mỗi lần gọi.
+const first$ = api.getProfile();
+const second$ = api.getProfile();
+```
+
+Cần một registry dùng chung theo cache key, thường là `Map<string, Observable<T>>`.
+Consumer thứ hai tìm thấy Observable đang bay trong map và subscribe vào chính nó.
+Khi request complete, error hoặc bị hủy, entry đang bay phải được dọn. Không cache
+error như một giá trị thành công; lần đọc sau cần có cơ hội thử lại theo chính sách
+retry riêng.
+
+### Cache service có TTL, SWR và deduplication
+
+Ví dụ dưới là cache **trong memory** cho request đọc. Nó trả `CacheResult<T>` để
+UI biết giá trị đang fresh hay stale. Khi entry stale, `concat()` phát body cũ trước
+rồi phát body mới sau khi revalidate thành công; `AsyncPipe` hoặc state store có
+thể render cả hai lần phát này.
+
+```ts
+import { Injectable } from '@angular/core';
+import {
+  Observable,
+  concat,
+  defer,
+  finalize,
+  map,
+  of,
+  shareReplay,
+} from 'rxjs';
+
+export type CacheFreshness = 'fresh' | 'stale' | 'network';
+
+export interface CacheResult<T> {
+  value: T;
+  freshness: CacheFreshness;
+}
+
+interface CacheEntry<T> {
+  value: T;
+  freshUntil: number;
+  staleUntil: number;
+}
+
+export interface CachePolicy {
+  freshForMs: number;
+  staleForMs: number;
+}
+
+@Injectable({ providedIn: 'root' })
+export class ApiCache {
+  private readonly entries = new Map<string, CacheEntry<unknown>>();
+  private readonly inFlight = new Map<string, Observable<CacheResult<unknown>>>();
+
+  read<T>(
+    key: string,
+    policy: CachePolicy,
+    loader: () => Observable<T>,
+  ): Observable<CacheResult<T>> {
+    const now = Date.now();
+    const entry = this.entries.get(key) as CacheEntry<T> | undefined;
+
+    if (entry && now < entry.freshUntil) {
+      return of({ value: entry.value, freshness: 'fresh' });
+    }
+
+    const refresh$ = this.load(key, policy, loader);
+
+    if (entry && now < entry.staleUntil) {
+      return concat(
+        of({ value: entry.value, freshness: 'stale' as const }),
+        refresh$,
+      );
+    }
+
+    return refresh$;
+  }
+
+  invalidate(key: string): void {
+    this.entries.delete(key);
+  }
+
+  invalidateWhere(matches: (key: string) => boolean): void {
+    for (const key of this.entries.keys()) {
+      if (matches(key)) this.entries.delete(key);
+    }
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+
+  private load<T>(
+    key: string,
+    policy: CachePolicy,
+    loader: () => Observable<T>,
+  ): Observable<CacheResult<T>> {
+    const running = this.inFlight.get(key) as Observable<CacheResult<T>> | undefined;
+    if (running) return running;
+
+    const request$ = defer(loader).pipe(
+      map((value) => {
+        const fetchedAt = Date.now();
+        this.entries.set(key, {
+          value,
+          freshUntil: fetchedAt + policy.freshForMs,
+          staleUntil: fetchedAt + policy.freshForMs + policy.staleForMs,
+        });
+        return { value, freshness: 'network' as const };
+      }),
+      finalize(() => this.inFlight.delete(key)),
+      shareReplay({ bufferSize: 1, refCount: true }),
+    );
+
+    this.inFlight.set(key, request$);
+    return request$;
+  }
+}
+```
+
+`defer(loader)` trì hoãn lời gọi `HttpClient` cho đến khi có subscriber. `finalize()`
+xóa registry bất kể request thành công, lỗi hoặc subscription bị hủy. `shareReplay`
+chia sẻ response cho các subscriber đang chờ cùng key. Mẫu này chỉ deduplicate
+request có cùng key, vì vậy độ đúng của `taskListKey()` quan trọng ngang với toán
+tử RxJS.
+
+Service domain sử dụng cache và sở hữu policy, thay vì để component biết TTL:
+
+```ts
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { Observable, map } from 'rxjs';
+
+interface TaskDto {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  completed: boolean;
+}
+
+@Injectable({ providedIn: 'root' })
+export class TaskApi {
+  private readonly http = inject(HttpClient);
+  private readonly cache = inject(ApiCache);
+
+  list(userId: string, page: number): Observable<CacheResult<Task[]>> {
+    const key = taskListKey({
+      userId,
+      tenantId: 'current-tenant',
+      locale: 'vi',
+      page,
+      filter: 'all',
+    });
+
+    return this.cache.read(key, {
+      freshForMs: 30_000,
+      staleForMs: 90_000,
+    }, () => {
+      const params = new HttpParams().set('page', String(page));
+      return this.http
+        .get<TaskDto[]>('/api/tasks', { params })
+        .pipe(map((items) => items.map((dto) => ({
+          id: dto.id,
+          title: dto.title,
+          completed: dto.done,
+        }))));
+    });
+  }
+}
+```
+
+Ví dụ cố ý không lưu entry khi HTTP lỗi. Nếu API lỗi nhưng có entry stale, bản mẫu
+trên phát stale rồi stream kết thúc bằng error khi revalidate thất bại. Product cần
+quyết định UI sẽ giữ stale và hiện lỗi nhỏ, hay coi lỗi là chặn. Đừng `catchError`
+rồi biến mọi lỗi thành mảng rỗng: như vậy UI không còn phân biệt “không có task” và
+“không tải được task”.
+
+<Callout type="warn" title="Giới hạn bộ nhớ">
+  `Map` không tự có giới hạn. Cache cho search với key theo mỗi ký tự người dùng nhập có thể phình vô hạn. Giới hạn số entry, dùng LRU (xóa entry ít dùng gần đây), chỉ cache query đã ổn định, hoặc không cache search nếu lợi ích không rõ.
+</Callout>
+
+## Invalidation sau thay đổi dữ liệu
+
+TTL chỉ giới hạn độ cũ theo thời gian. Khi ứng dụng biết dữ liệu đổi vì một
+mutation thành công, **invalidation** thường chính xác hơn chờ TTL hết. Mục tiêu
+là xóa hoặc thay entry chịu ảnh hưởng để lần đọc tiếp theo không trả bản cũ.
+
+### Xóa, cập nhật trực tiếp hay làm mới?
+
+Ba chiến lược thông dụng có chi phí khác nhau:
+
+| Chiến lược | Cơ chế | Phù hợp khi | Rủi ro |
+| --- | --- | --- | --- |
+| Invalidate | Xóa entry rồi lần đọc sau tải lại. | Nhiều danh sách/phân trang bị ảnh hưởng. | Lần đọc kế tiếp phải chờ mạng. |
+| Write-through | Ghi response mutation vào cache detail. | API trả resource chuẩn sau `PATCH`. | Dễ quên cập nhật danh sách hoặc derived state. |
+| Refetch chủ động | Invalidate rồi gọi lại query đang hiển thị. | Cần UI phản ánh server ngay sau thao tác. | Tạo thêm request; cần chống race. |
+| Optimistic update | Đổi cache/UI trước, rollback khi lỗi. | Thao tác đơn giản, tần suất cao, rollback rõ. | Conflict và rollback phức tạp. |
+
+Nếu `PATCH /api/tasks/7` trả `Task` đã được server chuẩn hóa, có thể write-through
+cho key detail `task|id=7`. Tuy nhiên danh sách `tasks|page=1|filter=open` và
+danh sách `filter=done` cũng có thể đổi vị trí. Trừ khi app có index cache rõ
+ràng, invalidate namespace `tasks|...` rồi refetch màn hình đang mở an toàn hơn.
+
+### Đặt invalidation cạnh mutation
+
+Data-access service biết endpoint nào thay đổi resource nào, nên đó là nơi tự
+nhiên để giữ invalidation. Component chỉ gọi `complete()` và render state, không
+tự nhớ mọi cache key trong ứng dụng.
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { Observable, tap } from 'rxjs';
+
+interface UpdateTaskCommand {
+  title?: string;
+  done?: boolean;
+}
+
+@Injectable({ providedIn: 'root' })
+export class TaskCommands {
+  private readonly http = inject(HttpClient);
+  private readonly cache = inject(ApiCache);
+
+  update(id: string, command: UpdateTaskCommand): Observable<Task> {
+    return this.http.patch<Task>(`/api/tasks/${encodeURIComponent(id)}`, command).pipe(
+      tap(() => {
+        this.cache.invalidate(`task|id=${id}`);
+        this.cache.invalidateWhere((key) => key.startsWith('tasks|'));
+      }),
+    );
+  }
+
+  delete(id: string): Observable<void> {
+    return this.http.delete<void>(`/api/tasks/${encodeURIComponent(id)}`).pipe(
+      tap(() => {
+        this.cache.invalidate(`task|id=${id}`);
+        this.cache.invalidateWhere((key) => key.startsWith('tasks|'));
+      }),
+    );
+  }
+}
+```
+
+`tap()` chỉ chạy khi Observable được subscribe và request phát thành công. Nếu
+component không subscribe, `AsyncPipe` không dùng hoặc facade không thực thi
+command, mutation chưa xảy ra nên cache cũng không bị xóa. Với `PATCH` có ETag,
+hãy invalidation chỉ sau `2xx`; `412 Precondition Failed` nghĩa là server từ chối
+bản ghi cũ và UI cần tải lại resource để người dùng giải quyết conflict.
+
+Nếu mutation diễn ra từ tab khác, thiết bị khác, webhook hoặc background job,
+client hiện tại không biết ngay để invalidation. Khi yêu cầu này quan trọng, nhận
+sự kiện qua WebSocket/SSE, polling có version hoặc revalidate khi tab quay lại
+foreground. Invalidation cục bộ sau mutation không thay thế đồng bộ đa client.
+
+## Consistency và các giới hạn không thể tránh
+
+Cache là bản sao, vì vậy không thể hứa mọi view trong mọi tab luôn giống server ở
+mọi mili giây. Thay vào đó, mô tả mức consistency cần thiết và chọn cơ chế nhỏ
+nhất đáp ứng nó.
+
+### Các mức kỳ vọng nhất quán
+
+| Kỳ vọng | Ví dụ | Cách tiếp cận |
+| --- | --- | --- |
+| Eventual consistency | Avatar hoặc mô tả sản phẩm cập nhật sau ít giây/phút. | TTL + SWR; báo thời điểm cập nhật nếu cần. |
+| Read-your-writes | Vừa đổi trạng thái task, người dùng phải thấy thay đổi của mình. | Invalidate/refetch hoặc write-through sau mutation thành công. |
+| Version-aware write | Hai người cùng sửa một task, không được ghi đè thầm lặng. | ETag/`If-Match` hoặc trường `version`; server phát hiện conflict. |
+| Strong correctness at action | Không bán quá tồn kho hoặc thanh toán sai giá. | Luôn xác nhận điều kiện tại server khi thực hiện command. |
+
+`Read-your-writes` không đồng nghĩa mọi người dùng khác thấy ngay thay đổi. Nó chỉ
+là cam kết với người vừa thao tác. Nếu sản phẩm cần nhiều người cùng thấy một thay
+đổi gần thời gian thực, bổ sung event server hoặc polling. Đừng cố đạt điều đó chỉ
+bằng giảm TTL xuống 0; cách này vừa tạo tải vừa vẫn có race giữa các response.
+
+### Race condition và phiên bản dữ liệu
+
+Một race thường gặp là request cũ bắt đầu trước, request mới bắt đầu sau, nhưng
+request cũ lại về sau cùng và ghi đè cache mới. Invalidation không tự loại bỏ mọi
+request đã bay trước đó.
+
+```text
+T0: GET /tasks bắt đầu (A)
+T1: PATCH /tasks/7 thành công, cache bị invalidate
+T2: GET /tasks bắt đầu lại (B), server trả dữ liệu mới
+T3: A trả dữ liệu cũ và vô tình ghi đè kết quả của B
+```
+
+Có vài hàng rào, mỗi hàng rào giải quyết một phần:
+
+1. Gắn `generation` tăng dần cho namespace. Khi mutation xảy ra, tăng generation;
+   response bắt đầu ở generation cũ không được ghi vào cache hiện tại.
+2. Hủy request đọc thay thế khi UI đổi query bằng `switchMap`. Hủy ở client không
+   bảo đảm server dừng, nhưng ngăn kết quả cũ cập nhật consumer đó.
+3. Để server trả `version`, `updatedAt` hoặc ETag và chỉ chấp nhận response mới
+   hơn theo quy tắc domain. Timestamp client không đáng tin để so phiên bản server.
+4. Sau mutation nhạy cảm, refetch từ server thay vì tự đoán ảnh hưởng lên mọi
+   danh sách dẫn xuất.
+
+Ví dụ `generation` tối giản cho cache service có thể được thêm vào entry và closure
+của request. Chỉ ghi khi generation lúc response về vẫn bằng generation lúc request
+bắt đầu:
+
+```ts
+private readonly generations = new Map<string, number>();
+
+invalidateTaskNamespace(): void {
+  const current = this.generations.get('tasks') ?? 0;
+  this.generations.set('tasks', current + 1);
+  this.invalidateWhere((key) => key.startsWith('tasks|'));
+}
+
+// Khi bắt đầu GET /tasks:
+const generationAtStart = this.generations.get('tasks') ?? 0;
+
+// Khi response về, trước entries.set(...):
+if (generationAtStart !== (this.generations.get('tasks') ?? 0)) {
+  // Không ghi response đã bị mutation làm cũ vào cache.
+}
+```
+
+Đây là minh họa, không phải một implementation hoàn chỉnh: cần quyết định consumer
+vẫn nhận response cũ hay phải tự tải lại. Điểm chính là version/generation phải
+được kiểm tra ở lúc **ghi cache**, không chỉ ở lúc bắt đầu request.
+
+### Cache theo người dùng, tenant và đăng xuất
+
+Không chia sẻ cache private giữa hai danh tính chỉ vì chúng dùng cùng browser. Khi
+login thành user khác, đổi tenant hoặc đổi role, hãy xóa memory cache của identity
+cũ trước khi render dữ liệu mới. Nếu có persistence, xóa cả namespace bền hoặc
+mã hóa/partition theo identity theo mô hình đe dọa đã đánh giá.
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class SessionLifecycle {
+  private readonly cache = inject(ApiCache);
+
+  onLogout(): void {
+    this.cache.clear();
+    // Xóa cả IndexedDB/sessionStorage namespace nếu ứng dụng đã dùng chúng.
+  }
+
+  onIdentityChanged(): void {
+    this.cache.clear();
+  }
+}
+```
+
+Không đợi request logout thành công mới xóa UI cache. Khi người dùng chọn logout,
+ứng dụng không nên tiếp tục hiển thị dữ liệu private của phiên cũ. Server vẫn cần
+vô hiệu hóa session/token theo hợp đồng; dọn cache client không phải logout bảo mật
+ở backend.
+
+## Đặt cache ở interceptor hay service?
+
+Interceptor có thể short-circuit một `GET` bằng `HttpResponse` đã cache và không
+gọi `next()`. Cách này hợp với quy tắc hạ tầng rất đồng nhất, chẳng hạn cache một
+số endpoint public có policy đơn giản. Dùng `HttpContextToken` để request phải chủ
+động chọn vào cache; không cache mọi `GET` chỉ dựa vào URL.
+
+```ts
+import { HttpContextToken } from '@angular/common/http';
+
+export const CACHE_POLICY = new HttpContextToken<CachePolicy | null>(() => null);
+
+// Request muốn chọn cache:
+// this.http.get('/api/catalog', {
+//   context: new HttpContext().set(CACHE_POLICY, {
+//     freshForMs: 300_000,
+//     staleForMs: 0,
+//   }),
+// });
+```
+
+Tuy vậy, interceptor chỉ nhìn thấy method, URL, header và response. Nó thường
+không biết mutation nào làm danh sách phân trang bị cũ, cache có thuộc tenant nào
+hay UI có chấp nhận stale không. Cache domain trong `TaskApi`, facade hoặc store
+cho key có ý nghĩa và invalidation cạnh mutation rõ hơn.
+
+| Đặt ở đâu? | Điểm mạnh | Không phù hợp khi |
+| --- | --- | --- |
+| HTTP/CDN/browser cache | Chuẩn HTTP, tái sử dụng ngoài Angular, giảm tải ở edge. | Response thay đổi theo identity mà header cache không được thiết kế đúng. |
+| Interceptor | Chính sách kỹ thuật lặp lại, có thể opt-in bằng context. | Cần hiểu quan hệ giữa mutation và nhiều query domain. |
+| API service/facade/store | Key nghiệp vụ, invalidation và state UI rõ ràng. | Bị sao chép thành nhiều cache khác nhau không có convention chung. |
+
+Một kiến trúc thực tế thường dùng header HTTP cho caching mạng, `ApiCache` chung cho
+deduplication/memory mechanics, và service domain khai báo key cùng policy. Giữ ranh
+giới này giúp không biến interceptor thành lớp toàn năng.
+
+## Lỗi thường gặp và trade-off
+
+| Sai lầm | Hậu quả | Cách sửa |
+| --- | --- | --- |
+| Cache mọi `GET` vô điều kiện | Trả dữ liệu sai user/tenant, bỏ qua locale hoặc feature flag. | Opt-in; key gồm mọi biến thể có ý nghĩa; dùng `private`/`Vary` ở HTTP layer. |
+| Cache `POST`/`PATCH` như request đọc | Có thể lặp command hoặc trả kết quả không còn hợp lệ. | Chỉ cache response đọc idempotent trừ khi hợp đồng đặc biệt nói khác. |
+| Chỉ có TTL, không invalidation | Người vừa sửa vẫn thấy dữ liệu cũ tới lúc hết TTL. | Invalidate/write-through/refetch sau mutation thành công. |
+| Dùng stale cho mọi màn hình | Hành động dựa trên số dư, quyền hoặc giá cũ. | Phân loại dữ liệu; không stale ở quyết định quan trọng. |
+| `shareReplay` nằm trong hàm tạo Observable mới | Vẫn có nhiều request đồng thời. | Giữ registry in-flight dùng chung theo key. |
+| Cache cả error hoặc mảng rỗng giả | Lỗi mạng bị hiểu nhầm là không có dữ liệu và không thể retry. | Cache chỉ success; giữ error state riêng. |
+| Không dọn `inFlight` | Một request lỗi có thể khóa key mãi hoặc rò bộ nhớ. | Dọn bằng `finalize()` cho complete, error và cancel. |
+| Key theo chuỗi query không chuẩn hóa | `page=1&sort=name` và `sort=name&page=1` bị cache hai lần. | Tạo key có cấu trúc từ input đã chuẩn hóa. |
+| Persist response private | Người dùng sau hoặc XSS đọc dữ liệu cũ trên thiết bị. | Ưu tiên memory; partition/xóa persistence theo identity và giảm dữ liệu lưu. |
+| Cache che race request | Response cũ ghi đè state mới sau mutation. | Hủy request thay thế, dùng generation/version và refetch khi cần. |
+
+Cache có chi phí vận hành: metric hit/miss, quota bộ nhớ, key version khi DTO đổi,
+quan sát invalidation và test các luồng đăng nhập/mutation. Chỉ thêm nó khi request
+lặp hoặc độ trễ là vấn đề đã đo. Một request đơn giản, rõ ràng đôi khi tốt hơn một
+cache phức tạp nhưng không có chủ sở hữu chính sách.
+
+## Checklist và tóm tắt
+
+Trước khi đưa một cache API vào production, kiểm tra:
+
+- [ ] Resource được phân loại theo độ cũ có thể chấp nhận; TTL có lý do nghiệp vụ.
+- [ ] Cache key bao gồm query đã chuẩn hóa, locale, tenant và phạm vi identity khi
+  response phụ thuộc các giá trị đó; không chứa token thô.
+- [ ] Response HTTP có `Cache-Control`, `ETag` và `Vary` chính xác nếu dùng browser
+  cache, CDN hoặc proxy.
+- [ ] Entry có phân biệt fresh, stale và expired; SWR chỉ được bật nơi UI chấp nhận
+  dữ liệu cũ.
+- [ ] Request đang bay cùng key được gộp và luôn được xóa khỏi registry khi hoàn tất,
+  lỗi hoặc bị hủy.
+- [ ] Mutation thành công invalidates hoặc cập nhật mọi query bị ảnh hưởng; có kế
+  hoạch cho thay đổi từ tab/thiết bị khác.
+- [ ] Race response cũ sau mutation được xem xét; dữ liệu quan trọng có version/ETag
+  và server xác nhận điều kiện cuối.
+- [ ] Cache private bị xóa khi logout, đổi user, đổi tenant hoặc đổi quyền; persistence
+  không giữ secret và có giới hạn dung lượng.
+- [ ] Có test cache hit/miss, expiry, deduplication, error, invalidation và identity
+  boundary; metric không log key chứa dữ liệu nhạy cảm.
+
+Tóm lại, cache dữ liệu API là một hợp đồng về **bản sao** và **độ cũ**, không phải
+một `Map` đặt trước `HttpClient`. Bắt đầu bằng lớp cache đúng: header HTTP cho
+response có semantics mạng rõ ràng, service domain cho policy theo nghiệp vụ.
+Đặt cache key đúng phạm vi, dùng TTL để giới hạn độ cũ, gộp request đang bay và
+invalidation ngay sau mutation. Khi tính mới là điều kiện quan trọng, xác nhận lại
+ở server bằng version hoặc điều kiện ghi thay vì tin cache phía client.
+
+## Đọc tiếp
+
+<Cards>
+  <Card
+    title="HttpClient"
+    href="/docs/http-api-auth/http-client"
+    description="Cấu hình request, lifecycle Observable và resource trong Angular."
+  />
+  <Card
+    title="Interceptors"
+    href="/docs/http-api-auth/interceptors"
+    description="Tập trung chính sách HTTP dùng chung và ngoại lệ bằng HttpContext."
+  />
+  <Card
+    title="Xử lý lỗi API"
+    href="/docs/http-api-auth/xu-ly-loi-api"
+    description="Phân loại lỗi mạng/HTTP và retry có kiểm soát."
+  />
+</Cards>

@@ -1,10 +1,569 @@
 ---
-title: Bảo mật
-description: Phòng tránh XSS, xử lý dữ liệu không tin cậy và bảo vệ cấu hình.
+title: Bảo mật frontend Angular
+description: Threat model, XSS, CSP, CSRF, xác thực và vận hành bảo mật cho ứng dụng Angular trên môi trường production.
 ---
 
-Trang này sẽ trình bày **Bảo mật** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="warn" title="Ranh giới quan trọng">
+  Angular giúp giảm một số rủi ro XSS trong template, nhưng frontend không phải là biên bảo mật. Mọi quyền truy cập dữ liệu, vai trò người dùng và kiểm tra nghiệp vụ vẫn phải được xác thực lại ở API.
 </Callout>
+
+## Mục lục
+
+- [Mục tiêu và nguyên tắc](#mục-tiêu-và-nguyên-tắc)
+- [Threat model: frontend bảo vệ được gì?](#threat-model-frontend-bảo-vệ-được-gì)
+  - [Tài sản, tác nhân và điểm vào](#tài-sản-tác-nhân-và-điểm-vào)
+  - [Luồng tin cậy](#luồng-tin-cậy)
+  - [Ưu tiên xử lý](#ưu-tiên-xử-lý)
+- [XSS và sanitization](#xss-và-sanitization)
+  - [Cơ chế an toàn mặc định của Angular](#cơ-chế-an-toàn-mặc-định-của-angular)
+  - [Ví dụ render dữ liệu không tin cậy](#ví-dụ-render-dữ-liệu-không-tin-cậy)
+  - [Khi nào mới dùng DomSanitizer](#khi-nào-mới-dùng-domsanitizer)
+  - [Lỗi phổ biến và trade-off](#lỗi-phổ-biến-và-trade-off)
+- [Content Security Policy (CSP)](#content-security-policy-csp)
+  - [CSP chặn điều gì](#csp-chặn-điều-gì)
+  - [Thiết kế policy cho Angular](#thiết-kế-policy-cho-angular)
+  - [Đưa CSP vào production](#đưa-csp-vào-production)
+  - [Báo cáo và rollout](#báo-cáo-và-rollout)
+- [CSRF, CORS và request đến API](#csrf-cors-và-request-đến-api)
+  - [Phân biệt CSRF và CORS](#phân-biệt-csrf-và-cors)
+  - [Cookie session và CSRF token](#cookie-session-và-csrf-token)
+  - [CORS phải được cấu hình ở server](#cors-phải-được-cấu-hình-ở-server)
+- [Token, session và xác thực](#token-session-và-xác-thực)
+  - [Chọn mô hình](#chọn-mô-hình)
+  - [Lưu token an toàn theo ngữ cảnh](#lưu-token-an-toàn-theo-ngữ-cảnh)
+  - [Interceptor và vòng đời đăng nhập](#interceptor-và-vòng-đời-đăng-nhập)
+- [Dependency, supply chain và secret](#dependency-supply-chain-và-secret)
+  - [Kiểm soát dependency](#kiểm-soát-dependency)
+  - [Không đặt secret trong bundle](#không-đặt-secret-trong-bundle)
+- [Security headers và triển khai](#security-headers-và-triển-khai)
+  - [Bộ header tối thiểu](#bộ-header-tối-thiểu)
+  - [Ví dụ cấu hình reverse proxy](#ví-dụ-cấu-hình-reverse-proxy)
+- [Quy trình xử lý phát hiện bảo mật](#quy-trình-xử-lý-phát-hiện-bảo-mật)
+- [Checklist trước khi phát hành](#checklist-trước-khi-phát-hành)
+- [Tóm tắt](#tóm-tắt)
+
+## Mục tiêu và nguyên tắc
+
+Bảo mật frontend là giảm khả năng mã độc chạy trong trình duyệt, giảm dữ liệu lộ ra ngoài và làm cho request đến API có nguồn gốc rõ ràng. Đây là **defense in depth**: nhiều lớp phòng vệ độc lập, thay vì tin vào một lớp duy nhất.
+
+Bốn nguyên tắc dùng xuyên suốt trang này:
+
+1. **Mọi input đều không tin cậy.** Input gồm cả nội dung người dùng nhập, HTML từ CMS, query parameter, API response, `postMessage`, `localStorage` và cấu hình runtime.
+2. **Không cấp quyền ở client.** Route guard, nút bị ẩn hay claim trong JWT chỉ phục vụ trải nghiệm. API phải tự kiểm tra danh tính, quyền và quyền sở hữu bản ghi.
+3. **Giảm quyền mặc định.** Chỉ cho phép origin, method, script source và dependency thực sự cần thiết.
+4. **Ưu tiên thiết kế có thể kiểm chứng.** Policy, header, lockfile và checklist phải được review, theo dõi và có đường rollback.
+
+<Callout type="idea" title="Cách đọc">
+  Mỗi chủ đề đi theo cùng một nhịp: khái niệm, cơ chế, ví dụ an toàn, sau đó là lỗi và trade-off. Áp dụng các ví dụ ở backend, CDN hoặc reverse proxy tương ứng; Angular không thể tự đặt header HTTP cho tài liệu HTML ban đầu.
+</Callout>
+
+## Threat model: frontend bảo vệ được gì?
+
+Threat model là mô tả ngắn về thứ cần bảo vệ, ai có thể tấn công và đường tấn công. Không cần dự đoán mọi lỗi; mục tiêu là chọn đúng lớp phòng vệ trước các rủi ro có hậu quả lớn.
+
+### Tài sản, tác nhân và điểm vào
+
+| Thành phần | Ví dụ | Rủi ro chính | Lớp bảo vệ chính |
+| --- | --- | --- | --- |
+| Phiên đăng nhập | session cookie, refresh token | chiếm phiên, CSRF | `HttpOnly`, `Secure`, `SameSite`, CSRF defense, HTTPS |
+| Dữ liệu hiển thị | tên, bình luận, HTML CMS | XSS, rò rỉ dữ liệu | escape/sanitize, CSP, authorization ở API |
+| Request API | `POST /api/payments` | gửi request trái phép, sửa dữ liệu | auth ở API, CSRF defense, CORS tối thiểu |
+| Bundle và pipeline | package npm, CI artifact | dependency độc hại, package bị chiếm | lockfile, audit, review, pin CI action |
+| Cấu hình public | API base URL, feature flag | hiểu nhầm là secret, trỏ nhầm môi trường | phân loại dữ liệu, validate config, secret ở server |
+
+Tác nhân không chỉ là “hacker” bên ngoài. Một tài khoản bình thường có thể gửi nội dung độc hại để nó chạy trong trình duyệt của quản trị viên. Một extension trình duyệt hoặc dependency bị cài cắm cũng có thể đọc dữ liệu mà JavaScript của trang truy cập được.
+
+### Luồng tin cậy
+
+Dữ liệu có thể đổi mức độ tin cậy khi đi qua nhiều hệ thống. Ví dụ, một bài viết do quản trị viên tạo vẫn nên được coi là không tin cậy khi được API trả lại: tài khoản quản trị có thể bị chiếm hoặc CMS có thể lưu HTML sai.
+
+```text
+┌────────────────┐     input / HTML / URL      ┌─────────────────┐
+│ Người dùng/CMS │ ───────────────────────────►│ API hoặc CDN    │
+└────────────────┘                             └────────┬────────┘
+                                                        │ JSON / HTML
+                                                        ▼
+┌────────────────┐   DOM đã escape/sanitize    ┌─────────────────┐
+│ Trình duyệt    │ ◄────────────────────────── │ Angular app     │
+│ (cookie, DOM)  │ ───── request có auth ────► │ template/client │
+└───────┬────────┘                             └────────┬────────┘
+        │                                               │
+        │ CSP, cookie policy, browser CORS              │ authz + validation
+        ▼                                               ▼
+┌────────────────┐                              ┌─────────────────┐
+│ Origin khác    │                              │ API/Database    │
+└────────────────┘                              └─────────────────┘
+```
+
+Biểu đồ cho thấy browser thực thi một phần chính sách, nhưng API mới là nơi quyết định request có được phép hay không. CORS không thay thế authorization; nó chỉ là quy tắc browser áp dụng trước khi JavaScript đọc response cross-origin.
+
+### Ưu tiên xử lý
+
+Bắt đầu từ các tình huống có khả năng xảy ra và tác động lớn:
+
+- Nội dung HTML từ CMS hoặc rich-text đi vào `[innerHTML]`.
+- Ứng dụng dùng cookie session và có endpoint thay đổi dữ liệu.
+- Token sống lâu được đặt trong `localStorage`.
+- CSP đang có `unsafe-inline`, `unsafe-eval` hoặc `*` mà không có lý do rõ ràng.
+- CORS phản chiếu mọi `Origin`, đồng thời bật credentials.
+- NPM dependency hoặc CI action chưa được pin/version review.
+
+<Callout type="error" title="Không tin route guard">
+  `CanActivate` có thể bị bỏ qua bằng cách gọi API trực tiếp. API phải trả `401` khi chưa xác thực và `403` khi đã xác thực nhưng không có quyền, kể cả khi frontend chưa hề render route đó.
+</Callout>
+
+## XSS và sanitization
+
+**Cross-site scripting (XSS)** là việc dữ liệu không tin cậy trở thành JavaScript hoặc markup có khả năng thực thi trong origin của ứng dụng. Nếu XSS thành công, mã độc có thể thao tác DOM, gửi request bằng cookie hiện có, đọc token mà JavaScript truy cập được và thay đổi nội dung hiển thị.
+
+### Cơ chế an toàn mặc định của Angular
+
+Interpolation và phần lớn property binding của Angular không chèn input như HTML thực thi được. Ví dụ `{{ comment.body }}` được escape; chuỗi `<img ...>` hiện thành chữ thay vì trở thành element. Khi binding vào các ngữ cảnh nhạy cảm như HTML, URL, style và resource URL, Angular áp dụng quy tắc sanitization riêng.
+
+```ts
+@Component({
+  selector: 'app-comment',
+  template: `
+    <p>{{ comment.author }}</p>
+    <p>{{ comment.body }}</p>
+  `,
+})
+export class CommentComponent {
+  comment = {
+    author: 'Mai',
+    body: '<img src=x onerror="alert(document.domain)">',
+  };
+}
+```
+
+Đoạn trên an toàn hơn ghép chuỗi HTML vì `body` đi qua interpolation. Kết quả người dùng nhìn thấy là ký tự `<` và `>` chứ không phải thẻ `img`.
+
+Không biến dữ liệu thành code bằng các API DOM trực tiếp. Tránh `ElementRef.nativeElement.innerHTML = ...`, `document.write`, `eval`, `new Function`, và các thư viện nhận chuỗi HTML rồi tự gắn vào DOM. Những API này có thể bỏ qua lớp bảo vệ của Angular.
+
+### Ví dụ render dữ liệu không tin cậy
+
+Khi chỉ cần hiển thị text, dùng interpolation là lựa chọn mặc định:
+
+```html
+<!-- An toàn: Angular render dữ liệu như text -->
+<h2>{{ article.title }}</h2>
+<p>{{ article.summary }}</p>
+<a [routerLink]="['/articles', article.id]">Đọc bài</a>
+```
+
+Khi sản phẩm thật sự cần rich-text, hãy sanitize ở **hai nơi**:
+
+1. Ở server trước khi lưu hoặc trước khi phát trả, với allowlist tag, attribute và URL scheme phù hợp nghiệp vụ.
+2. Ở client trước khi render như một lớp dự phòng, đồng thời không dùng giá trị “trusted” để vượt sanitizer.
+
+```ts
+@Component({
+  selector: 'app-article-body',
+  template: `<section [innerHTML]="articleHtml"></section>`,
+})
+export class ArticleBodyComponent {
+  // API chỉ trả HTML đã được server sanitize theo allowlist.
+  articleHtml = '<p>Nội dung <strong>đã kiểm duyệt</strong>.</p>';
+}
+```
+
+Angular sẽ sanitize giá trị gắn vào `[innerHTML]`. Tuy vậy, sanitizer client không phải bộ lọc nghiệp vụ đầy đủ và có thể bỏ những markup mà editor mong muốn giữ lại. Allowlist ở server là nơi xác định chính sách nội dung lâu dài, nhất quán cho mọi client.
+
+### Khi nào mới dùng DomSanitizer
+
+`DomSanitizer.bypassSecurityTrustHtml()` không sanitize. Nó gắn nhãn “tôi đã tin giá trị này” để Angular ngừng bảo vệ ngữ cảnh đó. Chỉ dùng khi giá trị đến từ nguồn được kiểm soát hoàn toàn, đã được sanitize bằng chính sách có test, và ranh giới đó được ghi chú ngay tại code.
+
+Ví dụ dưới đây vẫn giữ trách nhiệm kiểm tra ở một service riêng. Không nhận `string` trực tiếp từ component rồi bypass.
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class TrustedContentService {
+  constructor(private readonly sanitizer: DomSanitizer) {}
+
+  fromReviewedTemplate(template: string): SafeHtml {
+    // `template` phải lấy từ artifact nội bộ đã review, không phải API/user input.
+    return this.sanitizer.bypassSecurityTrustHtml(template);
+  }
+}
+```
+
+<Callout type="warn" title="Đặt tên để lộ rủi ro">
+  Nếu bắt buộc bypass, đặt tên như `fromReviewedTemplate` thay vì `trustHtml`. Tên hàm phải nói rõ điều kiện tin cậy và review cần thiết. Lý tưởng nhất là không cần bypass.
+</Callout>
+
+URL cũng cần allowlist. Với link do người dùng cung cấp, chỉ chấp nhận scheme cần thiết như `https:` hoặc `mailto:` sau khi parse bằng `URL`; không tự nối chuỗi rồi gán vào `href`.
+
+```ts
+function safeExternalUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return ['https:', 'mailto:'].includes(url.protocol) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+```
+
+Nếu `safeExternalUrl()` trả `null`, hiển thị text hoặc bỏ link. Không thay `null` bằng URL gốc “cho tiện”.
+
+### Lỗi phổ biến và trade-off
+
+| Lỗi | Vì sao nguy hiểm | Cách thay thế | Trade-off |
+| --- | --- | --- | --- |
+| Gọi `bypassSecurityTrustHtml` cho response API | biến input thành HTML tin cậy | server sanitize + `[innerHTML]` bình thường | cần duy trì allowlist |
+| Dùng `innerHTML` để format text | mở đường parser HTML | interpolation, CSS, component riêng | ít tự do markup hơn |
+| Dùng `eval()` để parse “template” | thực thi code tùy ý | JSON schema hoặc component map tĩnh | phải thiết kế schema |
+| Tin URL bất kỳ | có thể dẫn tới scheme nguy hiểm hoặc phishing | parse URL, allowlist protocol/host | cần quy định link hợp lệ |
+| Chỉ sanitize ở client | client khác hoặc API consumer vẫn nhận dữ liệu bẩn | sanitize server là nguồn chuẩn | backend phức tạp hơn |
+
+Nói ngắn gọn: coi HTML là một định dạng đặc quyền. Nếu không có yêu cầu rich-text rõ ràng, không render HTML từ dữ liệu động.
+
+## Content Security Policy (CSP)
+
+CSP là HTTP response header nói với browser rằng script, style, ảnh, kết nối mạng, frame và nhiều loại tài nguyên khác được phép tải từ đâu. CSP không sửa lỗi XSS, nhưng làm giảm hậu quả khi một đường chèn script bị sót.
+
+### CSP chặn điều gì
+
+Một policy tốt có thể ngăn script inline không có nonce/hash, ngăn ứng dụng kết nối đến API lạ và ngăn trang bị nhúng vào iframe của origin khác. CSP chỉ có hiệu lực khi browser nhận được nó từ response document; đặt CSP qua JavaScript sau khi app chạy là quá muộn.
+
+Các directive thường cần xem xét:
+
+| Directive | Vai trò | Hướng mặc định |
+| --- | --- | --- |
+| `default-src` | fallback cho loại tài nguyên chưa khai báo | `'self'` |
+| `script-src` | nguồn JavaScript | `'self'` + nonce/hash cần thiết |
+| `style-src` | nguồn stylesheet | `'self'`; nonce/hash nếu có inline style |
+| `connect-src` | `fetch`, XHR, WebSocket | `'self'` và API/telemetry cụ thể |
+| `img-src` | ảnh | `'self'`, `data:` nếu thật sự cần, CDN cụ thể |
+| `font-src` | font | `'self'` và font CDN cụ thể |
+| `frame-ancestors` | ai được nhúng trang trong iframe | `'none'` hoặc allowlist |
+| `base-uri` | nguồn cho thẻ `<base>` | `'self'` |
+| `object-src` | plugin cũ như Flash | `'none'` |
+| `form-action` | nơi form có thể submit | `'self'` hoặc allowlist |
+
+### Thiết kế policy cho Angular
+
+Hãy bắt đầu policy hẹp và thêm từng nguồn có lý do. Ví dụ khi SPA và API cùng origin, có thể bắt đầu như sau:
+
+```http
+Content-Security-Policy:
+  default-src 'self';
+  base-uri 'self';
+  object-src 'none';
+  frame-ancestors 'none';
+  form-action 'self';
+  img-src 'self' data:;
+  font-src 'self';
+  style-src 'self';
+  script-src 'self';
+  connect-src 'self';
+  upgrade-insecure-requests
+```
+
+Nếu app dùng API `https://api.example.com` và Sentry, khai báo tường minh thay vì mở `*`:
+
+```http
+connect-src 'self' https://api.example.com https://o123.ingest.sentry.io;
+```
+
+Không thêm `'unsafe-inline'` vào `script-src` để “sửa nhanh” lỗi CSP. Giá trị này làm inline script dễ chạy hơn và giảm ý nghĩa của CSP trước XSS. Khi cần script inline do server tạo, dùng **nonce ngẫu nhiên theo từng response** hoặc hash nội dung cố định. Nonce phải khó đoán, không tái sử dụng và được đưa đồng thời vào header lẫn thẻ script hợp lệ.
+
+Angular có cơ chế nonce cho style động. Nếu ứng dụng dùng CSP nonce, truyền cùng nonce từ document vào cấu hình Angular theo cách phù hợp phiên bản và kiến trúc đang dùng, rồi xác nhận các style runtime không bị browser chặn. Đừng tắt CSP chỉ vì style injection bị lỗi; hãy tìm đúng nguồn inline cần nonce.
+
+<Callout type="info" title="CSP và development">
+  Dev server, HMR, source map và extension có thể cần `localhost`, WebSocket hoặc `unsafe-eval`. Policy development không nên được sao chép nguyên trạng sang production. Kiểm tra header trên response HTML production thực tế.
+</Callout>
+
+### Đưa CSP vào production
+
+CSP nên đặt ở nơi phát `index.html`: reverse proxy, CDN, backend hoặc hosting platform. Với ứng dụng có SSR, server render response là nơi phù hợp để tạo nonce theo request. Với static hosting, dùng policy không cần nonce nếu bundle và style không đòi inline script; nếu không, chọn hosting có hỗ trợ header/edge logic phù hợp.
+
+`<meta http-equiv="Content-Security-Policy">` chỉ là phương án dự phòng hạn chế. Nó không hỗ trợ toàn bộ directive như HTTP header và được browser đọc sau khi bắt đầu parse tài liệu. Ưu tiên response header.
+
+### Báo cáo và rollout
+
+Rollout CSP có thể làm vỡ analytics, CDN font hoặc widget bên thứ ba. Triển khai theo thứ tự:
+
+1. Lập danh sách tất cả origin tải script, connect, font, ảnh và frame.
+2. Đặt `Content-Security-Policy-Report-Only` trong staging hoặc một tỷ lệ traffic nhỏ.
+3. Thu report, đối chiếu với DevTools Console và loại bỏ nguồn không cần thiết.
+4. Chuyển sang `Content-Security-Policy` enforce.
+5. Theo dõi vi phạm sau deploy; mọi origin mới phải qua review.
+
+Endpoint nhận CSP report không được tin dữ liệu report như dữ liệu nghiệp vụ. Giới hạn tốc độ, lọc log và không đưa payload thô vào dashboard có khả năng render HTML.
+
+## CSRF, CORS và request đến API
+
+### Phân biệt CSRF và CORS
+
+**CSRF (cross-site request forgery)** xảy ra khi browser tự đính kèm credential dựa trên cookie vào request do trang độc hại khởi tạo. Nếu API chỉ dựa vào cookie và không có lớp xác minh bổ sung, hành động thay đổi dữ liệu có thể bị thực hiện thay người dùng.
+
+**CORS (cross-origin resource sharing)** là cơ chế browser yêu cầu server cho phép JavaScript từ origin khác đọc response. CORS không ngăn request đơn giản được gửi, không bảo vệ non-browser client và không thay cho kiểm tra authentication/authorization.
+
+Ví dụ: `https://evil.example` có thể thử gửi một form `POST` tới `https://app.example/api/email`. CORS có thể khiến JavaScript ở `evil.example` không đọc được response, nhưng không tự đảm bảo request không thay đổi email. CSRF defense là lớp giải quyết việc đó.
+
+### Cookie session và CSRF token
+
+Khi xác thực bằng cookie, đặt cookie session ở server với các thuộc tính phù hợp:
+
+```http
+Set-Cookie: __Host-session=<opaque-session-id>; Path=/; Secure; HttpOnly; SameSite=Lax
+```
+
+- `Secure` chỉ gửi cookie qua HTTPS.
+- `HttpOnly` ngăn JavaScript đọc cookie, nên giảm hậu quả của XSS đối với việc đánh cắp cookie.
+- `SameSite=Lax` chặn nhiều request cross-site tự động nhưng không phải lý do để bỏ CSRF protection.
+- Prefix `__Host-` yêu cầu `Secure`, `Path=/` và không có `Domain`; nó giảm rủi ro cookie bị subdomain ghi đè.
+
+Với endpoint thay đổi trạng thái (`POST`, `PUT`, `PATCH`, `DELETE`), kết hợp cookie với CSRF token. Một mẫu phổ biến là **signed double-submit**: server phát token không nhạy cảm trong cookie có thể đọc được, Angular gửi token đó ở custom header, và server xác minh chữ ký/liên kết token với session. Trang cross-site có thể làm browser gửi cookie, nhưng không thể tùy ý đọc cookie để đặt custom header do same-origin policy.
+
+Angular `HttpClient` hỗ trợ XSRF cho request cùng origin. Cấu hình tên cookie/header cần khớp hoàn toàn với backend:
+
+```ts
+import { provideHttpClient, withXsrfConfiguration } from '@angular/common/http';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(
+      withXsrfConfiguration({
+        cookieName: 'XSRF-TOKEN',
+        headerName: 'X-XSRF-TOKEN',
+      }),
+    ),
+  ],
+};
+```
+
+Không gửi XSRF token sang origin API khác chỉ vì dùng chung backend. Nếu frontend và API khác origin, hãy thiết kế rõ mô hình credentials, CORS và CSRF với backend. Cách đơn giản, ít sai nhất là phục vụ API qua cùng site/origin bằng reverse proxy khi phù hợp kiến trúc.
+
+<Callout type="warn" title="CSRF token không thay thế XSS defense">
+  JavaScript chạy được trong origin hợp lệ thường có thể gửi token CSRF. Vì vậy XSS và CSRF là hai lớp khác nhau: vẫn cần escape/sanitize, CSP và CSRF defense.
+</Callout>
+
+### CORS phải được cấu hình ở server
+
+Chỉ server/API mới có thể gửi `Access-Control-Allow-*`. Code Angular không thể “bật CORS”; `withCredentials: true` chỉ yêu cầu browser gửi credential, không cấp phép nó.
+
+Cấu hình an toàn cho frontend `https://app.example.com` gọi `https://api.example.com` cần cụ thể như sau:
+
+```http
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Credentials: true
+Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE
+Access-Control-Allow-Headers: Content-Type, X-XSRF-TOKEN
+Vary: Origin
+```
+
+Không dùng `Access-Control-Allow-Origin: *` cùng `Access-Control-Allow-Credentials: true`; browser sẽ từ chối tổ hợp này. Cũng không phản chiếu `Origin` vô điều kiện. Server phải so origin với allowlist và chỉ trả header khi khớp.
+
+Preflight `OPTIONS` không thay thế authorization. API vẫn phải xác minh cookie/token, CSRF token (nếu dùng) và quyền cho request thật.
+
+## Token, session và xác thực
+
+### Chọn mô hình
+
+Không có một nơi lưu token phù hợp cho mọi ứng dụng. Chọn dựa trên mức độ nhạy cảm, loại client, domain deployment và khả năng chống XSS/CSRF của hệ thống.
+
+| Mô hình | Ưu điểm | Rủi ro/cái giá | Phù hợp khi |
+| --- | --- | --- | --- |
+| Opaque session trong `HttpOnly` cookie | JS không đọc được session ID; revoke dễ ở server | cần CSRF defense và vận hành session store | web app first-party |
+| Access token ngắn hạn trong bộ nhớ | mất khi reload, không bền trong XSS sau reload | refresh flow phức tạp; tab mới cần khôi phục | SPA có OAuth/OIDC |
+| BFF (backend for frontend) + cookie | token OAuth không vào browser JS; policy tập trung | thêm service/hạ tầng | ứng dụng nhạy cảm hoặc nhiều upstream API |
+| Token trong `localStorage` | dễ triển khai và bền qua reload | XSS đọc/đánh cắp được | chỉ cân nhắc khi đã chấp nhận rủi ro rõ ràng |
+
+Đối với web frontend có dữ liệu nhạy cảm, session `HttpOnly` cookie hoặc BFF thường tạo ranh giới tốt hơn việc giữ refresh token trong `localStorage`. `HttpOnly` không chữa XSS: mã độc vẫn có thể thực hiện hành động bằng phiên hiện tại. Nó chỉ làm khó việc mang credential đi nơi khác.
+
+Access token cần ngắn hạn. Refresh token cần rotation, phát hiện reuse và cơ chế revoke ở authorization server. Không log token, authorization header, cookie hoặc payload chứa token vào console, telemetry hay error tracker.
+
+### Lưu token an toàn theo ngữ cảnh
+
+Nếu buộc phải dùng bearer token phía browser, giữ access token trong service bộ nhớ thay vì persistent storage, và bảo đảm các request đến đúng origin. Không gắn `Authorization` vào URL: URL có thể xuất hiện trong history, log proxy, `Referer` hoặc analytics.
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class AccessTokenStore {
+  private token: string | null = null;
+
+  set(token: string): void {
+    this.token = token;
+  }
+
+  get(): string | null {
+    return this.token;
+  }
+
+  clear(): void {
+    this.token = null;
+  }
+}
+```
+
+Service này không tự làm token an toàn. Nó chỉ khiến token biến mất khi tab đóng/reload, từ đó giảm persistence. Vẫn cần bảo vệ XSS và có flow đăng nhập/refresh được thiết kế ở identity provider hoặc BFF.
+
+### Interceptor và vòng đời đăng nhập
+
+Interceptor là vị trí nhất quán để đính kèm bearer token cho **API allowlist**, không phải cho mọi request. Ví dụ sau chỉ thêm header khi URL có cùng origin API đã cấu hình:
+
+```ts
+export const authInterceptor: HttpInterceptorFn = (request, next) => {
+  const tokenStore = inject(AccessTokenStore);
+  const apiOrigin = 'https://api.example.com';
+  const target = new URL(request.url, apiOrigin);
+  const token = tokenStore.get();
+
+  if (token && target.origin === apiOrigin) {
+    request = request.clone({
+      setHeaders: { Authorization: `Bearer ${token}` },
+    });
+  }
+
+  return next(request);
+};
+```
+
+`apiOrigin` là base URL cấu hình thay vì `window.location`, nên việc kiểm tra origin
+không chạm browser global khi Angular SSR. Không tự động retry `401` vô hạn. Một
+refresh flow cần single-flight (nhiều request cùng chờ một lần refresh), giới hạn
+retry và logout/xóa state khi refresh thất bại. Phân biệt `401` với `403`: `401`
+thường là thiếu/hết hạn xác thực; `403` là đã xác thực nhưng không được phép. Không
+cố refresh token chỉ vì nhận `403`.
+
+<Callout type="idea" title="Authorization luôn nằm ở API">
+  Frontend có thể đọc role để ẩn nút “Xóa”, nhưng endpoint xóa vẫn phải kiểm tra quyền và quyền sở hữu tài nguyên. UI chỉ là hướng dẫn, không phải cổng bảo vệ.
+</Callout>
+
+## Dependency, supply chain và secret
+
+### Kiểm soát dependency
+
+Mỗi package chạy trong build hoặc bundle đều là một phần của bề mặt tấn công. Một dependency transitive có thể có lỗ hổng hoặc bị chiếm quyền phát hành.
+
+Thực hành tối thiểu:
+
+- Commit lockfile và dùng cài đặt xác định, ví dụ `npm ci` trong CI thay vì `npm install` tùy ý.
+- Review package mới: maintainer, mức độ sử dụng, license, quyền postinstall và lý do cần package.
+- Cập nhật dependency theo đợt nhỏ, có test; ưu tiên bản vá lỗ hổng có mức độ ảnh hưởng thực tế.
+- Chạy `npm audit` như tín hiệu, sau đó đánh giá đường thực thi và bản vá. Không dùng `npm audit fix --force` mù quáng vì có thể nâng breaking change.
+- Pin phiên bản GitHub Action/CI action theo commit SHA khi chính sách tổ chức yêu cầu supply-chain hardening.
+- Bảo vệ npm organization bằng MFA và token publish có scope, thời hạn ngắn nếu đội ngũ phát hành package.
+
+`npm audit` không chứng minh ứng dụng an toàn. Nó dựa trên advisory đã biết và có thể báo false positive theo đường code không dùng. Ngược lại, bỏ qua mọi báo cáo vì “app không gọi package đó” cũng nguy hiểm. Ghi nhận quyết định, owner và thời hạn xem lại cho từng ngoại lệ.
+
+### Không đặt secret trong bundle
+
+Mọi giá trị được Angular build vào JavaScript đều có thể bị người dùng tải và đọc. Các biến môi trường frontend chỉ là **cấu hình public**, dù có tên `API_KEY`, `SECRET` hay nằm trong file environment.
+
+```ts
+// Có thể public: endpoint, ID public, cờ tính năng không nhạy cảm.
+export const environment = {
+  production: true,
+  apiBaseUrl: 'https://api.example.com',
+  analyticsSiteId: 'public-site-id',
+};
+```
+
+Không đặt private API key, database password, signing key, OAuth client secret hoặc credential service-to-service vào `environment.ts`, JSON runtime config hay source map. Đưa secret vào server, secret manager hoặc CI secret store; client gọi backend/BFF để thực hiện thao tác đặc quyền.
+
+Source map giúp debug nhưng có thể lộ cấu trúc và source code. Chọn policy theo sản phẩm: không public source map, upload source map riêng vào error tracker với access control, hoặc chấp nhận public khi code không nhạy cảm. Dù chọn cách nào, source map không bao giờ được chứa secret.
+
+## Security headers và triển khai
+
+### Bộ header tối thiểu
+
+Headers được gửi từ CDN, reverse proxy hoặc backend phát `index.html` và API. Dưới đây là baseline để thảo luận, không phải chuỗi copy-paste bất biến.
+
+| Header | Giá trị/ý nghĩa gợi ý | Lưu ý |
+| --- | --- | --- |
+| `Content-Security-Policy` | policy hẹp theo phần CSP | rollout Report-Only trước |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | chỉ bật sau khi mọi subdomain hỗ trợ HTTPS; cân nhắc `preload` riêng |
+| `X-Content-Type-Options` | `nosniff` | tránh MIME sniffing |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | giảm URL/path bị gửi sang origin khác |
+| `Permissions-Policy` | ví dụ `camera=(), microphone=(), geolocation=()` | chỉ tắt capability app không dùng |
+| `Cross-Origin-Opener-Policy` | `same-origin` khi tương thích | có thể ảnh hưởng popup OAuth |
+| `Cross-Origin-Resource-Policy` | `same-site` hoặc phù hợp asset | kiểm tra CDN và resource cross-origin |
+
+`X-Frame-Options: DENY` vẫn hữu ích cho browser cũ, nhưng `frame-ancestors 'none'` trong CSP là cơ chế linh hoạt hơn. Nếu ứng dụng cần chạy trong iframe của portal đối tác, allowlist chính xác portal đó; không dùng `*` hoặc bỏ toàn bộ bảo vệ clickjacking chỉ để tích hợp nhanh.
+
+HSTS buộc browser dùng HTTPS cho domain đã thấy header. Bật HSTS khi HTTP redirect và certificate coverage đã ổn định. Nếu có subdomain cũ không HTTPS, `includeSubDomains` có thể làm chúng không truy cập được.
+
+### Ví dụ cấu hình reverse proxy
+
+Ví dụ Nginx dưới đây minh họa nơi đặt header. Thay origin, policy, asset CDN và API theo môi trường thật; không triển khai nguyên văn nếu chưa kiểm thử asset, OAuth popup và third-party widget.
+
+```nginx
+location / {
+  try_files $uri $uri/ /index.html;
+
+  add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; font-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self' https://api.example.com" always;
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+  add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+}
+```
+
+Dùng `always` để header vẫn xuất hiện ở response lỗi, nơi browser cũng cần policy. Xác minh bằng Network tab hoặc `curl -I https://app.example.com/`; kiểm tra response HTML, route deep-link và trang lỗi, không chỉ file JavaScript.
+
+## Quy trình xử lý phát hiện bảo mật
+
+Khi phát hiện XSS, token lộ hoặc CSP bị bypass, ưu tiên giảm tác động trước khi tối ưu nguyên nhân gốc:
+
+1. **Khoanh vùng:** xác định URL, phiên bản deploy, origin bị ảnh hưởng và dữ liệu/credential có thể đã lộ. Không dán token thật vào ticket hoặc chat.
+2. **Chặn:** gỡ nội dung độc hại, disable feature, thu hẹp CSP/CORS, rotate credential hoặc revoke session/token khi cần.
+3. **Sửa gốc:** loại bỏ sink nguy hiểm, thêm server-side validation/sanitization, sửa header hoặc cập nhật dependency.
+4. **Xác minh:** tái tạo bằng payload vô hại trong môi trường an toàn; kiểm tra response header, log và test regression.
+5. **Rút kinh nghiệm:** thêm test, lint rule, review checklist hoặc monitoring để lỗi không lặp lại.
+
+<Callout type="error" title="Sự cố token/session">
+  Nếu nghi ngờ refresh token, signing key hoặc session store bị lộ, hãy làm theo playbook incident của tổ chức ngay. “Đổi token ở client” không đủ; cần revoke/rotate tại identity provider hoặc server phát hành.
+</Callout>
+
+## Checklist trước khi phát hành
+
+Dùng checklist này cho release có thay đổi frontend, auth, hosting hoặc dependency:
+
+### Ranh giới và quyền
+
+- [ ] API kiểm tra authentication, authorization và quyền sở hữu resource cho mọi endpoint nhạy cảm.
+- [ ] Route guard và UI role chỉ được xem là cải thiện UX, không phải security control.
+- [ ] Các origin API, CDN, analytics và iframe đã được liệt kê, có owner và lý do sử dụng.
+
+### XSS và dữ liệu không tin cậy
+
+- [ ] Dữ liệu động được render bằng interpolation/property binding; không dùng DOM API trực tiếp.
+- [ ] Mọi `[innerHTML]` có nguồn dữ liệu, policy sanitize và test rõ ràng.
+- [ ] Không có `bypassSecurityTrust*` với input từ API, URL, CMS hoặc người dùng.
+- [ ] URL động được parse và allowlist protocol/host khi cần.
+- [ ] Không có `eval`, `new Function`, `document.write` hay template runtime không được review.
+
+### CSP và headers
+
+- [ ] CSP được trả bằng HTTP header cho `index.html`, không chỉ meta tag.
+- [ ] `script-src`, `connect-src`, `frame-ancestors` và `object-src` hẹp theo nhu cầu.
+- [ ] Không thêm `unsafe-inline`/`unsafe-eval` nếu chưa có ngoại lệ được review và kế hoạch loại bỏ.
+- [ ] CSP đã chạy Report-Only hoặc được kiểm tra trên luồng production quan trọng.
+- [ ] HSTS, `nosniff`, `Referrer-Policy` và `Permissions-Policy` đã được đánh giá cho domain.
+
+### CSRF, CORS và auth
+
+- [ ] Cookie session có `Secure`, `HttpOnly`, `SameSite` phù hợp và HTTPS ở mọi môi trường production.
+- [ ] Endpoint thay đổi dữ liệu có CSRF defense khi dùng cookie credential.
+- [ ] Tên XSRF cookie/header trong Angular khớp chính xác với server.
+- [ ] CORS allowlist origin cụ thể; không phản chiếu `Origin` vô điều kiện.
+- [ ] `Access-Control-Allow-Credentials` không được kết hợp với wildcard origin.
+- [ ] Bearer token chỉ được gửi đến API origin allowlist và không xuất hiện trong URL/log/telemetry.
+- [ ] Luồng refresh có giới hạn retry, logout khi thất bại và không retry `403` như `401`.
+
+### Dependency, artifact và secret
+
+- [ ] Lockfile được commit; CI dùng cài đặt xác định.
+- [ ] Dependency mới, advisory mức cao và script cài đặt đã được review.
+- [ ] Không có private key, password, client secret hoặc token publish trong bundle, source map hay runtime config public.
+- [ ] Source map có policy phát hành và access control phù hợp.
+- [ ] Response header thực tế đã được kiểm tra ở CDN/proxy production, gồm route deep-link và response lỗi.
+
+## Tóm tắt
+
+Angular tạo mặc định tốt cho template, nhưng bảo mật production cần nhiều lớp phối hợp. Render text thay vì HTML, chỉ trust nội dung có ranh giới kiểm duyệt rõ ràng và dùng CSP để giảm hậu quả của XSS. Với cookie, triển khai CSRF defense; với CORS, cấu hình allowlist ở server chứ không ở Angular.
+
+Session hoặc BFF thường giảm việc token nhạy cảm nằm trong JavaScript, nhưng không thay thế chống XSS và authorization tại API. Cuối cùng, giữ dependency có kiểm soát, không đưa secret vào bundle, và xác minh headers trên response thực tế trước mỗi phát hành.

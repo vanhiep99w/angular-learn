@@ -1,10 +1,497 @@
 ---
 title: Signals
-description: Tạo, đọc và cập nhật signal trong Angular.
+description: Quản lý state đồng bộ trong Angular bằng giá trị reactive có dependency được theo dõi.
 ---
 
-Trang này sẽ trình bày **Signals** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Bạn sẽ học gì?">
+  Signals phù hợp nhất cho state hiện tại của giao diện: giá trị form, tab đang chọn, bộ đếm, dữ liệu đã tải và các giá trị dẫn xuất từ chúng. Trang này tập trung vào `signal`, không đi sâu vào `computed`, `effect` hay RxJS.
 </Callout>
+
+## Mục lục
+
+- [Signals là gì?](#signals-là-gì)
+  - [Bài toán của state giao diện](#bài-toán-của-state-giao-diện)
+  - [Khi nào nên dùng Signals?](#khi-nào-nên-dùng-signals)
+- [Ba loại signal cần phân biệt](#ba-loại-signal-cần-phân-biệt)
+  - [WritableSignal: nguồn state có thể ghi](#writablesignal-nguồn-state-có-thể-ghi)
+  - [Signal chỉ đọc: một giao diện đọc giá trị](#signal-chỉ-đọc-một-giao-diện-đọc-giá-trị)
+  - [Readonly signal với asReadonly](#readonly-signal-với-asreadonly)
+- [Đọc signal và dependency tracking](#đọc-signal-và-dependency-tracking)
+  - [Đọc bằng lời gọi hàm](#đọc-bằng-lời-gọi-hàm)
+  - [Dependency được ghi nhận động](#dependency-được-ghi-nhận-động)
+- [Ghi state đúng cách](#ghi-state-đúng-cách)
+  - [set: thay thế toàn bộ giá trị](#set-thay-thế-toàn-bộ-giá-trị)
+  - [update: tính giá trị mới từ giá trị cũ](#update-tính-giá-trị-mới-từ-giá-trị-cũ)
+  - [mutate: mã cũ và lý do không dùng](#mutate-mã-cũ-và-lý-do-không-dùng)
+  - [Object và array: cập nhật bất biến](#object-và-array-cập-nhật-bất-biến)
+- [Flow từ event đến DOM](#flow-từ-event-đến-dom)
+- [Ví dụ hoàn chỉnh: danh sách công việc](#ví-dụ-hoàn-chỉnh-danh-sách-công-việc)
+  - [Component](#component)
+  - [Template và chuyện gì được theo dõi](#template-và-chuyện-gì-được-theo-dõi)
+- [Signals trong template và OnPush](#signals-trong-template-và-onpush)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Quên dấu ngoặc khi đọc](#quên-dấu-ngoặc-khi-đọc)
+  - [Mutation làm state khó dự đoán](#mutation-làm-state-khó-dự-đoán)
+  - [Lộ WritableSignal ra public API](#lộ-writablesignal-ra-public-api)
+  - [Dùng signal cho stream phức tạp](#dùng-signal-cho-stream-phức-tạp)
+- [Checklist chọn Signals](#checklist-chọn-signals)
+- [Tóm tắt](#tóm-tắt)
+
+## Signals là gì?
+
+Signal là một **hộp chứa giá trị hiện tại** mà Angular có thể theo dõi. Không giống biến JavaScript thông thường, nơi đọc signal được Angular ghi nhận. Khi giá trị signal thay đổi, Angular biết consumer nào — template, `computed` hoặc `effect` — có thể cần chạy lại.
+
+```ts
+import { signal } from '@angular/core';
+
+const quantity = signal(1);
+
+console.log(quantity()); // 1: đọc giá trị hiện tại
+quantity.set(2);         // ghi giá trị mới
+console.log(quantity()); // 2
+```
+
+Cú pháp `quantity()` có chủ đích: signal là một hàm không tham số để đọc giá trị. Điều này giúp phân biệt rõ thao tác **đọc reactive** với việc chỉ giữ một field bình thường.
+
+### Bài toán của state giao diện
+
+Một component thường có state thay đổi theo tương tác: tab đang mở, nội dung ô tìm kiếm hoặc trạng thái tải dữ liệu. Template phải phản ánh state đó mà không cần tự quản lý subscription cho từng giá trị.
+
+```text
+Người dùng click / dữ liệu về
+            │
+            ▼
+      component ghi signal
+            │
+            ▼
+  Angular biết consumer đã đọc signal
+            │
+            ▼
+  View liên quan được đánh dấu để kiểm tra
+            │
+            ▼
+       Binding khác biệt cập nhật DOM
+```
+
+Signal không thay thế DOM renderer hay change detection. Nó cung cấp thông tin chính xác rằng **giá trị nào** đã đổi và **ai đã đọc** giá trị đó. Angular vẫn thực hiện lượt đồng bộ template với DOM khi cần.
+
+### Khi nào nên dùng Signals?
+
+Dùng signal khi state có một giá trị hiện tại, được đọc đồng bộ và chủ yếu phục vụ UI. Các trường hợp phổ biến gồm:
+
+- Cờ `isOpen`, `isLoading`, lỗi hiện tại hoặc tab được chọn.
+- Giá trị form cục bộ, bộ đếm và lựa chọn của người dùng.
+- Kết quả HTTP đã được đưa về dạng state hiện tại của component.
+- State dùng chung có phạm vi nhỏ, ví dụ trong một service feature.
+
+Signal không phải một lựa chọn mặc định cho mọi dữ liệu. Một luồng tìm kiếm có `debounce`, hủy request cũ, retry và ghép nhiều nguồn thời gian thực vẫn phù hợp với RxJS. Có thể dùng RxJS ở ranh giới bất đồng bộ và chuyển kết quả thành signal để render UI.
+
+<Callout type="idea" title="Quy tắc chọn nhanh">
+  Nếu câu hỏi là “giá trị hiện tại của UI là gì?”, hãy bắt đầu với signal. Nếu câu hỏi là “xử lý một chuỗi sự kiện theo thời gian thế nào?”, hãy cân nhắc Observable/RxJS.
+</Callout>
+
+## Ba loại signal cần phân biệt
+
+Các loại TypeScript thể hiện ai có quyền ghi dữ liệu. Việc phân tách này quan trọng hơn tên kiểu: nó ngăn component con hoặc code bên ngoài vô tình sửa state mà chúng chỉ nên quan sát.
+
+| Loại | Tạo bằng | Có thể đọc `()` | Có thể ghi | Vai trò |
+| --- | --- | --- | --- | --- |
+| `WritableSignal<T>` | `signal(initialValue)` | Có | `set`, `update` | Nguồn state có thể thay đổi |
+| `Signal<T>` | `computed(...)`, `asReadonly()` hoặc API trả về | Có | Không | Giao diện chỉ đọc |
+| `InputSignal<T>` | `input(...)` | Có | Không, Angular gán input | Input reactive của component |
+
+`computed` và `InputSignal` là các chủ đề liên quan; ở đây trọng tâm là writable signal và readonly view của nó.
+
+### WritableSignal: nguồn state có thể ghi
+
+`signal()` trả về `WritableSignal<T>`. Đây là nơi component hoặc service sở hữu state thực hiện thay đổi.
+
+```ts
+import { signal, type WritableSignal } from '@angular/core';
+
+const selectedId: WritableSignal<number | null> = signal(null);
+
+selectedId.set(42);
+selectedId.update((id) => (id === 42 ? null : 42));
+```
+
+Một writable signal vừa là hàm đọc, vừa có các method ghi. Không cần khai báo kiểu tường minh nếu TypeScript có thể suy luận; annotation trong ví dụ chỉ nhằm làm rõ API.
+
+### Signal chỉ đọc: một giao diện đọc giá trị
+
+`Signal<T>` chỉ cho phép gọi hàm để đọc. Người nhận kiểu này không có `.set()` hay `.update()`, nên không thể thay đổi state qua reference đó.
+
+```ts
+import { signal, type Signal, type WritableSignal } from '@angular/core';
+
+const internalCount: WritableSignal<number> = signal(0);
+const count: Signal<number> = internalCount;
+
+console.log(count());
+// count.set(1); // Lỗi TypeScript: Signal<number> không có method set.
+```
+
+Đây là một ràng buộc ở mức API, không phải bản sao dữ liệu. `count` và `internalCount` vẫn đọc cùng một giá trị. Chủ sở hữu `internalCount` đổi state thì mọi nơi đọc `count()` nhận giá trị mới.
+
+### Readonly signal với asReadonly
+
+Khi service sở hữu state nhưng chỉ muốn công khai quyền đọc, gọi `asReadonly()`.
+
+```ts
+import { Injectable, signal } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class CartStore {
+  private readonly _itemCount = signal(0);
+
+  readonly itemCount = this._itemCount.asReadonly();
+
+  addOne(): void {
+    this._itemCount.update((count) => count + 1);
+  }
+}
+```
+
+Component dùng `cartStore.itemCount()` để hiển thị, rồi gọi `cartStore.addOne()` để yêu cầu thay đổi. Nó không được gọi `cartStore.itemCount.set(...)`. Mẫu này tạo một điểm ghi rõ ràng để validation, log hoặc quy tắc nghiệp vụ không bị rải khắp ứng dụng.
+
+<Callout type="warn" title="Readonly không clone sâu dữ liệu">
+  `asReadonly()` chỉ bỏ các method ghi trên signal. Nếu giá trị là object và code đang giữ reference tới object lồng bên trong, code đó vẫn có thể mutate object bằng JavaScript. Hãy coi dữ liệu trả ra là bất biến và tạo reference mới khi cập nhật.
+</Callout>
+
+## Đọc signal và dependency tracking
+
+### Đọc bằng lời gọi hàm
+
+Signal được đọc khi gọi nó: `user()` hoặc `items()`. Angular ghi nhận lần đọc đó nếu nó diễn ra trong một reactive consumer như template, `computed` hoặc `effect`.
+
+```ts
+const firstName = signal('Linh');
+
+const greeting = () => `Xin chào ${firstName()}`;
+console.log(greeting());
+```
+
+Lời gọi trong một method JavaScript bình thường vẫn trả giá trị mới nhất, nhưng bản thân method đó không tự chạy lại mỗi khi signal đổi. Dependency tracking chỉ có ý nghĩa khi Angular đang chạy template, `computed` hoặc `effect`.
+
+### Dependency được ghi nhận động
+
+Dependency không được khai báo một lần rồi cố định. Angular theo dõi những signal thực sự được đọc ở **lần chạy gần nhất**. Nhờ đó, nhánh điều kiện không tạo công việc thừa.
+
+```ts
+import { computed, signal } from '@angular/core';
+
+const showDetails = signal(false);
+const productName = signal('Bàn phím');
+
+const label = computed(() => {
+  if (!showDetails()) return 'Chi tiết đang ẩn';
+  return `Sản phẩm: ${productName()}`;
+});
+```
+
+Khi `showDetails()` là `false`, `label` không đọc `productName()`. Đổi `productName` lúc đó không làm `label` cần tính lại. Sau khi `showDetails.set(true)`, lần đọc `label()` tiếp theo mới tạo dependency tới `productName`.
+
+```text
+showDetails ───────────────► label (computed) ───► template
+                                  ▲
+                                  │ chỉ khi showDetails = true
+productName ──────────────────────┘
+```
+
+Đừng cố dự đoán dependency chỉ từ mã nguồn. Hãy nhìn vào đường chạy thực tế: signal nào được gọi trong lần render/tính toán đó mới là dependency.
+
+## Ghi state đúng cách
+
+Đọc signal bằng `()`. Ghi chỉ qua API của writable signal; không gán kiểu `count() = 1` và cũng không thay signal bằng một hàm mới.
+
+### set: thay thế toàn bộ giá trị
+
+Dùng `set(value)` khi đã có sẵn giá trị mới. Nó phù hợp cho cờ boolean, giá trị từ event hoặc dữ liệu trả về từ API.
+
+```ts
+const isMenuOpen = signal(false);
+const profile = signal<{ id: number; name: string } | null>(null);
+
+isMenuOpen.set(true);
+profile.set({ id: 7, name: 'Mai' });
+```
+
+Signal mặc định dùng so sánh identity (`Object.is`) để quyết định giá trị có thay đổi hay không. Với primitive, điều này có nghĩa đặt lại đúng cùng giá trị thường không tạo notification mới. Với object, reference mới là một giá trị khác.
+
+### update: tính giá trị mới từ giá trị cũ
+
+Dùng `update(updater)` khi state mới phụ thuộc state cũ. Angular đưa giá trị hiện tại vào callback; callback phải trả về giá trị kế tiếp.
+
+```ts
+const quantity = signal(1);
+
+quantity.update((current) => current + 1);
+quantity.update((current) => Math.max(0, current - 1));
+```
+
+`update` đặt logic chuyển state sát state đang sở hữu. Điều đó rõ hơn việc đọc rồi ghi ở hai statement, đặc biệt khi có validation hoặc dữ liệu là object/array.
+
+### mutate: mã cũ và lý do không dùng
+
+Bạn có thể gặp ví dụ Angular cũ dùng `mutate()`:
+
+```ts
+// API của các phiên bản Angular cũ; không dùng cho mã Angular hiện nay.
+items.mutate((list) => list.push(newItem));
+```
+
+`mutate()` từng cho phép sửa object/array tại chỗ và ép các consumer được thông báo. API này đã bị loại khỏi Angular hiện đại. Với mã mới, thay nó bằng `update()` và trả về một reference mới:
+
+```ts
+items.update((list) => [...list, newItem]);
+```
+
+Cách mới làm thay đổi dữ liệu hiện rõ trong debugger, phù hợp với `OnPush`, và không chia sẻ một object đã bị thay đổi âm thầm. Nếu đang bảo trì code cũ, kiểm tra phiên bản Angular trước khi migration; đừng thêm `mutate()` vào code mới.
+
+### Object và array: cập nhật bất biến
+
+Cập nhật bất biến (immutable update) nghĩa là không sửa trực tiếp object đang giữ. Thay vào đó, tạo object/array mới cho phần thay đổi. Không cần clone sâu toàn bộ dữ liệu; chỉ tạo mới các nhánh trên đường đến giá trị đã đổi.
+
+```ts
+interface Todo {
+  id: number;
+  title: string;
+  done: boolean;
+}
+
+const todos = signal<Todo[]>([
+  { id: 1, title: 'Đọc Signals', done: false },
+]);
+
+function toggleTodo(id: number): void {
+  todos.update((current) =>
+    current.map((todo) =>
+      todo.id === id ? { ...todo, done: !todo.done } : todo,
+    ),
+  );
+}
+```
+
+Không nên làm như sau:
+
+```ts
+// Không nên: sửa trực tiếp giá trị đang được signal giữ.
+todos()[0].done = true;
+```
+
+Mutation có thể khiến thay đổi khó truy vết, phá vỡ kỳ vọng của code đang chia sẻ reference, và không tạo một giá trị signal mới. Kết luận thực hành: coi giá trị của signal là readonly; dùng `set` hoặc `update` để công bố state kế tiếp.
+
+## Flow từ event đến DOM
+
+Ví dụ có một nút tăng số lượng. Template đọc `quantity()`, nên component trở thành consumer của signal đó.
+
+```text
+Người dùng nhấn “+”
+        │
+        ▼
+(click) gọi increase()
+        │
+        ▼
+quantity.update(value => value + 1)
+        │
+        ▼
+WritableSignal có giá trị mới
+        │
+        ├──► computed phụ thuộc bị invalid (nếu có)
+        │
+        └──► view đã đọc quantity() được đánh dấu
+                                      │
+                                      ▼
+                         Angular kiểm tra view phù hợp
+                                      │
+                                      ▼
+                         {{ quantity() }} đổi text trong DOM
+```
+
+Có hai ý cần nhớ. Thứ nhất, Angular chỉ theo dõi signal khi template **gọi** nó. Thứ hai, ghi signal không đồng nghĩa render đồng bộ toàn bộ ứng dụng; Angular lên lịch công việc cần thiết rồi cập nhật các binding có giá trị khác.
+
+## Ví dụ hoàn chỉnh: danh sách công việc
+
+Ví dụ này có một writable signal private, readonly signal công khai và các method là điểm duy nhất thay đổi state. Nó minh họa cách một component giữ state UI nhỏ gọn mà không cần store ngoài.
+
+### Component
+
+```ts
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+
+interface Todo {
+  id: number;
+  title: string;
+  done: boolean;
+}
+
+@Component({
+  selector: 'app-todo-list',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  templateUrl: './todo-list.component.html',
+})
+export class TodoListComponent {
+  private nextId = 3;
+
+  private readonly _todos = signal<Todo[]>([
+    { id: 1, title: 'Cài Angular', done: true },
+    { id: 2, title: 'Đọc về Signals', done: false },
+  ]);
+
+  readonly todos = this._todos.asReadonly();
+
+  add(title: string): void {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+
+    this._todos.update((current) => [
+      ...current,
+      { id: this.nextId++, title: trimmed, done: false },
+    ]);
+  }
+
+  toggle(id: number): void {
+    this._todos.update((current) =>
+      current.map((todo) =>
+        todo.id === id ? { ...todo, done: !todo.done } : todo,
+      ),
+    );
+  }
+
+  remove(id: number): void {
+    this._todos.update((current) => current.filter((todo) => todo.id !== id));
+  }
+}
+```
+
+`_todos` là nguồn state và chỉ class này có quyền ghi. `todos` là API đọc cho template. Mỗi method trả về array mới; các item không đổi giữ nguyên reference, còn item được toggle nhận object mới.
+
+### Template và chuyện gì được theo dõi
+
+```html
+<input #title type="text" placeholder="Việc cần làm" />
+<button type="button" (click)="add(title.value); title.value = ''">
+  Thêm
+</button>
+
+<ul>
+  @for (todo of todos(); track todo.id) {
+    <li>
+      <label>
+        <input
+          type="checkbox"
+          [checked]="todo.done"
+          (change)="toggle(todo.id)"
+        />
+        <span [class.done]="todo.done">{{ todo.title }}</span>
+      </label>
+      <button type="button" (click)="remove(todo.id)">Xóa</button>
+    </li>
+  } @empty {
+    <li>Chưa có công việc nào.</li>
+  }
+</ul>
+```
+
+`todos()` được gọi trong `@for`, do đó Angular ghi nhận template này phụ thuộc vào `todos`. Khi `add`, `toggle` hoặc `remove` gọi `_todos.update`, view được thông báo. `track todo.id` là một mối quan tâm khác nhưng bổ trợ tốt: nó giúp Angular tái sử dụng DOM node của item không đổi khi array có reference mới.
+
+<Callout type="idea" title="Ranh giới sở hữu rõ ràng">
+  Nếu component con chỉ hiển thị danh sách, truyền `todos` dưới dạng readonly signal hoặc truyền giá trị `todos()` qua input. Không để component con sửa trực tiếp store của component cha chỉ vì nó có reference tới array.
+</Callout>
+
+## Signals trong template và OnPush
+
+Angular tích hợp Signals trực tiếp với template. Khi template của component `OnPush` đọc một signal, Angular biết view đó là consumer. Lần signal đổi sau đó sẽ đánh dấu view để kiểm tra, nên không cần gọi `ChangeDetectorRef.markForCheck()` chỉ vì một handler đã dùng `.set()` hoặc `.update()`.
+
+```ts
+@Component({
+  selector: 'app-theme-toggle',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <button type="button" (click)="toggle()">
+      Giao diện: {{ isDark() ? 'tối' : 'sáng' }}
+    </button>
+  `,
+})
+export class ThemeToggleComponent {
+  readonly isDark = signal(false);
+
+  toggle(): void {
+    this.isDark.update((value) => !value);
+  }
+}
+```
+
+Không viết `{{ isDark }}`. Đó là reference tới hàm signal, không phải giá trị boolean. Cũng không cần chuyển signal thành Observable chỉ để dùng `AsyncPipe` trong trường hợp state đồng bộ đơn giản.
+
+Signals bổ sung cho `OnPush`, không làm `OnPush` trở nên vô nghĩa. Input mới, event trong template, `AsyncPipe` và các Angular notification khác vẫn là những cách hợp lệ để một view `OnPush` được kiểm tra.
+
+## Lỗi thường gặp và trade-off
+
+### Quên dấu ngoặc khi đọc
+
+```html
+<!-- Sai: tham chiếu hàm, không phải giá trị signal. -->
+<p>{{ count }}</p>
+
+<!-- Đúng: gọi signal để đọc. -->
+<p>{{ count() }}</p>
+```
+
+Tương tự trong TypeScript: `if (isSaving)` luôn kiểm tra object hàm, còn `if (isSaving())` kiểm tra boolean hiện tại.
+
+### Mutation làm state khó dự đoán
+
+```ts
+const user = signal({ name: 'An', tags: ['angular'] });
+
+// Không nên
+user().tags.push('signals');
+
+// Nên
+user.update((current) => ({
+  ...current,
+  tags: [...current.tags, 'signals'],
+}));
+```
+
+Cập nhật bất biến tốn một ít allocation và có thể dài hơn mutation tại chỗ. Đổi lại, code có lịch sử state rõ ràng và notification nhất quán. Với state UI thông thường, trade-off này thường đáng giá. Với dữ liệu lớn cần tối ưu, hãy đo đạc trước và thiết kế cấu trúc state nhỏ hơn thay vì quay về mutation mặc định.
+
+### Lộ WritableSignal ra public API
+
+```ts
+// Tránh công khai writable signal nếu service phải kiểm soát quy tắc ghi.
+readonly cartItems = signal<CartItem[]>([]);
+```
+
+Consumer bất kỳ lúc đó có thể gọi `cartItems.set([])` và bỏ qua validation. Hãy giữ writable signal private, công khai `asReadonly()` và cung cấp action như `addItem`, `changeQuantity`, `clear`.
+
+Có trường hợp công khai writable signal là hợp lý, chẳng hạn một component rất nhỏ tự sở hữu state và không có consumer bên ngoài. Quy tắc không phải “luôn private”, mà là quyền ghi phải thuộc đúng nơi chịu trách nhiệm cho state đó.
+
+### Dùng signal cho stream phức tạp
+
+Signal không có sẵn các toán tử như `switchMap`, `debounceTime`, retry/backoff hay khả năng biểu diễn lỗi/kết thúc của stream. Dùng nhiều `effect` để mô phỏng chúng thường tạo cancellation và lifecycle khó kiểm soát.
+
+Giữ RxJS cho luồng bất đồng bộ phức tạp. Khi UI cần giá trị mới nhất, chuyển Observable sang signal ở ranh giới component/service bằng interop phù hợp, rồi để template đọc signal. Trang [Signals và RxJS](/docs/reactivity-state/signals-rxjs) trình bày ranh giới này chi tiết hơn.
+
+## Checklist chọn Signals
+
+Trước khi thêm signal, trả lời các câu hỏi sau:
+
+1. Đây có phải là state hiện tại, đồng bộ của UI không? Nếu có, signal là ứng viên tốt.
+2. Ai sở hữu quyền ghi? Giữ `WritableSignal` tại nơi đó và chỉ công khai `Signal` readonly khi cần.
+3. State mới có phụ thuộc state cũ không? Dùng `update`; nếu đã có giá trị hoàn chỉnh, dùng `set`.
+4. Giá trị có object hoặc array không? Trả về reference mới cho phần thay đổi, tránh mutation.
+5. Template có gọi signal bằng `()` không? Không có lần đọc thì view không trở thành consumer.
+6. Đây có phải stream có debounce, cancellation hoặc phối hợp nhiều event không? Nếu có, RxJS có thể là công cụ chính xác hơn.
+
+## Tóm tắt
+
+- `signal(value)` tạo `WritableSignal`: đọc bằng `()`, ghi bằng `set()` hoặc `update()`.
+- `Signal<T>` là giao diện chỉ đọc. Dùng `asReadonly()` để che quyền ghi của state do service hoặc component sở hữu.
+- Angular theo dõi signal được đọc trong template, `computed` và `effect`; dependency thay đổi theo nhánh thực thi.
+- `set` thay thế giá trị đã có; `update` tạo giá trị mới từ giá trị cũ. Không dùng `mutate()` trong Angular hiện đại và tránh sửa object/array tại chỗ.
+- Template phải gọi `mySignal()`. Khi template `OnPush` đã đọc signal, cập nhật signal sẽ thông báo view phù hợp.
+- Signals làm state UI rõ ràng hơn, nhưng không thay thế RxJS cho các stream bất đồng bộ phức tạp.
+
+Tiếp theo, xem [Computed và effect](/docs/reactivity-state/computed-effect) để dẫn xuất state và đồng bộ với thế giới bên ngoài mà không tạo state trùng lặp.

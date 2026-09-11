@@ -1,10 +1,728 @@
 ---
 title: RxJS căn bản
-description: Observable, operator, subscription và các mẫu sử dụng phổ biến.
+description: Hiểu Observable, subscription, operators và cách quản lý vòng đời RxJS đúng cách trong Angular.
 ---
 
-Trang này sẽ trình bày **RxJS căn bản** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi bài học">
+  RxJS phù hợp để xử lý dữ liệu đến theo thời gian: HTTP, nhập liệu, route, timer và WebSocket. Bài này xây nền tảng Observable trước khi kết hợp nó với Signals hoặc state feature.
 </Callout>
+
+## Mục lục
+
+- [RxJS giải quyết bài toán gì?](#rxjs-giải-quyết-bài-toán-gì)
+  - [Luồng dữ liệu thay vì một giá trị](#luồng-dữ-liệu-thay-vì-một-giá-trị)
+  - [Từ nguồn đến consumer](#từ-nguồn-đến-consumer)
+- [Observable và subscription](#observable-và-subscription)
+  - [Observable là bản mô tả luồng](#observable-là-bản-mô-tả-luồng)
+  - [Ba loại notification](#ba-loại-notification)
+  - [Subscription là phiên chạy](#subscription-là-phiên-chạy)
+- [Tạo Observable thường gặp](#tạo-observable-thường-gặp)
+  - [of và from](#of-và-from)
+  - [interval và Observable tự tạo](#interval-và-observable-tự-tạo)
+  - [Nguồn Angular quen thuộc](#nguồn-angular-quen-thuộc)
+- [Operators: biến đổi luồng bằng pipe](#operators-biến-đổi-luồng-bằng-pipe)
+  - [map, filter và tap](#map-filter-và-tap)
+  - [Các operator theo thời gian](#các-operator-theo-thời-gian)
+  - [switchMap: thay luồng cũ bằng luồng mới](#switchmap-thay-luồng-cũ-bằng-luồng-mới)
+  - [Chọn flattening operator](#chọn-flattening-operator)
+- [Cold và hot Observable](#cold-và-hot-observable)
+  - [Cold: mỗi subscriber có một phiên riêng](#cold-mỗi-subscriber-có-một-phiên-riêng)
+  - [Hot: subscriber cùng nghe một nguồn đang chạy](#hot-subscriber-cùng-nghe-một-nguồn-đang-chạy)
+  - [Chia sẻ HTTP với shareReplay](#chia-sẻ-http-với-sharereplay)
+- [Error, completion và cleanup](#error-completion-và-cleanup)
+  - [Kết thúc bình thường và lỗi là hai nhánh khác nhau](#kết-thúc-bình-thường-và-lỗi-là-hai-nhánh-khác-nhau)
+  - [Bắt lỗi trong pipeline](#bắt-lỗi-trong-pipeline)
+  - [finalize và unsubscribe](#finalize-và-unsubscribe)
+- [RxJS trong lifecycle Angular](#rxjs-trong-lifecycle-angular)
+  - [Ưu tiên AsyncPipe khi template chỉ cần hiển thị](#ưu-tiên-asyncpipe-khi-template-chỉ-cần-hiển-thị)
+  - [takeUntilDestroyed cho subscription ở class](#takeuntildestroyed-cho-subscription-ở-class)
+  - [Ví dụ hoàn chỉnh: tìm kiếm có debounce và hủy request cũ](#ví-dụ-hoàn-chỉnh-tìm-kiếm-có-debounce-và-hủy-request-cũ)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Subscribe lồng nhau](#subscribe-lồng-nhau)
+  - [Dùng subscribe để tạo dữ liệu dẫn xuất](#dùng-subscribe-để-tạo-dữ-liệu-dẫn-xuất)
+  - [Nuốt lỗi hoặc để stream chết ngoài ý muốn](#nuốt-lỗi-hoặc-để-stream-chết-ngoài-ý-muốn)
+  - [Dùng Subject như state mặc định](#dùng-subject-như-state-mặc-định)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## RxJS giải quyết bài toán gì?
+
+RxJS là thư viện làm việc với **luồng dữ liệu theo thời gian**. Một luồng có thể phát ra không, một hoặc nhiều giá trị; các giá trị có thể đến ngay, đến sau vài giây, hoặc đến bất kỳ lúc nào người dùng thao tác.
+
+Ví dụ, nội dung ô tìm kiếm không chỉ là một chuỗi `query` hiện tại. Nó là chuỗi sự kiện `"a"` → `"an"` → `"angular"` theo thời gian. Với mỗi lần gõ, ứng dụng có thể cần đợi người dùng dừng gõ, bỏ qua giá trị trùng và hủy HTTP request cũ. RxJS mô tả những quy tắc đó thành một pipeline rõ ràng.
+
+### Luồng dữ liệu thay vì một giá trị
+
+`Promise` biểu diễn một kết quả bất đồng bộ duy nhất: thành công hoặc thất bại một lần. `Observable` biểu diễn một dãy notification, vì vậy nó phù hợp với event, timer, WebSocket và các nguồn có thể phát nhiều lần.
+
+| Nhu cầu | `Promise` | `Observable` |
+| --- | --- | --- |
+| Số kết quả | Một kết quả hoặc một lỗi | Không, một hoặc nhiều giá trị; rồi có thể complete/lỗi |
+| Hủy tác vụ | Không có cơ chế chuẩn trong bản thân Promise | `unsubscribe()` hủy phần việc còn đang chạy nếu nguồn hỗ trợ |
+| Biến đổi nhiều bước | Dùng `then`/`catch` | Ghép operator bằng `pipe(...)` |
+| Ví dụ | Đọc một token | Click, `valueChanges`, HTTP, route params, WebSocket |
+
+Một HTTP request Angular trả về `Observable`, dù thường chỉ phát một response. Điều này cho phép nó tham gia cùng pipeline với input, route hoặc retry; không có nghĩa HTTP tự chạy ngay khi gọi `http.get()`.
+
+### Từ nguồn đến consumer
+
+Một pipeline RxJS thường có bốn phần: nguồn phát, các operator biến đổi, subscription tiêu thụ, và cleanup khi không còn cần thiết.
+
+```text
+FormControl.valueChanges
+          │ phát "a", "an", "angular"
+          ▼
+debounceTime(300) ──► distinctUntilChanged()
+          │
+          ▼
+ switchMap(query => HTTP request)
+          │
+          ▼
+ AsyncPipe / subscribe nhận kết quả
+          │
+          ▼
+ component bị hủy → unsubscribe → dọn listener/request còn chạy
+```
+
+Mỗi mũi tên là dữ liệu đi một chiều. Thay vì gọi request trong từng event handler và tự quản lý kết quả cũ, hãy để pipeline nói rõ thời điểm xử lý và cách chuyển từ nguồn này sang nguồn khác.
+
+## Observable và subscription
+
+### Observable là bản mô tả luồng
+
+`Observable<T>` là một đối tượng mô tả cách cung cấp giá trị kiểu `T`. Nó **không phải** giá trị `T`, cũng không nhất thiết bắt đầu làm việc khi được tạo.
+
+```ts
+import { Observable } from 'rxjs';
+
+const greeting$ = new Observable<string>((subscriber) => {
+  subscriber.next('Xin chào');
+  subscriber.next('Angular');
+  subscriber.complete();
+});
+```
+
+Hậu tố `$` là quy ước đặt tên phổ biến cho biến giữ Observable. Nó không làm TypeScript hay RxJS hoạt động khác đi, nhưng giúp người đọc biết `greeting$` cần được subscribe hoặc đưa vào `AsyncPipe`, thay vì dùng như string hiện tại.
+
+### Ba loại notification
+
+Observable giao tiếp với subscriber qua ba notification:
+
+| Notification | Ý nghĩa | Sau đó có phát tiếp được không? |
+| --- | --- | --- |
+| `next(value)` | Một giá trị mới đã đến | Có |
+| `complete()` | Luồng kết thúc bình thường | Không |
+| `error(err)` | Luồng kết thúc vì lỗi | Không |
+
+`complete` và `error` là **terminal notification**: một subscription chỉ nhận tối đa một trong hai. Sau terminal notification, RxJS tự đóng subscription đó.
+
+```ts
+const numbers$ = new Observable<number>((subscriber) => {
+  subscriber.next(1);
+  subscriber.next(2);
+  subscriber.complete();
+  // subscriber.next(3); // Bị bỏ qua: stream đã kết thúc.
+});
+```
+
+Không phải Observable nào cũng complete. Event `click`, `FormControl.valueChanges` và route params về bản chất có thể tiếp tục phát trong suốt đời sống component. Ngược lại, `HttpClient.get()` thường phát một response rồi complete.
+
+### Subscription là phiên chạy
+
+Gọi `subscribe()` tạo một **subscription**: phiên kết nối cụ thể giữa Observable và consumer. Đây là lúc nhiều cold Observable bắt đầu công việc thật.
+
+```ts
+const subscription = greeting$.subscribe({
+  next: (message) => console.log(message),
+  complete: () => console.log('Đã xong'),
+  error: (error) => console.error('Có lỗi', error),
+});
+
+// Khi không cần nhận thêm giá trị:
+subscription.unsubscribe();
+```
+
+`subscribe()` có thể nhận callback `next`, nhưng dạng object ở trên dễ đọc hơn khi cần xử lý `error` hoặc `complete`. Đừng kỳ vọng `unsubscribe()` gọi callback `complete`: hủy là chủ động đóng kết nối, không phải source phát completion.
+
+<Callout type="warn" title="Subscribe là side effect">
+  `subscribe()` dùng để đưa dữ liệu ra rìa hệ thống: cập nhật state, điều hướng, hiển thị thông báo hoặc gọi API khác. Nếu chỉ cần biến đổi dữ liệu để consumer khác dùng tiếp, hãy trả về Observable mới bằng operator thay vì subscribe giữa chừng.
+</Callout>
+
+## Tạo Observable thường gặp
+
+### of và from
+
+`of(...)` phát lần lượt các đối số rồi complete. Nó hữu ích để minh họa, test hoặc đưa một giá trị tĩnh vào pipeline.
+
+```ts
+import { from, of } from 'rxjs';
+
+of('Angular', 'RxJS').subscribe(console.log);
+// Angular
+// RxJS
+
+from(['signal', 'observable']).subscribe(console.log);
+// signal
+// observable
+```
+
+`from(...)` chuyển một nguồn có thể lặp, `Promise`, iterable hoặc async iterable thành Observable. Một điểm dễ nhầm: `of(['a', 'b'])` phát **một array**, còn `from(['a', 'b'])` phát từng phần tử của array.
+
+```ts
+of(['a', 'b']).subscribe((value) => console.log(value));
+// ['a', 'b'] — một lần next
+
+from(['a', 'b']).subscribe((value) => console.log(value));
+// 'a', rồi 'b' — hai lần next
+```
+
+### interval và Observable tự tạo
+
+`interval(1000)` phát `0`, `1`, `2`... mỗi giây và không tự complete. Vì stream còn sống, consumer phải có chiến lược hủy.
+
+```ts
+import { interval, take } from 'rxjs';
+
+const countdown$ = interval(1000).pipe(take(3));
+
+countdown$.subscribe({
+  next: (value) => console.log(value),
+  complete: () => console.log('Hết giờ'),
+});
+// 0, 1, 2, "Hết giờ"
+```
+
+Khi tự tạo Observable, callback có thể trả về hàm teardown. RxJS gọi hàm này khi subscription bị unsubscribe, complete hoặc error. Đây là nơi dọn timer, event listener hoặc kết nối do bạn tự mở.
+
+```ts
+import { Observable } from 'rxjs';
+
+const ticks$ = new Observable<number>((subscriber) => {
+  let count = 0;
+  const timerId = window.setInterval(() => subscriber.next(count++), 1000);
+
+  return () => {
+    window.clearInterval(timerId);
+    console.log('Đã dọn timer');
+  };
+});
+```
+
+Trong code Angular hằng ngày, ưu tiên các creation function và API framework đã có. Tự tạo Observable chỉ phù hợp khi bạn cần bao một callback API hoặc resource chưa có adapter.
+
+### Nguồn Angular quen thuộc
+
+Angular đã cung cấp nhiều Observable sẵn dùng. Hãy đọc kiểu `Observable<T>` trong API để biết dữ liệu phát ra là gì và stream có khả năng kết thúc hay không.
+
+| Nguồn | Giá trị phát ra | Vòng đời điển hình |
+| --- | --- | --- |
+| `http.get<User[]>('/api/users')` | HTTP response | Một response rồi complete; lỗi nếu request thất bại |
+| `control.valueChanges` | Giá trị form mới | Sống khi control còn sống |
+| `route.paramMap` | `ParamMap` mới | Sống khi route/component còn hoạt động |
+| `router.events` | Router event | Thường sống lâu cùng `Router` |
+| `fromEvent(button, 'click')` | DOM event | Sống đến khi unsubscribe |
+
+Nguồn phát không quyết định toàn bộ lifecycle. Ví dụ, route có thể còn phát lâu, nhưng nếu component chỉ cần nó trong một view thì subscription của component vẫn phải kết thúc khi view bị destroy.
+
+## Operators: biến đổi luồng bằng pipe
+
+Operator là hàm nhận một Observable và trả về Observable khác. `pipe(...)` ghép các operator theo thứ tự từ trái sang phải; source gốc không bị sửa.
+
+```ts
+import { filter, map } from 'rxjs';
+
+const evenLabels$ = of(1, 2, 3, 4).pipe(
+  filter((value) => value % 2 === 0),
+  map((value) => `Số chẵn: ${value}`),
+);
+```
+
+`evenLabels$` là một Observable mới. Chưa có dòng log hay biến side effect nào chạy cho đến khi có subscription ở cuối pipeline.
+
+### map, filter và tap
+
+Ba operator này xuất hiện rất thường xuyên nhưng có trách nhiệm khác nhau:
+
+| Operator | Làm gì? | Không nên dùng để |
+| --- | --- | --- |
+| `map` | Đổi mỗi giá trị thành giá trị khác | Gọi HTTP hoặc cập nhật state bên ngoài |
+| `filter` | Chỉ cho giá trị qua khi thỏa điều kiện | Biến đổi giá trị thành kiểu khác |
+| `tap` | Quan sát/thực hiện side effect, vẫn giữ nguyên giá trị | Thay thế logic biến đổi hay xử lý lỗi |
+
+```ts
+import { filter, map, tap } from 'rxjs';
+
+const userNames$ = users$.pipe(
+  filter((user) => user.active),
+  map((user) => user.name.trim()),
+  tap((name) => console.debug('Tên sẽ hiển thị:', name)),
+);
+```
+
+`tap` phù hợp để log, đo metrics hoặc gọi một effect nhỏ có chủ đích. Nếu `tap` chứa logic quyết định dữ liệu chính hoặc nhiều mutation, pipeline trở nên khó test. Hãy dùng `map`, `filter`, `catchError` hoặc tách method có tên rõ ràng.
+
+### Các operator theo thời gian
+
+Input người dùng thường phát nhanh hơn tốc độ ứng dụng nên xử lý. Các operator thời gian giảm công việc thừa nhưng có hành vi khác nhau.
+
+| Operator | Hành vi | Ví dụ phù hợp |
+| --- | --- | --- |
+| `debounceTime(300)` | Chờ 300 ms yên lặng rồi phát giá trị cuối | Tìm kiếm sau khi người dùng dừng gõ |
+| `throttleTime(300)` | Phát sớm một giá trị, sau đó bỏ qua trong cửa sổ thời gian | Giới hạn event scroll/resize |
+| `distinctUntilChanged()` | Bỏ qua giá trị liên tiếp bằng nhau | Không tìm lại cùng một query |
+| `take(1)` | Nhận số giá trị giới hạn rồi complete | Chỉ cần giá trị đầu tiên |
+
+```ts
+const query$ = searchControl.valueChanges.pipe(
+  map((value) => value.trim()),
+  debounceTime(300),
+  distinctUntilChanged(),
+  filter((query) => query.length >= 2),
+);
+```
+
+Thứ tự operator tạo ra chính sách. Đặt `distinctUntilChanged()` sau `map(trim)` để `"angular"` và `" angular "` được xem là một query. Đặt `filter` trước `debounceTime` có thể thay đổi cảm nhận UI; hãy chọn thứ tự dựa trên yêu cầu chứ không theo công thức máy móc.
+
+### switchMap: thay luồng cũ bằng luồng mới
+
+Một số operator nhận một giá trị rồi tạo ra Observable bên trong. `switchMap` chuyển sang Observable mới và unsubscribe Observable bên trong trước đó khi source phát giá trị tiếp theo.
+
+```ts
+import { switchMap } from 'rxjs';
+
+const results$ = query$.pipe(
+  switchMap((query) => this.http.get<Product[]>('/api/products', {
+    params: { q: query },
+  })),
+);
+```
+
+Khi query đổi từ `"ang"` sang `"angular"`, `switchMap` ngừng quan tâm request của `"ang"` và chỉ chuyển kết quả mới nhất xuống dưới. Với `HttpClient`, unsubscribe trước khi response về thường hủy request phía client. Server có thể đã bắt đầu xử lý, vì vậy không coi đây là bảo đảm server không nhận request.
+
+```text
+query:      ang ───────────── angular ─────────────►
+             │                  │
+HTTP:        request A          request B
+             │                  │
+             └── unsubscribe ──┘
+                                │
+results:                        kết quả B ─────────►
+```
+
+`switchMap` là lựa chọn tốt khi chỉ kết quả mới nhất có ý nghĩa: tìm kiếm, route id đổi hoặc tải chi tiết theo lựa chọn hiện tại.
+
+### Chọn flattening operator
+
+`switchMap` không phải lúc nào cũng đúng. Bốn operator dưới đây đều chuyển từ giá trị ngoài sang Observable trong, nhưng chính sách đồng thời khác nhau.
+
+| Operator | Khi source phát giá trị mới | Dùng khi |
+| --- | --- | --- |
+| `switchMap` | Hủy inner cũ, chỉ giữ inner mới | Tìm kiếm, dữ liệu theo route hiện tại |
+| `concatMap` | Xếp inner mới vào hàng đợi | Lưu thay đổi phải đúng thứ tự |
+| `mergeMap` | Chạy các inner song song | Tác vụ độc lập, kết quả nào về trước cũng được |
+| `exhaustMap` | Bỏ qua source mới khi inner đang chạy | Chống double-submit form/đăng nhập |
+
+Ví dụ, dùng `switchMap` cho nút thanh toán có thể vô tình hủy request đầu nếu người dùng click lại. Với thao tác không được mất hoặc phải giữ thứ tự, dùng `concatMap`; với click submit chỉ cho phép một request đang chạy, dùng `exhaustMap`.
+
+<Callout type="idea" title="Câu hỏi để chọn operator">
+  Khi một giá trị mới đến lúc tác vụ cũ chưa xong, bạn muốn **hủy**, **xếp hàng**, **chạy song song** hay **bỏ qua** giá trị mới? Câu trả lời lần lượt dẫn tới `switchMap`, `concatMap`, `mergeMap` hoặc `exhaustMap`.
+</Callout>
+
+## Cold và hot Observable
+
+Cold/hot mô tả quan hệ giữa source và subscriber, không phải hai class Observable khác nhau. Câu hỏi quan trọng là: mỗi subscriber có bắt đầu producer riêng, hay các subscriber đang cùng nghe một producer đã chạy?
+
+### Cold: mỗi subscriber có một phiên riêng
+
+Cold Observable tạo producer cho từng subscription. `HttpClient` là ví dụ quan trọng: mỗi lần subscribe vào một `http.get(...)` cold Observable sẽ gửi một HTTP request riêng.
+
+```ts
+const users$ = this.http.get<User[]>('/api/users');
+
+users$.subscribe(); // Request 1
+users$.subscribe(); // Request 2
+```
+
+Điều này không phải lỗi của Angular. `users$` là công thức tạo request, còn mỗi subscription là một lần thực thi công thức. Với `of(...)`, sự khác biệt ít thấy vì producer rẻ và đồng bộ; với HTTP hoặc `interval`, nó ảnh hưởng network và tài nguyên.
+
+### Hot: subscriber cùng nghe một nguồn đang chạy
+
+Hot source phát độc lập với thời điểm một subscriber tham gia. Người đến muộn có thể bỏ lỡ giá trị cũ. Một DOM event là ví dụ trực quan: click xảy ra dù có hay không code đang lắng nghe, và listener mới chỉ nhận click từ sau khi được gắn.
+
+`Subject` thường được dùng để multicast: một lần `next` có thể đi đến nhiều subscriber hiện tại.
+
+```ts
+import { Subject } from 'rxjs';
+
+const refresh$ = new Subject<void>();
+
+refresh$.subscribe(() => console.log('A tải lại'));
+refresh$.next(); // A tải lại
+
+refresh$.subscribe(() => console.log('B tải lại'));
+refresh$.next(); // A tải lại, B tải lại
+```
+
+`Subject` không tự giữ giá trị cuối. Nếu consumer mới cần giá trị gần nhất, `BehaviorSubject` có current value và yêu cầu initial value; `ReplaySubject` có thể phát lại một số notification trước đó. Chỉ dùng khả năng replay khi đó là yêu cầu thật, vì replay cũng tạo trách nhiệm về bộ nhớ và thời điểm dữ liệu còn hợp lệ.
+
+### Chia sẻ HTTP với shareReplay
+
+Nếu nhiều nơi thật sự phải dùng cùng một kết quả HTTP, có thể multicast và replay giá trị mới nhất bằng `shareReplay`.
+
+```ts
+import { shareReplay } from 'rxjs';
+
+readonly users$ = this.http.get<User[]>('/api/users').pipe(
+  shareReplay({ bufferSize: 1, refCount: true }),
+);
+```
+
+`bufferSize: 1` giữ lại response gần nhất cho subscriber đến sau. `refCount: true` kết nối source khi có subscriber và ngắt khi subscriber cuối rời đi trước khi source kết thúc. Với HTTP đã complete, giá trị thành công vẫn có thể được replay cho subscriber đến sau; đây là cache trong bộ nhớ của service, không phải cơ chế làm mới dữ liệu.
+
+<Callout type="warn" title="shareReplay không phải cache toàn năng">
+  Hãy xác định rõ khi nào cache hết hạn và ai làm mới nó. Dùng `shareReplay(1)` bừa bãi có thể giữ dữ liệu cũ, chia sẻ lỗi/hành vi không mong đợi tùy cấu hình, hoặc khiến request không còn được tạo lại theo kỳ vọng.
+</Callout>
+
+## Error, completion và cleanup
+
+### Kết thúc bình thường và lỗi là hai nhánh khác nhau
+
+HTTP thành công thường đi theo `next` rồi `complete`. HTTP thất bại đi thẳng vào `error`; callback `complete` không chạy.
+
+```ts
+this.http.get<User[]>('/api/users').subscribe({
+  next: (users) => console.log('Nhận', users.length, 'người dùng'),
+  error: (error) => console.error('Không tải được danh sách', error),
+  complete: () => console.log('Request hoàn tất'),
+});
+```
+
+Một lỗi không được xử lý sẽ kết thúc subscription tại điểm đó. Nếu nguồn dài hạn như WebSocket hoặc thao tác refresh cần tiếp tục sau lỗi, xử lý lỗi **trong pipeline** để quyết định giá trị thay thế, retry hay để lỗi đi tiếp.
+
+### Bắt lỗi trong pipeline
+
+`catchError` nhận lỗi và phải trả về Observable thay thế. Vị trí đặt nó quyết định phạm vi phục hồi.
+
+```ts
+import { catchError, of } from 'rxjs';
+
+const users$ = this.http.get<User[]>('/api/users').pipe(
+  catchError((error) => {
+    console.error('Tải users thất bại', error);
+    return of([] as User[]);
+  }),
+);
+```
+
+Ví dụ trên biến lỗi thành danh sách rỗng, nên consumer không biết đó là lỗi hay thật sự không có user. Cách này chỉ đúng nếu UI đã có state lỗi riêng hoặc sản phẩm chủ đích coi lỗi như empty result. Trong đa số màn hình, hãy biểu diễn cả dữ liệu và lỗi rõ ràng.
+
+```ts
+import { catchError, map, of, startWith } from 'rxjs';
+
+type LoadState<T> =
+  | { status: 'loading' }
+  | { status: 'success'; data: T }
+  | { status: 'error'; message: string };
+
+const usersState$ = this.http.get<User[]>('/api/users').pipe(
+  map((users): LoadState<User[]> => ({ status: 'success', data: users })),
+  catchError((error): Observable<LoadState<User[]>> =>
+    of({ status: 'error', message: error.message ?? 'Không thể tải dữ liệu' }),
+  ),
+  startWith({ status: 'loading' } as LoadState<User[]>),
+);
+```
+
+Với stream tạo HTTP bên trong `switchMap`, đặt `catchError` **bên trong** callback nếu một query lỗi không được phép giết stream input. Đặt nó bên ngoài sẽ kết thúc toàn bộ `results$` sau lỗi đầu tiên nếu fallback cũng complete.
+
+### finalize và unsubscribe
+
+`finalize(callback)` luôn chạy khi subscription kết thúc vì `complete`, `error` hoặc `unsubscribe`. Nó phù hợp để dọn loading flag, timer hay resource cục bộ.
+
+```ts
+import { finalize } from 'rxjs';
+
+this.isLoading = true;
+this.http.get<User[]>('/api/users').pipe(
+  finalize(() => {
+    this.isLoading = false;
+  }),
+).subscribe({
+  next: (users) => this.users = users,
+  error: (error) => this.error = error,
+});
+```
+
+Tuy nhiên, `finalize` không thay thế một mô hình state tốt. Nếu nhiều request chạy đồng thời, request cũ complete có thể đặt `isLoading = false` khi request mới vẫn đang chạy. Với UI phức tạp, mô hình hóa state trong pipeline hoặc giới hạn đồng thời bằng flattening operator phù hợp.
+
+## RxJS trong lifecycle Angular
+
+Subscription sở hữu resource: event listener, timer, request đang chờ hoặc kết nối. Nơi tạo subscription phải xác định lúc hủy nó. Trong component, lifecycle thường là ranh giới đúng.
+
+```text
+Component được tạo
+       │
+       ├── template dùng AsyncPipe: Angular subscribe khi render
+       │
+       └── class dùng subscribe: pipeline gắn takeUntilDestroyed()
+       │
+       ▼
+Component bị destroy
+       │
+       ├── AsyncPipe unsubscribe
+       └── takeUntilDestroyed() unsubscribe
+                 │
+                 ▼
+       teardown/finalize của source chạy nếu có
+```
+
+### Ưu tiên AsyncPipe khi template chỉ cần hiển thị
+
+Nếu template chỉ cần render Observable, đưa Observable vào field có hậu tố `$` và dùng `AsyncPipe`. Pipe tự subscribe, đưa giá trị mới vào view, đánh dấu component `OnPush` khi có dữ liệu, và unsubscribe khi view bị destroy.
+
+```ts
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
+
+@Component({
+  selector: 'app-user-list',
+  imports: [AsyncPipe],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    @if (users$ | async; as users) {
+      <p>Có {{ users.length }} người dùng.</p>
+    } @else {
+      <p>Đang tải...</p>
+    }
+  `,
+})
+export class UserListComponent {
+  readonly users$ = this.http.get<User[]>('/api/users');
+
+  constructor(private readonly http: HttpClient) {}
+}
+```
+
+Với cold HTTP Observable, mỗi lần `AsyncPipe` phải subscribe lại có thể tạo request mới. Đừng gọi `http.get(...)` trực tiếp trong biểu thức template. Hãy giữ Observable ở field như ví dụ, và dùng `shareReplay` hoặc một service nếu nhiều consumer cần chung kết quả.
+
+`AsyncPipe` trả về `null` trước khi có giá trị. Template cần có trạng thái chờ rõ ràng. Nếu cần phân biệt loading, empty và error, hãy tạo view model Observable như `LoadState<T>` ở phần trước thay vì suy luận chỉ từ `null`.
+
+### takeUntilDestroyed cho subscription ở class
+
+Có trường hợp class phải subscribe vì cần thực hiện hành động: điều hướng theo event, đồng bộ một API imperative hoặc cập nhật integration không thuộc template. Trong Angular hiện đại, dùng `takeUntilDestroyed` để gắn teardown với `DestroyRef`.
+
+```ts
+import { Component, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+@Component({
+  selector: 'app-route-title',
+  template: `<h2>{{ title }}</h2>`,
+})
+export class RouteTitleComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  title = '';
+
+  constructor(private readonly route: ActivatedRoute) {
+    this.route.paramMap.pipe(
+      map((params) => `Sản phẩm ${params.get('id') ?? ''}`),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe((title) => {
+      this.title = title;
+    });
+  }
+}
+```
+
+`takeUntilDestroyed` unsubscribe khi instance hiện tại bị destroy. Không cần tạo `Subject<void>` và tự gọi `next/complete` trong `ngOnDestroy` cho mẫu thông thường này. Nếu code chạy trong injection context, `takeUntilDestroyed()` có thể không cần đối số; truyền `DestroyRef` tường minh giúp ví dụ dùng an toàn trong constructor hay method khác.
+
+<Callout type="info" title="Service root không tự bị destroy">
+  Service `providedIn: 'root'` thường sống đến khi ứng dụng đóng. `takeUntilDestroyed` trong service đó không thay thế chính sách hủy cho một luồng do từng component khởi tạo. Hãy để component sở hữu subscription theo view, hoặc thiết kế service trả Observable để consumer tự quyết định lifecycle.
+</Callout>
+
+### Ví dụ hoàn chỉnh: tìm kiếm có debounce và hủy request cũ
+
+Ví dụ dưới đây tách nguồn input, pipeline dữ liệu và render. Component không có `subscribe()` thủ công; `AsyncPipe` sở hữu subscription của template. `switchMap` đảm bảo chỉ response cho query mới nhất được dùng.
+
+```ts
+import { AsyncPipe } from '@angular/common';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
+import { catchError, debounceTime, distinctUntilChanged, map, of, startWith, switchMap } from 'rxjs';
+
+interface Product {
+  id: number;
+  name: string;
+}
+
+type SearchState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; products: Product[] }
+  | { status: 'error'; message: string };
+
+@Component({
+  selector: 'app-product-search',
+  imports: [AsyncPipe, ReactiveFormsModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  templateUrl: './product-search.component.html',
+})
+export class ProductSearchComponent {
+  readonly searchControl = new FormControl('', { nonNullable: true });
+
+  readonly state$ = this.searchControl.valueChanges.pipe(
+    startWith(this.searchControl.value),
+    map((value) => value.trim()),
+    debounceTime(300),
+    distinctUntilChanged(),
+    switchMap((query) => {
+      if (query.length < 2) {
+        return of<SearchState>({ status: 'idle' });
+      }
+
+      return this.http.get<Product[]>('/api/products', { params: { q: query } }).pipe(
+        map((products): SearchState => ({ status: 'success', products })),
+        startWith<SearchState>({ status: 'loading' }),
+        catchError((error) =>
+          of<SearchState>({
+            status: 'error',
+            message: error.message ?? 'Không thể tìm sản phẩm',
+          }),
+        ),
+      );
+    }),
+  );
+
+  constructor(private readonly http: HttpClient) {}
+}
+```
+
+```html
+<label for="query">Tìm sản phẩm</label>
+<input id="query" type="search" [formControl]="searchControl" />
+
+@if (state$ | async; as state) {
+  @switch (state.status) {
+    @case ('idle') {
+      <p>Nhập ít nhất 2 ký tự.</p>
+    }
+    @case ('loading') {
+      <p>Đang tìm...</p>
+    }
+    @case ('success') {
+      @if (state.products.length) {
+        <ul>
+          @for (product of state.products; track product.id) {
+            <li>{{ product.name }}</li>
+          }
+        </ul>
+      } @else {
+        <p>Không có kết quả.</p>
+      }
+    }
+    @case ('error') {
+      <p role="alert">{{ state.message }}</p>
+    }
+  }
+}
+```
+
+`catchError` nằm trong inner HTTP Observable. Vì vậy, request lỗi trả về trạng thái `error`, inner đó complete, nhưng `valueChanges` bên ngoài vẫn sống; người dùng gõ query mới thì tìm kiếm tiếp tục. Đây là một ví dụ của việc đặt error handling ở ranh giới có ý nghĩa nghiệp vụ.
+
+## Lỗi thường gặp và trade-off
+
+### Subscribe lồng nhau
+
+Không nên subscribe bên trong subscribe để nối các bước bất đồng bộ.
+
+```ts
+// Không nên: khó hủy request trong, khó giữ kết quả mới nhất.
+this.route.paramMap.subscribe((params) => {
+  this.http.get<User>(`/api/users/${params.get('id')}`).subscribe((user) => {
+    this.user = user;
+  });
+});
+```
+
+Pipeline phẳng nêu rõ chính sách hủy và chỉ cần một điểm subscribe.
+
+```ts
+readonly user$ = this.route.paramMap.pipe(
+  map((params) => params.get('id')),
+  filter((id): id is string => id !== null),
+  switchMap((id) => this.http.get<User>(`/api/users/${id}`)),
+);
+```
+
+Ngoại lệ không làm quy tắc biến mất: đôi khi một side effect thật sự phải khởi động một luồng độc lập. Nhưng nếu luồng trong chỉ phụ thuộc dữ liệu từ luồng ngoài, flattening operator gần như luôn mô tả đúng hơn.
+
+### Dùng subscribe để tạo dữ liệu dẫn xuất
+
+Ví dụ sau tạo `fullName` bằng mutation. Nó dễ quên xử lý lỗi, unsubscribe hoặc các trường hợp `firstName`/`lastName` đổi đồng thời.
+
+```ts
+// Tránh khi mục tiêu chỉ là tạo dữ liệu cho consumer khác.
+this.fullName = '';
+this.user$.subscribe((user) => {
+  this.fullName = `${user.firstName} ${user.lastName}`;
+});
+```
+
+Nếu kết quả vẫn thuộc thế giới Observable, dùng `map`:
+
+```ts
+readonly fullName$ = this.user$.pipe(
+  map((user) => `${user.firstName} ${user.lastName}`),
+);
+```
+
+Nếu đây là state UI đồng bộ cuối cùng cần render, trang [Signals và RxJS](/docs/reactivity-state/signals-rxjs) sẽ trình bày cách chuyển đổi có chủ đích. Không chuyển qua lại chỉ để thay cú pháp; giữ dữ liệu trong mô hình cần cho bước kế tiếp.
+
+### Nuốt lỗi hoặc để stream chết ngoài ý muốn
+
+`catchError(() => EMPTY)` có thể hữu ích khi bạn cố ý dừng một nhánh, nhưng cũng có thể khiến UI im lặng sau lỗi. `catchError(() => of([]))` lại có thể làm UI báo “không có kết quả” thay vì báo sự cố.
+
+Hãy chọn một outcome nhìn thấy được: trạng thái lỗi có thông điệp, retry có giới hạn, hoặc lỗi được đẩy lên consumer xử lý. Với nguồn dài hạn, kiểm tra vị trí `catchError` để bảo đảm lỗi của một inner request không đóng luôn nguồn event bên ngoài.
+
+### Dùng Subject như state mặc định
+
+`Subject` là công cụ phát event tốt, nhưng không tự cung cấp current value. Dùng nó làm mọi state có thể khiến component mới không biết dữ liệu hiện tại, và public `.next()` cho mọi consumer ghi dữ liệu không kiểm soát.
+
+Nếu cần state hiện tại trong RxJS, `BehaviorSubject` có thể phù hợp trong service nhỏ, nhưng hãy che subject writable:
+
+```ts
+import { BehaviorSubject } from 'rxjs';
+
+private readonly selectedIdSubject = new BehaviorSubject<number | null>(null);
+readonly selectedId$ = this.selectedIdSubject.asObservable();
+
+select(id: number | null): void {
+  this.selectedIdSubject.next(id);
+}
+```
+
+Trong Angular hiện đại, state UI đồng bộ đơn giản thường rõ ràng hơn khi dùng Signal. Subject/BehaviorSubject vẫn hữu ích khi bạn cần một Observable source để phối hợp với pipeline RxJS. Trade-off là API, lifecycle và quyền ghi phải được thiết kế rõ ràng.
+
+## Checklist và tóm tắt
+
+Trước khi hoàn tất một pipeline RxJS trong Angular, tự kiểm tra:
+
+1. Source phát giá trị gì, có thể `complete`/`error` không, và ai subscribe?
+2. Subscription sống đến khi nào? Dùng `AsyncPipe` cho render, hoặc `takeUntilDestroyed` cho subscription imperative trong component.
+3. Operator có phản ánh yêu cầu khi tác vụ chồng nhau không? Chọn `switchMap`, `concatMap`, `mergeMap` hoặc `exhaustMap` có chủ đích.
+4. Error có đi đến UI/log theo cách người dùng và đội ngũ có thể nhận biết không? Không biến lỗi thành empty data nếu hai trạng thái khác nghĩa.
+5. Observable có cold không? Nếu có nhiều subscriber, nhiều request/timer có phải điều bạn muốn không?
+6. Có `subscribe()` lồng nhau hoặc `Subject` public không? Thường có thể thay bằng pipeline phẳng và API đọc/ghi rõ ràng hơn.
+
+Tóm lại:
+
+- `Observable` là bản mô tả một chuỗi giá trị theo thời gian; `subscribe()` tạo phiên chạy và trả về `Subscription` để hủy khi cần.
+- Stream phát `next`, rồi có thể kết thúc bằng một `complete` hoặc `error`. `finalize` chạy khi subscription kết thúc theo bất kỳ đường nào.
+- `pipe` ghép operator. Dùng `map`/`filter` để biến đổi, operator thời gian để điều tiết event, và flattening operator để xử lý Observable bên trong.
+- Cold Observable tạo producer theo từng subscriber; hot source chia sẻ một producer đang chạy. Chỉ dùng `shareReplay` khi đã có chính sách cache rõ ràng.
+- Trong Angular, `AsyncPipe` là lựa chọn đầu tiên để render Observable. Khi phải subscribe trong class, gắn lifecycle bằng `takeUntilDestroyed`.
+
+<Cards>
+  <Card title="Signals và RxJS" href="/docs/reactivity-state/signals-rxjs" description="Chọn công cụ phù hợp và chuyển đổi giữa Observable với signal." />
+  <Card title="State cục bộ" href="/docs/reactivity-state/state-cuc-bo" description="Tổ chức state và API feature sau khi đã nắm nền tảng RxJS." />
+</Cards>

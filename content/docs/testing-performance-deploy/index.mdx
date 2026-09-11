@@ -1,25 +1,185 @@
 ---
 title: Kiểm thử, Hiệu năng & Triển khai
-description: Đảm bảo chất lượng, tối ưu và đưa ứng dụng lên môi trường chạy thật.
+description: Lộ trình đưa ứng dụng Angular từ mã nguồn đã kiểm chứng đến bản phát hành nhanh, ổn định và có thể quan sát.
 ---
 
-Đây là trang khung cho nhóm **Kiểm thử, Hiệu năng & Triển khai**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+<Callout type="info" title="Đích đến của nhóm bài này">
+  Bạn sẽ thiết lập được một vòng phản hồi ngắn: phát hiện lỗi sớm bằng kiểm thử, đo hiệu năng trước khi tối ưu, rồi phát hành theo quy trình có thể lặp lại. Mục tiêu không phải đạt mọi chỉ số tuyệt đối, mà là giảm rủi ro cho từng thay đổi trước khi người dùng gặp nó.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Mục tiêu và đầu vào](#mục-tiêu-và-đầu-vào)
+  - [Mục tiêu học tập](#mục-tiêu-học-tập)
+  - [Nền tảng cần có](#nền-tảng-cần-có)
+- [Bức tranh chất lượng](#bức-tranh-chất-lượng)
+  - [Quality pipeline](#quality-pipeline)
+  - [Nguyên tắc chọn lớp kiểm thử](#nguyên-tắc-chọn-lớp-kiểm-thử)
+- [Thứ tự học các bài con](#thứ-tự-học-các-bài-con)
+- [Lộ trình thực hành](#lộ-trình-thực-hành)
+  - [Giai đoạn 1: dựng lưới an toàn](#giai-đoạn-1-dựng-lưới-an-toàn)
+  - [Giai đoạn 2: đo trước khi tối ưu](#giai-đoạn-2-đo-trước-khi-tối-ưu)
+  - [Giai đoạn 3: chuẩn bị phát hành](#giai-đoạn-3-chuẩn-bị-phát-hành)
+  - [Giai đoạn 4: vận hành sau phát hành](#giai-đoạn-4-vận-hành-sau-phát-hành)
+- [Checklist trước khi phát hành](#checklist-trước-khi-phát-hành)
+- [Đi tiếp theo mục tiêu](#đi-tiếp-theo-mục-tiêu)
 
-## Phạm vi dự kiến
+## Mục tiêu và đầu vào
 
-Đảm bảo chất lượng, tối ưu và đưa ứng dụng lên môi trường chạy thật. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+Nhóm bài này nối phần viết tính năng với phần vận hành production. Khi hoàn thành, bạn có thể trả lời bằng bằng chứng cho ba câu hỏi: **thay đổi có đúng không**, **trải nghiệm có đủ nhanh không**, và **bản phát hành có chạy đúng trong môi trường thật không**.
 
-## Các bài trong nhóm
+### Mục tiêu học tập
 
-- **[Unit testing](/docs/testing-performance-deploy/unit-testing)** — Kiểm thử hàm, service và logic độc lập.
-- **[Component testing](/docs/testing-performance-deploy/component-testing)** — Kiểm thử component, template và tương tác người dùng.
-- **[E2E testing](/docs/testing-performance-deploy/e2e-testing)** — Kiểm thử luồng nghiệp vụ hoàn chỉnh trên trình duyệt.
-- **[Profiling hiệu năng](/docs/testing-performance-deploy/profiling-performance)** — Đo change detection, render, bundle và thời gian tải.
-- **[SSR và hydration](/docs/testing-performance-deploy/ssr-hydration)** — Render phía server, hydration và các lưu ý khi chạy đa môi trường.
-- **[Build và tối ưu bundle](/docs/testing-performance-deploy/build-optimization)** — Cấu hình build production, budgets và chia nhỏ mã nguồn.
-- **[Docker và Cloudflare](/docs/testing-performance-deploy/deployment)** — Đóng gói và triển khai ứng dụng Angular lên hạ tầng phổ biến.
+Bạn sẽ biết cách:
+
+- Chia một yêu cầu thành kiểm thử đơn vị, kiểm thử component và kiểm thử đầu-cuối (E2E) theo mức rủi ro.
+- Dùng chỉ số đo để tìm nguyên nhân của render chậm, change detection dư thừa, tải chậm hoặc bundle quá lớn.
+- Hiểu ranh giới giữa trình duyệt và server khi dùng server-side rendering (SSR) cùng hydration.
+- Tạo bản build production có ngân sách bundle, đóng gói ứng dụng và triển khai theo một quy trình kiểm tra được.
+- Biến các bước trên thành quality pipeline — chuỗi cổng chất lượng chạy lặp lại trước và sau khi phát hành.
+
+### Nền tảng cần có
+
+Hãy hoàn thành hoặc nắm vững các chủ đề sau trước khi đi sâu:
+
+- [Cấu trúc workspace](/docs/bat-dau/cau-truc-workspace) và [Angular CLI](/docs/bat-dau/angular-cli), để biết lệnh build/test đang tác động vào đâu.
+- [Component standalone](/docs/component-template/component-standalone), [data binding](/docs/component-template/data-binding) và [vòng đời component](/docs/component-template/lifecycle-hooks), vì đây là đối tượng chính của component test và profiling giao diện.
+- [Dependency injection](/docs/di-kien-truc/dependency-injection), [service](/docs/di-kien-truc/service) và [HttpClient](/docs/http-api-auth/http-client), để cô lập dependency trong unit test.
+- [Angular Router](/docs/routing-forms/angular-router) và [reactive forms](/docs/routing-forms/reactive-forms), vì một luồng E2E thường đi qua điều hướng, nhập liệu và gọi API.
+
+<Callout type="idea" title="Chuẩn bị một ứng dụng mẫu">
+  Chọn một tính năng nhỏ nhưng đủ thật, chẳng hạn danh sách sản phẩm có tìm kiếm, form tạo mới và trang chi tiết. Tính năng này sẽ là đối tượng xuyên suốt cho toàn bộ lộ trình; nhờ vậy mỗi phép đo và mỗi test đều có mục đích rõ ràng.
+</Callout>
+
+## Bức tranh chất lượng
+
+Chất lượng không phải là một lệnh chạy ngay trước khi deploy. Nó là vòng lặp: xác nhận hành vi nhỏ, xác nhận giao diện, xác nhận luồng người dùng, đo trải nghiệm, đóng gói, phát hành, rồi quan sát bản đang chạy. Mỗi lớp có tốc độ phản hồi và phạm vi lỗi khác nhau.
+
+### Quality pipeline
+
+```text
+Yêu cầu thay đổi
+      │
+      ▼
+┌──────────────────┐   unit test    ┌──────────────────┐
+│ Logic và service  │ ─────────────► │ Phản hồi nhanh    │
+└──────────────────┘                └────────┬─────────┘
+                                               │
+                                               ▼
+┌──────────────────┐ component test ┌──────────────────┐
+│ Template, input,  │ ─────────────► │ Hành vi UI đúng   │
+│ output, tương tác │                └────────┬─────────┘
+└──────────────────┘                         │
+                                               ▼
+┌──────────────────┐    E2E test    ┌──────────────────┐
+│ Luồng người dùng  │ ─────────────► │ Tích hợp tin cậy  │
+└──────────────────┘                └────────┬─────────┘
+                                               │
+                                               ▼
+┌──────────────────┐   profiling    ┌──────────────────┐
+│ Render, tải,      │ ─────────────► │ Có số liệu nền    │
+│ change detection  │                └────────┬─────────┘
+└──────────────────┘                         │
+                                               ▼
+┌──────────────────┐ build + deploy ┌──────────────────┐
+│ Bundle, SSR,      │ ─────────────► │ Bản phát hành     │
+│ cấu hình runtime  │                │ quan sát được     │
+└──────────────────┘                └──────────────────┘
+```
+
+Pipeline này không có nghĩa mọi thay đổi đều phải chạy mọi phép kiểm thủ công. Unit test phù hợp để chạy thường xuyên. E2E chậm hơn nên nên tập trung vào hành trình quan trọng, ví dụ đăng nhập hoặc hoàn tất đơn hàng. Profiling cần được chạy khi có tín hiệu chậm hoặc trước một mốc phát hành đáng kể.
+
+### Nguyên tắc chọn lớp kiểm thử
+
+| Câu hỏi cần trả lời | Lớp ưu tiên | Ví dụ Angular | Tránh làm gì |
+| --- | --- | --- | --- |
+| Hàm tính tổng, mapping dữ liệu có đúng? | Unit test | Pure function, service, guard | Khởi tạo cả component chỉ để kiểm tra một hàm. |
+| Template phản ứng đúng với state và thao tác? | Component test | Click nút, form validation, `@Input`, `@Output` | Kiểm tra chi tiết nội bộ không tạo ra giá trị cho người dùng. |
+| Người dùng hoàn thành một hành trình quan trọng? | E2E test | Điều hướng, đăng nhập, lưu dữ liệu | Dùng E2E thay cho mọi unit test; suite sẽ chậm và dễ không ổn định. |
+| Thay đổi có làm ứng dụng chậm hoặc nặng hơn? | Profiling và budget | Render danh sách, thời gian tải, kích thước bundle | Tối ưu dựa trên cảm giác mà không lưu số đo trước/sau. |
+
+Một kiểm thử tốt nêu rõ hành vi quan sát được và nguyên nhân thất bại. Ví dụ, thay vì kiểm tra một method nội bộ đã được gọi, hãy kiểm tra nút `Lưu` bị vô hiệu hóa khi form chưa hợp lệ. Cách viết này cho phép refactor mà vẫn giữ đúng cam kết với người dùng.
+
+## Thứ tự học các bài con
+
+Đi theo thứ tự dưới đây để mỗi bài cung cấp dữ liệu đầu vào cho bài sau. Ba bài kiểm thử đầu tạo lưới an toàn. Ba bài tiếp theo làm rõ hiệu năng và cách đóng gói. Bài cuối đưa artefact đã kiểm tra lên môi trường chạy thật.
+
+1. **[Unit testing](/docs/testing-performance-deploy/unit-testing)** — bắt đầu với hàm thuần, service, dependency và các nhánh nghiệp vụ. Đây là nơi phản hồi nhanh nhất khi sửa code.
+2. **[Component testing](/docs/testing-performance-deploy/component-testing)** — kiểm tra template, binding, event và trạng thái giao diện trên nền logic đã được cô lập.
+3. **[E2E testing](/docs/testing-performance-deploy/e2e-testing)** — chỉ giữ các hành trình có rủi ro cao mà component test không thể chứng minh, chẳng hạn router và tích hợp trình duyệt.
+4. **[Profiling hiệu năng](/docs/testing-performance-deploy/profiling-performance)** — thiết lập baseline cho render, change detection, tải trang và các thao tác quan trọng trước khi thay đổi kiến trúc.
+5. **[SSR và hydration](/docs/testing-performance-deploy/ssr-hydration)** — áp dụng khi cần cải thiện lần hiển thị đầu hoặc SEO; đồng thời kiểm tra code có phụ thuộc API chỉ tồn tại trong trình duyệt hay không.
+6. **[Build và tối ưu bundle](/docs/testing-performance-deploy/build-optimization)** — kiểm soát artefact production bằng build configuration, lazy loading và budgets sau khi đã có số đo.
+7. **[Docker và Cloudflare](/docs/testing-performance-deploy/deployment)** — đóng gói, cấu hình biến môi trường, deploy và xác minh bản phát hành cuối cùng.
+
+<Callout type="warn" title="Đừng đảo ngược vòng lặp">
+  Không nên thêm SSR, nén bundle hoặc thay đổi chiến lược change detection để rồi mới đi tìm số liệu. Hãy ghi lại baseline trước, thay đổi một giả thuyết tại một thời điểm và so sánh cùng điều kiện đo.
+</Callout>
+
+## Lộ trình thực hành
+
+Lộ trình sau dùng một feature mẫu và tạo ra các artefact có thể review: test, báo cáo đo, cấu hình build và checklist phát hành. Mỗi giai đoạn phải để lại bằng chứng trước khi chuyển sang giai đoạn kế tiếp.
+
+### Giai đoạn 1: dựng lưới an toàn
+
+1. Liệt kê ba đến năm quy tắc nghiệp vụ của feature. Ví dụ: từ khóa rỗng không gọi API, form thiếu trường bắt buộc không gửi dữ liệu, và lỗi API hiển thị thông báo có thể hành động.
+2. Viết unit test cho quy tắc có nhiều nhánh, đặc biệt các service biến đổi dữ liệu và [guards/resolvers](/docs/routing-forms/guards-resolvers).
+3. Viết component test cho trạng thái `loading`, `empty`, `error` và `success`. Mỗi test nên mô phỏng một thao tác người dùng hoặc một state nhìn thấy được.
+4. Chọn một đến ba luồng E2E quan trọng nhất. Giữ dữ liệu test độc lập để test có thể chạy lại mà không phụ thuộc thứ tự.
+
+**Đầu ra cần có:** suite test chạy được tại máy phát triển và trong CI, danh sách hành trình E2E được ưu tiên, cùng mô tả ngắn về rủi ro mà mỗi test đang bảo vệ.
+
+### Giai đoạn 2: đo trước khi tối ưu
+
+1. Mở feature trong điều kiện gần production và ghi lại mốc ban đầu: thời gian tải, thời gian phản hồi sau click, số lần render đáng chú ý và kích thước bundle.
+2. Dùng profiler để khoanh vùng một điểm chậm. Tách hiện tượng khỏi nguyên nhân; ví dụ danh sách lag là hiện tượng, còn tạo lại mảng trong template hoặc render quá nhiều item mới là giả thuyết cần kiểm chứng.
+3. Chọn một cải tiến nhỏ, như lazy-load route, dùng `track` trong vòng lặp, hoãn phần UI không cần ngay hoặc giảm kích thước dependency.
+4. Đo lại cùng thiết bị, dữ liệu và thao tác. Giữ thay đổi chỉ khi chỉ số hoặc trải nghiệm quan sát được tốt hơn mà test vẫn xanh.
+
+**Đầu ra cần có:** bảng baseline/trước-sau, một quyết định tối ưu có liên kết đến số đo, và một regression test nếu lỗi hiệu năng bắt nguồn từ hành vi có thể tái diễn.
+
+### Giai đoạn 3: chuẩn bị phát hành
+
+1. Chạy production build và kiểm tra cảnh báo. Xem budget như ngưỡng cảnh báo sớm: một bundle vượt ngưỡng yêu cầu giải thích hoặc chia nhỏ, không phải chỉ tăng ngưỡng để build qua.
+2. Nếu dùng SSR, thử các trang quan trọng ở cả server và trình duyệt. Bảo vệ truy cập `window`, `document`, storage hoặc API trình duyệt khác để tránh lỗi khi render phía server.
+3. Đóng gói artefact cùng cấu hình runtime rõ ràng. Bí mật và endpoint theo môi trường phải được cấp từ hạ tầng, không ghi cứng vào bundle.
+4. Triển khai một môi trường thử nghiệm, sau đó chạy smoke test: mở trang chủ, đi qua luồng chính, kiểm tra network và xác nhận phiên bản đang phục vụ.
+
+**Đầu ra cần có:** artefact production có thể truy vết, cấu hình môi trường được mô tả, kết quả smoke test và phương án rollback ngắn gọn.
+
+### Giai đoạn 4: vận hành sau phát hành
+
+1. Theo dõi lỗi phía người dùng, trạng thái request và chỉ số hiệu năng của bản vừa phát hành. Xem thêm [Monitoring](/docs/production-troubleshooting/monitoring) để thiết kế tín hiệu cần quan sát.
+2. So sánh chỉ số sau phát hành với baseline đã ghi ở giai đoạn 2. Nếu lệch đáng kể, ưu tiên khôi phục trải nghiệm trước rồi mới tối ưu sâu.
+3. Ghi nhận lỗi lọt qua pipeline. Bổ sung test ở lớp thấp nhất có thể chứng minh lỗi đó để vòng phản hồi sau nhanh hơn.
+
+**Đầu ra cần có:** ghi chú phát hành, dashboard hoặc log có thể truy cập, và một backlog cải tiến chất lượng dựa trên sự cố thực tế.
+
+## Checklist trước khi phát hành
+
+Dùng checklist này như cổng review, không phải thay cho hiểu biết về feature:
+
+- [ ] Unit và component test liên quan đã chạy; lỗi mới có test bảo vệ ở lớp phù hợp.
+- [ ] Các luồng E2E quan trọng đã chạy với dữ liệu test độc lập.
+- [ ] Không có lỗi console, request thất bại bất thường hoặc source map bị lộ ngoài ý muốn.
+- [ ] Chỉ số hiệu năng đã được so với baseline; mọi thay đổi bundle đáng kể có lý do.
+- [ ] Production build thành công và budgets được xem xét thay vì bị bỏ qua.
+- [ ] SSR/hydration, nếu có, đã được thử ở route quan trọng và không gọi API chỉ có trên trình duyệt khi chạy server.
+- [ ] Biến môi trường, secrets, cache header và URL API đúng với môi trường đích.
+- [ ] Có smoke test sau deploy, thông tin phiên bản và cách rollback rõ ràng.
+
+<Callout type="idea" title="Quy tắc dừng">
+  Nếu không thể mô tả cách xác minh một thay đổi, hãy xem đó là tín hiệu cần bổ sung test hoặc phép đo trước khi deploy. Một pipeline nhỏ nhưng đáng tin cậy tốt hơn một checklist dài không ai chạy.
+</Callout>
+
+## Đi tiếp theo mục tiêu
+
+<Cards>
+  <Card title="Bắt đầu với unit test" href="/docs/testing-performance-deploy/unit-testing" description="Cô lập logic, service và các nhánh nghiệp vụ để nhận phản hồi nhanh." />
+  <Card title="Kiểm tra UI bằng component test" href="/docs/testing-performance-deploy/component-testing" description="Xác minh template và tương tác mà người dùng thực sự nhìn thấy." />
+  <Card title="Bảo vệ hành trình E2E" href="/docs/testing-performance-deploy/e2e-testing" description="Chọn các luồng nghiệp vụ quan trọng để kiểm thử trên trình duyệt." />
+  <Card title="Đo và tối ưu hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="Tìm nút thắt bằng số liệu thay vì tối ưu theo cảm giác." />
+  <Card title="Hiểu SSR và hydration" href="/docs/testing-performance-deploy/ssr-hydration" description="Chuẩn bị ứng dụng cho render đa môi trường." />
+  <Card title="Kiểm soát production build" href="/docs/testing-performance-deploy/build-optimization" description="Giảm bundle và bảo vệ giới hạn kích thước bằng budgets." />
+  <Card title="Đóng gói và triển khai" href="/docs/testing-performance-deploy/deployment" description="Đưa artefact đã kiểm tra lên Docker và Cloudflare." />
+</Cards>

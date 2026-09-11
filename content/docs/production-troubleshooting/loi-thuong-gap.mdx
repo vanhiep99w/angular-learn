@@ -1,10 +1,585 @@
 ---
-title: Lỗi thường gặp
-description: Nhận diện và xử lý các lỗi cấu hình, DI, template và router.
+title: Lỗi Angular thường gặp
+description: Tra cứu và xử lý có hệ thống các lỗi template, DI, router, forms, HTTP, change detection, build và SSR trong Angular.
 ---
 
-Trang này sẽ trình bày **Lỗi thường gặp** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Cách dùng trang này">
+  Bắt đầu từ triệu chứng quan sát được, rồi xác minh giả thuyết bằng bằng chứng nhỏ nhất trước khi sửa. Mỗi nhóm lỗi bên dưới đi theo cùng một thứ tự: **triệu chứng → nguyên nhân → cách xác minh → xử lý → phòng ngừa**.
 </Callout>
+
+## Mục lục
+
+- [Quy trình chẩn đoán trước khi sửa](#quy-trình-chẩn-đoán-trước-khi-sửa)
+  - [Ghi nhận ca lỗi tối thiểu](#ghi-nhận-ca-lỗi-tối-thiểu)
+  - [Luồng khoanh vùng](#luồng-khoanh-vùng)
+- [Lỗi template](#lỗi-template)
+  - [Không biết phần tử hoặc binding](#không-biết-phần-tử-hoặc-binding)
+  - [Đọc thuộc tính của giá trị chưa có](#đọc-thuộc-tính-của-giá-trị-chưa-có)
+  - [Danh sách render sai hoặc mất state](#danh-sách-render-sai-hoặc-mất-state)
+- [Lỗi Dependency Injection](#lỗi-dependency-injection)
+  - [NullInjectorError: No provider](#nullinjectorerror-no-provider)
+  - [Vòng lặp provider](#vòng-lặp-provider)
+  - [Sai phạm vi injector](#sai-phạm-vi-injector)
+- [Lỗi router](#lỗi-router)
+  - [Cannot match any routes](#cannot-match-any-routes)
+  - [Trang trắng sau điều hướng](#trang-trắng-sau-điều-hướng)
+  - [Lazy route hoặc asset lỗi khi deploy](#lazy-route-hoặc-asset-lỗi-khi-deploy)
+- [Lỗi forms](#lỗi-forms)
+  - [Không tìm thấy control hoặc directive form](#không-tìm-thấy-control-hoặc-directive-form)
+  - [Control không đồng bộ với UI](#control-không-đồng-bộ-với-ui)
+  - [Validation không hiện hoặc submit sai](#validation-không-hiện-hoặc-submit-sai)
+- [Lỗi HTTP](#lỗi-http)
+  - [Không có request hoặc request bị hủy](#không-có-request-hoặc-request-bị-hủy)
+  - [Status 0, CORS và lỗi mạng](#status-0-cors-và-lỗi-mạng)
+  - [401, 403, 404, 4xx và 5xx](#401-403-404-4xx-và-5xx)
+  - [200 nhưng dữ liệu hoặc UI sai](#200-nhưng-dữ-liệu-hoặc-ui-sai)
+- [Lỗi change detection và state](#lỗi-change-detection-và-state)
+  - [OnPush và mutation](#onpush-và-mutation)
+  - [Callback ngoài Angular hoặc zoneless](#callback-ngoài-angular-hoặc-zoneless)
+  - [ExpressionChangedAfterItHasBeenCheckedError](#expressionchangedafterithasbeencheckederror)
+- [Lỗi build và triển khai](#lỗi-build-và-triển-khai)
+  - [Build thất bại](#build-thất-bại)
+  - [Chunk, base href và refresh route bị 404](#chunk-base-href-và-refresh-route-bị-404)
+  - [Sai cấu hình runtime hoặc cache cũ](#sai-cấu-hình-runtime-hoặc-cache-cũ)
+- [Lỗi SSR và hydration](#lỗi-ssr-và-hydration)
+  - [Không có window, document hoặc localStorage](#không-có-window-document-hoặc-localstorage)
+  - [Hydration mismatch](#hydration-mismatch)
+  - [SSR request lỗi hoặc treo](#ssr-request-lỗi-hoặc-treo)
+- [Checklist trước khi đóng lỗi](#checklist-trước-khi-đóng-lỗi)
+- [Tóm tắt](#tóm-tắt)
+
+## Quy trình chẩn đoán trước khi sửa
+
+Một thông báo lỗi chỉ là dấu vết của thời điểm ứng dụng thất bại. Ví dụ, danh sách trống có thể do API trả mảng rỗng, mapper đọc sai field, template đi vào nhánh `@else`, hoặc CSS che phần tử đã render. Không thêm `detectChanges()`, `setTimeout()` hay `!` (non-null assertion) trước khi biết lớp nào sai.
+
+### Ghi nhận ca lỗi tối thiểu
+
+Lưu các dữ kiện không thay đổi trước khi xóa cache, đổi code hoặc thử lại:
+
+- URL, query parameter không nhạy cảm, thao tác tái hiện và kết quả mong đợi/thực tế.
+- Release hoặc commit đang chạy, môi trường, browser, thời điểm và phạm vi người dùng bị ảnh hưởng.
+- Console error, request Network, status HTTP và correlation ID đã được che dữ liệu.
+- Quyền, feature flag, trạng thái đăng nhập và dữ liệu mẫu tối thiểu cần để tái hiện.
+
+<Callout type="warn" title="Không đưa bí mật vào bằng chứng">
+  Không dán access token, cookie, header `Authorization`, nội dung form hoặc response nguyên vẹn vào ticket, log hay ảnh chụp. Request ID và mã lỗi chuẩn hóa thường đủ để nối điều tra frontend với backend.
+</Callout>
+
+### Luồng khoanh vùng
+
+```text
+Triệu chứng
+    │
+    ▼
+Tái hiện nhỏ nhất và ghi release / route / thời điểm
+    │
+    ▼
+Console + Network có exception hoặc request bất thường?
+    │
+    ├── Có ──► kiểm tra source-mapped code, request và contract
+    │
+    └── Không / state đúng ──► kiểm tra template, DOM, CSS và change detection
+                                      │
+                                      ▼
+                         Sửa ở lớp sở hữu nguyên nhân
+                                      │
+                                      ▼
+                     Thêm regression test hoặc guardrail
+```
+
+Ưu tiên phép đo loại trừ được nhiều giả thuyết: Network trả lời request có tồn tại và response là gì; breakpoint trả lời nhánh TypeScript nào chạy; Elements trả lời phần tử có trong DOM không. Chỉ kết luận lỗi change detection khi state, binding và DOM đã được kiểm tra.
+
+## Lỗi template
+
+Template được biên dịch cùng component. Phần lớn lỗi template là lỗi import/phạm vi, dữ liệu chưa sẵn sàng hoặc danh sách có khóa theo dõi không ổn định.
+
+### Không biết phần tử hoặc binding
+
+**Triệu chứng**: build báo `NG8001` (*is not a known element*) hoặc `NG8002` (*Can't bind to ... since it isn't a known property*). Với standalone component, lỗi thường xuất hiện ngay sau khi thêm một directive, pipe hoặc component vào HTML.
+
+**Nguyên nhân**: component chứa template chưa import declaration cần dùng. Với NgModule cũ, declaration không nằm trong `imports` hoặc module không export declaration đó. Cũng có thể selector bị gõ sai, hoặc binding nhắm vào thuộc tính không phải `@Input`.
+
+**Cách xác minh**:
+
+1. Đọc đầy đủ message để lấy tên phần tử, property và component có template lỗi.
+2. Tìm selector hoặc `@Input()` của declaration thực tế, không suy đoán theo tên class.
+3. Kiểm tra `imports` của standalone component; nếu dùng NgModule, kiểm tra cả `declarations`, `imports` và `exports`.
+
+```ts
+import { Component } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { UserBadgeComponent } from './user-badge.component';
+
+@Component({
+  selector: 'app-profile',
+  standalone: true,
+  imports: [CommonModule, UserBadgeComponent],
+  template: `<app-user-badge [user]="user" />`,
+})
+export class ProfileComponent {
+  user = { name: 'An' };
+}
+```
+
+**Xử lý**: import đúng standalone component, directive hoặc pipe vào `imports`. Với `NgIf`, `NgFor` kiểu cũ hoặc `AsyncPipe`, import `CommonModule`; với form directive, import module form phù hợp. Không thêm `CUSTOM_ELEMENTS_SCHEMA` hoặc `NO_ERRORS_SCHEMA` chỉ để dập lỗi Angular, vì chúng có thể che typo selector và binding.
+
+**Phòng ngừa**: ưu tiên standalone component với dependencies cục bộ, bật template type checking nghiêm ngặt, và có component test render template quan trọng.
+
+### Đọc thuộc tính của giá trị chưa có
+
+**Triệu chứng**: Console báo `Cannot read properties of undefined` hoặc UI nhấp nháy/lỗi ở lượt render đầu trước khi HTTP hoàn tất.
+
+**Nguyên nhân**: template giả định dữ liệu luôn tồn tại trong khi field khởi tạo là `undefined`, input chưa được cha truyền, hoặc response không đúng contract. Optional chaining có thể ngăn exception nhưng cũng có thể che dữ liệu bắt buộc bị thiếu.
+
+**Cách xác minh**: dừng tại component hoặc Angular DevTools và kiểm tra giá trị ngay trước lượt render. Trong Network, xác nhận response có field cần thiết. Nếu state có dữ liệu nhưng DOM không đổi, chuyển sang kiểm tra điều kiện render và CSS, không kết luận dữ liệu chưa có.
+
+**Xử lý**: biểu diễn rõ các state loading, success, empty và error. Chỉ dùng `?.` khi `null`/`undefined` thực sự là trạng thái hợp lệ.
+
+```html
+@if (customer; as currentCustomer) {
+  <h2>{{ currentCustomer.profile.displayName }}</h2>
+} @else if (loading) {
+  <p aria-busy="true">Đang tải khách hàng…</p>
+} @else {
+  <p role="alert">Không thể tải khách hàng.</p>
+}
+```
+
+**Phòng ngừa**: khai báo type phản ánh tính tùy chọn, validate DTO tại boundary API và test các state đầu tiên của component thay vì chỉ test dữ liệu thành công.
+
+### Danh sách render sai hoặc mất state
+
+**Triệu chứng**: nhập liệu trong một hàng rồi sang hàng khác bị mất, item hiển thị nhầm sau sort/filter, hoặc Angular cảnh báo khóa `track` trùng.
+
+**Nguyên nhân**: `@for` theo dõi bằng index, object reference thay đổi, hoặc `id` không duy nhất. Angular tái sử dụng DOM theo khóa; khi khóa không đại diện cho thực thể ổn định, state DOM con bị gán sang item khác.
+
+**Cách xác minh**: mở Elements, so sánh `id` dữ liệu trước/sau sort và kiểm tra cảnh báo Console. Thử thay đổi thứ tự mảng trong fixture nhỏ; nếu lỗi chỉ xảy ra khi chèn/xóa giữa danh sách, khóa là nghi phạm mạnh.
+
+**Xử lý**: theo dõi bằng định danh duy nhất và bất biến của thực thể.
+
+```html
+@for (order of orders; track order.id) {
+  <app-order-row [order]="order" />
+}
+```
+
+**Phòng ngừa**: API cần trả stable ID; component test nên thêm, xóa và reorder danh sách có input hoặc state con. Chỉ dùng index khi danh sách tĩnh, không sắp xếp và không có state theo từng item.
+
+## Lỗi Dependency Injection
+
+Dependency Injection (DI) là cơ chế Angular tìm một giá trị theo token trong cây injector. Khi DI lỗi, đọc token và injector đang tạo component/service quan trọng hơn việc đăng ký provider ngẫu nhiên ở root.
+
+### NullInjectorError: No provider
+
+**Triệu chứng**: Console hoặc test báo `NullInjectorError: No provider for X!` hay `R3InjectorError(...)` khi bootstrap hoặc tạo một component.
+
+**Nguyên nhân**: token chưa có provider trong injector có thể nhìn thấy; ví dụ service thiếu `providedIn: 'root'`, `HttpClient` chưa được cấu hình bằng `provideHttpClient()`, hoặc test thiếu mock provider. Một token interface TypeScript cũng không tồn tại ở runtime nên không thể inject trực tiếp.
+
+**Cách xác minh**: đọc token cuối cùng trong chuỗi lỗi; đó thường là dependency thiếu. Tìm nơi token được khai báo và provider gần nhất. Đối với test, xem riêng cấu hình `TestBed`, vì provider của ứng dụng không tự xuất hiện nếu test không bootstrap cùng cấu hình.
+
+```ts
+import { Injectable } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class OrdersService {}
+```
+
+```ts
+// app.config.ts
+import { ApplicationConfig } from '@angular/core';
+import { provideHttpClient } from '@angular/common/http';
+
+export const appConfig: ApplicationConfig = {
+  providers: [provideHttpClient()],
+};
+```
+
+**Xử lý**: đăng ký provider tại phạm vi phù hợp. Dùng `providedIn: 'root'` cho singleton dùng toàn ứng dụng; thêm vào route hoặc component provider khi cần instance theo feature; mock dependency trong test. Với abstraction, dùng `InjectionToken` thay vì interface.
+
+**Phòng ngừa**: giữ provider gần boundary sở hữu nó, dùng hàm `provideX()` cho feature, và chạy unit/component test có các dependency thực tế hoặc mock rõ ràng.
+
+### Vòng lặp provider
+
+**Triệu chứng**: `NG0200: Circular dependency in DI detected` hoặc ứng dụng dừng khi tạo service.
+
+**Nguyên nhân**: `OrdersService` inject `AuditService`, rồi `AuditService` lại inject `OrdersService`, trực tiếp hoặc qua chuỗi service khác. Đây thường là dấu hiệu hai service cùng sở hữu một workflow.
+
+**Cách xác minh**: đọc chuỗi token trong error, vẽ cạnh inject giữa các service và tìm vòng quay lại token đầu. Không dùng `Injector.get()` hoặc `forwardRef()` như cách che vòng lặp trước khi tách trách nhiệm.
+
+**Xử lý**: tách phần dùng chung thành service thứ ba, hoặc đảo dependency qua event/interface token phù hợp. Ví dụ `AuditService` nhận một sự kiện đã chuẩn hóa thay vì biết toàn bộ `OrdersService`.
+
+**Phòng ngừa**: dependency nên đi một chiều từ UI → application service → infrastructure. Review constructor injection mới và tránh service “god object” vừa gọi API vừa quản lý state vừa telemetry.
+
+### Sai phạm vi injector
+
+**Triệu chứng**: state service bị reset khi đổi route, hoặc ngược lại dữ liệu của tenant/người dùng cũ còn tồn tại sau logout.
+
+**Nguyên nhân**: provider được đặt ở component/lazy route trong khi cần singleton, hoặc đặt ở root trong khi cần instance theo feature/session. Mỗi provider scope có vòng đời khác nhau.
+
+**Cách xác minh**: thêm log định danh instance tạm trong môi trường development, điều hướng qua route và quan sát lúc service được tạo/hủy. Kiểm tra `providers` trên component, route và app config.
+
+**Xử lý**: chuyển provider về root khi state cần sống xuyên route; đặt ở route/component khi state phải bị hủy cùng feature. Khi logout, gọi một hàm reset state có chủ đích; không trông chờ injector root tự tạo lại.
+
+**Phòng ngừa**: ghi rõ ownership và vòng đời state trong thiết kế feature. Test điều hướng vào/ra lazy route và luồng logout/login liên tiếp.
+
+## Lỗi router
+
+Router có thể thất bại trước khi component được tạo. Vì vậy, bắt đầu bằng URL thực tế, route config, guard/resolver và Network thay vì debug template.
+
+### Cannot match any routes
+
+**Triệu chứng**: Console báo `NG04002: Cannot match any routes`, điều hướng không đến trang mong muốn hoặc rơi vào wildcard route.
+
+**Nguyên nhân**: `routerLink`/`navigate` tạo URL sai, route parameter thiếu, thứ tự route khiến wildcard hoặc route rộng bắt trước route cụ thể, hoặc lazy child route khai báo nhầm `path`.
+
+**Cách xác minh**: sao chép URL từ thanh địa chỉ, so với `Routes` theo từng segment và kiểm tra `pathMatch`. Bật router event logging tạm thời hoặc đặt breakpoint trước lệnh điều hướng để thấy commands thực tế.
+
+```ts
+export const routes: Routes = [
+  { path: 'orders/:id', loadComponent: () => import('./order-page.component') },
+  { path: 'orders', loadComponent: () => import('./orders-page.component') },
+  { path: '**', redirectTo: 'not-found' },
+];
+```
+
+**Xử lý**: sửa path/parameter và đặt wildcard cuối cùng. Khi dùng lazy route `path: 'admin'`, các route con thường khai báo `''`, `users`..., không lặp lại `admin` lần nữa.
+
+**Phòng ngừa**: tạo test cho URL trực tiếp, routerLink chính và deep link của từng feature; review thứ tự route mỗi khi thêm prefix hoặc wildcard.
+
+### Trang trắng sau điều hướng
+
+**Triệu chứng**: URL đổi nhưng vùng nội dung trống, component đích không thấy, hoặc navigation bị hủy/redirect liên tục.
+
+**Nguyên nhân**: thiếu `<router-outlet>`, guard trả `false`/`UrlTree`, resolver ném lỗi hoặc không hoàn tất, route component không tải được, hoặc component render empty state vì data resolver khác contract.
+
+**Cách xác minh**:
+
+1. Kiểm tra Console và Network xem chunk lazy có tải không.
+2. Quan sát `NavigationCancel`, `NavigationError` hoặc redirect bằng router events.
+3. Đặt breakpoint trong guard/resolver; xác định giá trị trả về và request bên trong.
+4. Xác nhận layout cha có `<router-outlet />` đúng cấp.
+
+**Xử lý**: để guard trả `UrlTree` khi redirect thay vì vừa gọi `navigate()` vừa trả `false`; bắt lỗi resolver và trả về UI state hoặc redirect có chủ đích. Đảm bảo route shell chứa router outlet.
+
+**Phòng ngừa**: E2E/smoke test cho route có guard và resolver, bao gồm quyền bị từ chối, resolver HTTP lỗi và điều hướng back/forward.
+
+### Lazy route hoặc asset lỗi khi deploy
+
+**Triệu chứng**: local chạy được nhưng production báo `Loading chunk ... failed`, refresh một route con trả `404`, hoặc người dùng vừa deploy thấy màn hình trắng.
+
+**Nguyên nhân**: server/CDN không rewrite deep link về `index.html`, `baseHref`/`deployUrl` không khớp sub-path, chunk từ release cũ bị cache trong khi HTML trỏ release mới, hoặc deploy không upload đủ asset có hash.
+
+**Cách xác minh**: trong Network, xem URL HTML/chunk, status và response thực; thử mở trực tiếp `/feature/item` và hard refresh; so sánh manifest/asset của release với nội dung CDN. Đừng chỉ thử điều hướng từ trang chủ vì nó không kiểm tra server rewrite.
+
+**Xử lý**: cấu hình fallback cho các URL ứng dụng về `index.html` nhưng không che asset/API thật bị 404; đặt `base href` đúng nơi ứng dụng được host; deploy HTML và asset như một artefact nhất quán; thiết kế retry/reload có kiểm soát cho chunk lỗi do release đổi.
+
+**Phòng ngừa**: CI smoke test deep link sau deploy, cache policy tách HTML ngắn hạn với asset hashed dài hạn, và rollback toàn bộ artefact thay vì chỉ thay một file.
+
+## Lỗi forms
+
+Angular có hai hướng form: template-driven (`ngModel`) và reactive (`FormGroup`, `FormControl`). Không trộn directive của hai hướng trên cùng một control nếu không hiểu rõ contract, vì hai nguồn state cạnh tranh nhau.
+
+### Không tìm thấy control hoặc directive form
+
+**Triệu chứng**: `Can't bind to 'formGroup'`, `No value accessor for form control`, hoặc `Cannot find control with name: 'email'`.
+
+**Nguyên nhân**: thiếu `ReactiveFormsModule`/`FormsModule`, `formControlName` không trùng key trong `FormGroup`, control nằm ngoài phần tử có `[formGroup]`, hoặc custom component chưa cung cấp `ControlValueAccessor`.
+
+**Cách xác minh**: kiểm tra `imports` của component; in `form.controls` trong breakpoint; đối chiếu chính xác tên control trong template và TypeScript; với custom component, tìm provider `NG_VALUE_ACCESSOR` và các hàm `writeValue`, `registerOnChange`.
+
+```ts
+import { Component } from '@angular/core';
+import { ReactiveFormsModule, FormControl, FormGroup, Validators } from '@angular/forms';
+
+@Component({
+  standalone: true,
+  imports: [ReactiveFormsModule],
+  template: `
+    <form [formGroup]="form" (ngSubmit)="save()">
+      <input formControlName="email" type="email" />
+    </form>
+  `,
+})
+export class ProfileFormComponent {
+  readonly form = new FormGroup({
+    email: new FormControl('', { nonNullable: true, validators: [Validators.email] }),
+  });
+
+  save(): void {}
+}
+```
+
+**Xử lý**: import đúng module, tạo control trước khi template dùng, thống nhất tên và triển khai `ControlValueAccessor` cho custom form control. Không ép `any` để bỏ typed-form error; lỗi type thường chỉ ra control name hoặc giá trị sai.
+
+**Phòng ngừa**: dùng typed reactive forms, đặt key control thành hằng số hoặc type chung khi form lớn, và component test render mọi custom control trong form thật.
+
+### Control không đồng bộ với UI
+
+**Triệu chứng**: `patchValue()` chạy nhưng input không đổi, người dùng nhập nhưng `form.value` cũ, hoặc custom select không disabled khi form bị disable.
+
+**Nguyên nhân**: custom control không gọi callback từ `registerOnChange`, `writeValue` không cập nhật view, `setDisabledState` bị bỏ qua, hoặc mã sửa một object model riêng thay vì `FormControl`.
+
+**Cách xác minh**: đặt breakpoint trong `writeValue`, callback `onChange` và `setDisabledState`; so sánh `control.value`, DOM input và state nội bộ custom component sau một thao tác. Nếu native input hoạt động còn custom control không, tập trung vào `ControlValueAccessor`.
+
+**Xử lý**: để form là nguồn dữ liệu chuẩn. Custom control phải nhận giá trị qua `writeValue`, phát thay đổi người dùng qua callback đã đăng ký, và phản ánh disabled state.
+
+**Phòng ngừa**: test contract ControlValueAccessor: model → UI, UI → model, touched state và disabled state. Không duy trì hai-way binding khác trên cùng input reactive form.
+
+### Validation không hiện hoặc submit sai
+
+**Triệu chứng**: button submit bị khóa không rõ lý do, lỗi validation không hiện, hoặc request vẫn gửi dù form invalid.
+
+**Nguyên nhân**: template chỉ hiện lỗi khi `touched` nhưng control chưa được touch, handler không kiểm tra `form.invalid`, validator async còn `PENDING`, hoặc button không nằm trong `<form>`/không có `type="submit"`.
+
+**Cách xác minh**: kiểm tra `form.status`, `control.errors`, `touched`, `dirty` và `pending` ở breakpoint. Trong Network, xác nhận handler có return trước khi gọi service. Tái hiện cả submit bằng Enter, không chỉ bằng click.
+
+**Xử lý**: khi submit, đánh dấu controls đã chạm và dừng nếu form invalid; hiển thị lỗi gần control theo trạng thái mà UX đã chọn.
+
+```ts
+save(): void {
+  if (this.form.invalid || this.form.pending) {
+    this.form.markAllAsTouched();
+    return;
+  }
+
+  // Chỉ gọi API khi dữ liệu hợp lệ.
+}
+```
+
+**Phòng ngừa**: test invalid, pending, valid, server validation error và submit bằng Enter. Validation client tăng trải nghiệm nhưng backend vẫn phải validate và trả lỗi theo contract.
+
+## Lỗi HTTP
+
+HTTP lỗi không đồng nghĩa backend lỗi. Hãy phân biệt: browser có tạo request không; mạng/CORS có cho request hoàn tất không; server trả gì; và Angular có chuyển response thành state/UI đúng không.
+
+### Không có request hoặc request bị hủy
+
+**Triệu chứng**: người dùng click nhưng Network trống, hoặc request hiện `(canceled)`.
+
+**Nguyên nhân**: event handler không chạy, form return sớm vì invalid, Observable chưa được subscribe, `switchMap` hủy request cũ theo thiết kế, component bị destroy, hoặc navigation/page reload hủy request.
+
+**Cách xác minh**: đặt breakpoint đầu handler và ngay trước `HttpClient` call. Kiểm tra form state. Xem Initiator/Timing trong Network và toán tử RxJS đang dùng; `switchMap` chỉ nên bị coi là lỗi nếu yêu cầu cũ phải được giữ.
+
+**Xử lý**: sửa event/form contract; subscribe qua `AsyncPipe` hoặc quản lý lifecycle rõ ràng; chọn `concatMap`, `exhaustMap`, `mergeMap` hay `switchMap` theo ngữ nghĩa thao tác, không theo cách làm request “hết bị hủy”.
+
+**Phòng ngừa**: viết test cho double-click, tìm kiếm gõ liên tiếp và rời trang trong lúc tải. Ghi rõ hành vi hủy mong muốn của từng luồng.
+
+### Status 0, CORS và lỗi mạng
+
+**Triệu chứng**: `HttpErrorResponse` có `status === 0`, Network hiển thị failed, hoặc Console báo CORS/certificate/mixed content.
+
+**Nguyên nhân**: browser không nhận được response HTTP có thể đọc. Có thể là offline, DNS, TLS, CORS preflight, proxy, ad blocker, mixed content, request bị abort hoặc server không reachable.
+
+**Cách xác minh**: đọc Console vì thông tin CORS thường ở đây; kiểm tra Network request và preflight `OPTIONS`; thử từ cùng browser/mạng; xem response headers trên server/gateway. Không dùng Postman làm bằng chứng CORS vì Postman không chịu chính sách same-origin của browser.
+
+**Xử lý**: sửa cấu hình CORS tại server/gateway bằng origin, method, header và credentials tối thiểu; phục vụ frontend qua HTTPS; xử lý offline/timeout ở UI. Không thêm `Access-Control-Allow-Origin` ở Angular client, vì browser không coi request header đó là chính sách server.
+
+**Phòng ngừa**: kiểm tra CORS trong môi trường gần production, giữ allowlist origin theo môi trường, và monitor status 0 theo route/release mà không log URL query hay header nhạy cảm.
+
+### 401, 403, 404, 4xx và 5xx
+
+**Triệu chứng**: Network có response HTTP lỗi, UI có thể spinner vô hạn, thông báo chung chung hoặc logout sai lúc.
+
+**Nguyên nhân**: `401` thường là phiên/token không hợp lệ; `403` là identity hợp lệ nhưng không đủ quyền; `404` là URL/resource không tồn tại hoặc rewrite sai; `4xx` khác thường là input/contract; `5xx` là server/dependency thất bại. Đây là hướng điều tra, không phải kết luận chỉ từ status.
+
+**Cách xác minh**: kiểm tra URL, method, payload đã scrub, response error code chuẩn hóa, quyền/feature flag và correlation ID. Với `401`, xác minh refresh token chỉ chạy một lần theo policy. Với `5xx`, đối chiếu request ID với backend thay vì retry mù quáng.
+
+**Xử lý**: biến từng lớp lỗi thành state UI có thể hành động: validation gần field cho `4xx`, màn hình quyền cho `403`, đăng nhập lại theo flow cho `401`, retry có giới hạn khi lỗi tạm thời và thông báo/trace ID cho `5xx`. Dùng interceptor cho chính sách chung, nhưng vẫn để component/service quyết định ngữ cảnh UX.
+
+**Phòng ngừa**: contract test API, mapping error code tập trung, test interceptor auth/refresh và test tất cả nhánh `next`/`error` để loading luôn được dọn.
+
+### 200 nhưng dữ liệu hoặc UI sai
+
+**Triệu chứng**: request thành công nhưng danh sách rỗng, field `undefined`, dữ liệu cũ hoặc UI hiển thị sai.
+
+**Nguyên nhân**: DTO khác schema runtime, mapper đọc nhầm `items` thay vì `data`, fallback `?? []` che contract break, cache trả response cũ, hoặc state bị luồng khác ghi đè sau response.
+
+**Cách xác minh**: so sánh body Network với type và mapper tại runtime; breakpoint sau mapping và sau khi state được ghi; kiểm tra thứ tự emission nếu có nhiều request. Status `200` chỉ xác nhận transport thành công, không xác nhận contract hoặc UI đúng.
+
+**Xử lý**: map DTO sang model ở service/boundary, validate field bắt buộc và hiển thị lỗi có ngữ cảnh khi contract bị phá vỡ. Chỉ cache dữ liệu với key, TTL và chiến lược invalidation rõ ràng.
+
+```ts
+interface OrdersResponseDto {
+  data: Array<{ id: string; number: string }>;
+}
+
+function toOrders(response: OrdersResponseDto): Array<{ id: string; number: string }> {
+  if (!Array.isArray(response.data)) {
+    throw new Error('Orders response is missing data');
+  }
+
+  return response.data.map(({ id, number }) => ({ id, number }));
+}
+```
+
+**Phòng ngừa**: fixture response thật đã ẩn danh cho mapper test, schema validation ở boundary khi rủi ro cao, và telemetry chỉ gửi error code/release/endpoint template thay vì body response.
+
+## Lỗi change detection và state
+
+Change detection đồng bộ giá trị mà template đọc với DOM. Nó không sửa được state sai, DOM bị CSS che hay request mapping sai. Chỉ đến phần này khi đã chứng minh state đúng và template đọc đúng state đó.
+
+### OnPush và mutation
+
+**Triệu chứng**: component con dùng `OnPush` vẫn hiện dữ liệu cũ sau khi object bị sửa; UI chỉ cập nhật sau click khác.
+
+**Nguyên nhân**: code mutate object/array đang truyền vào thay vì tạo reference mới. Với input OnPush, reference mới là một tín hiệu quan trọng để Angular kiểm tra component con.
+
+**Cách xác minh**: tại breakpoint, so sánh reference trước/sau update và kiểm tra component con có thực sự nhận input mới không. Nếu state mới đã có mà `<li>` DOM cũ, thử sửa bằng immutable update để kiểm chứng giả thuyết; không thêm `detectChanges()` trước.
+
+**Xử lý**: cập nhật bất biến hoặc dùng signal `.set()`/`.update()` với value/reference mới.
+
+```ts
+// Tránh: cùng object reference.
+this.selectedOrder.status = 'paid';
+
+// Tốt: thay đổi được biểu đạt bằng reference mới.
+this.selectedOrder = { ...this.selectedOrder, status: 'paid' };
+```
+
+**Phòng ngừa**: giữ state có một chủ sở hữu, dùng readonly type khi phù hợp, và test component OnPush với cập nhật object/array thực tế.
+
+### Callback ngoài Angular hoặc zoneless
+
+**Triệu chứng**: callback của thư viện bên thứ ba chạy, state đổi, nhưng UI không đổi cho đến một event khác; lỗi dễ xuất hiện khi tích hợp map, chart, WebSocket hoặc ứng dụng zoneless.
+
+**Nguyên nhân**: callback không thông báo thay đổi theo cơ chế Angular đang dùng, hoặc state được mutate ngoài signal/store. Với zoneless, không thể dựa vào mọi tác vụ bất đồng bộ tự kích hoạt kiểm tra như ứng dụng Zone.js truyền thống.
+
+**Cách xác minh**: log/breakpoint xác nhận callback có chạy và state có đổi; kiểm tra template có đọc signal/input đó; tạo một cập nhật signal nhỏ để xem DOM có phản ánh không. Cô lập integration bên thứ ba trước khi thay đổi chiến lược toàn app.
+
+**Xử lý**: đưa dữ liệu vào primitive Angular rõ ràng, chẳng hạn signal hoặc Observable được template tiêu thụ bằng `AsyncPipe`. Dùng `ChangeDetectorRef.markForCheck()` chỉ tại boundary integration khi hiểu component nào cần được đánh dấu. `detectChanges()` đồng bộ là công cụ hẹp, không phải giải pháp mặc định.
+
+**Phòng ngừa**: tạo adapter cho mỗi SDK bên thứ ba thay vì để callback ghi state rải rác. Test integration ở cả thời điểm callback và sau lần render kế tiếp.
+
+### ExpressionChangedAfterItHasBeenCheckedError
+
+**Triệu chứng**: development mode báo `ExpressionChangedAfterItHasBeenCheckedError`, thường sau `ngAfterViewInit`, content projection hoặc callback đồng bộ.
+
+**Nguyên nhân**: binding đổi trong cùng lượt Angular đã kiểm tra nó. Ví dụ child phát event đồng bộ khiến parent đổi input sau khi parent đã được check. Lệnh `setTimeout()` chỉ trì hoãn triệu chứng và có thể tạo flash UI/race condition.
+
+**Cách xác minh**: đọc binding cũ/mới trong error, đặt breakpoint tại nơi set state và kiểm tra lifecycle/call stack. Xác định state thuộc input, view child, effect hay callback nào.
+
+**Xử lý**: chuyển việc khởi tạo state về sớm hơn, biểu diễn derived state bằng `computed`, hoặc thay đổi giao tiếp parent-child để không ghi ngược trong lượt render. Nếu phải đo DOM sau render, tách rõ phần đo và lần cập nhật state theo API/lifecycle phù hợp phiên bản Angular.
+
+**Phòng ngừa**: tránh side effect ghi state trong getter/template, giữ dữ liệu chảy một chiều, và test component ở development mode để lỗi thời điểm không bị production che mất.
+
+## Lỗi build và triển khai
+
+Lỗi production có thể do artefact, server hay cache dù `ng serve` chạy tốt. Luôn đối chiếu cùng release đang lỗi và kiểm tra deploy như một đơn vị HTML, JavaScript, source map và runtime config.
+
+### Build thất bại
+
+**Triệu chứng**: CI hoặc `ng build` thất bại với lỗi TypeScript, template, stylesheet, dependency hoặc ngân sách bundle.
+
+**Nguyên nhân**: type/template sai, import path chỉ khác hoa/thường (chỉ lộ trên Linux CI), dependency lockfile lệch, environment variable build thiếu, asset không tồn tại hoặc bundle vượt budget.
+
+**Cách xác minh**: dùng log đầu tiên có đường dẫn mã nguồn của build; cảnh báo sau đó thường là hệ quả. So sánh phiên bản Node/package manager và lockfile giữa local với CI. Kiểm tra bằng clean install trong môi trường gần CI khi dependency là nghi phạm.
+
+**Xử lý**: sửa lỗi gốc tại path/dòng được báo; chuẩn hóa casing import; pin runtime theo policy dự án; xem bundle analyzer trước khi chỉ tăng budget. Không tắt strict template checking hoặc bỏ qua lockfile để build qua tạm thời.
+
+**Phòng ngừa**: CI chạy install bất biến, type check/build production và lint; quy ước case-sensitive path; review thay đổi dependency và theo dõi bundle budget như tín hiệu regression.
+
+### Chunk, base href và refresh route bị 404
+
+**Triệu chứng**: tải trang đầu được nhưng lazy chunk 404, host dưới `/portal/` lại gọi asset từ `/`, hoặc refresh `/orders/42` trả 404 từ CDN.
+
+**Nguyên nhân**: build base path khác URL host thực tế, server không có SPA fallback, asset thiếu hoặc cache đang ghép HTML mới với chunk cũ.
+
+**Cách xác minh**: xem `base` trong HTML đã deploy, URL thật của script/chunk trong Network và response headers cache. Test hard refresh một deep link trên URL production/staging, không chỉ test điều hướng client-side.
+
+**Xử lý**: cấu hình `baseHref` và asset path đúng sub-path; tạo rewrite fallback chỉ cho app route; phát hành artefact bất biến trong đó HTML tham chiếu đúng asset hashed. HTML thường cần cache ngắn hơn asset có content hash để client không giữ manifest cũ quá lâu.
+
+**Phòng ngừa**: post-deploy smoke test route gốc, deep link và lazy route; kiểm thử hosting config mỗi khi đổi CDN/base path; có chiến lược rollback đồng bộ HTML và asset.
+
+### Sai cấu hình runtime hoặc cache cũ
+
+**Triệu chứng**: build thành công nhưng app gọi nhầm API, feature flag khác kỳ vọng, chỉ một nhóm người dùng lỗi sau deploy hoặc refresh mới hết lỗi.
+
+**Nguyên nhân**: biến môi trường được bake vào build khác với mong muốn, runtime config không được tải/validate, service worker/CDN/browser cache phục vụ version cũ, hoặc cache key không bao gồm tenant/locale/version cần thiết.
+
+**Cách xác minh**: hiển thị release ID và runtime config đã được lọc trong development/staging; trong Network xem config và cache source; kiểm tra service worker/Cache Storage; đối chiếu header `Cache-Control`, ETag và release của HTML/chunk.
+
+**Xử lý**: validate runtime config khi khởi động và fail rõ ràng nếu field bắt buộc thiếu; version hóa cache; cung cấp luồng update service worker có chủ đích. Không bảo người dùng “xóa cache” như một bản sửa; đó chỉ là phép cô lập nguyên nhân.
+
+**Phòng ngừa**: release ID chung cho artefact, source map và telemetry; smoke test runtime config sau deploy; cache policy được review cùng pipeline; dashboard phân nhóm lỗi theo release.
+
+## Lỗi SSR và hydration
+
+SSR (server-side rendering) tạo HTML trên server. Hydration là bước browser gắn Angular vào HTML đó. Cùng mã có thể chạy trong hai môi trường, nên API browser, dữ liệu không xác định và side effect phải được xử lý rõ ràng.
+
+### Không có window, document hoặc localStorage
+
+**Triệu chứng**: SSR log `ReferenceError: window is not defined`, `document is not defined`, hoặc `localStorage is not defined`; route chỉ lỗi khi mở trực tiếp/refresh trên server.
+
+**Nguyên nhân**: component, service hoặc thư viện đọc API browser lúc module được import, constructor chạy hoặc render server. Kiểm tra `typeof window` rải rác thường không đủ vì third-party library có thể đọc `window` ngay khi import.
+
+**Cách xác minh**: tái hiện bằng SSR production-like; đọc stack frame đầu thuộc app/library; tìm mọi đường gọi `window`, `document`, `navigator`, storage và thư viện phụ thuộc browser. Xác nhận lỗi xảy ra trước hay sau hydration.
+
+**Xử lý**: tách browser-only code sang lifecycle/boundary chỉ chạy trên browser và dùng API platform của Angular để kiểm tra platform. Lazy-import thư viện browser-only sau khi đã xác nhận đang ở browser nếu cần.
+
+```ts
+import { Component, PLATFORM_ID, inject } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+
+@Component({
+  selector: 'app-theme-toggle',
+  template: `<button (click)="toggle()">Đổi giao diện</button>`,
+})
+export class ThemeToggleComponent {
+  private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
+
+  toggle(): void {
+    if (!this.isBrowser) return;
+    localStorage.setItem('theme', 'dark');
+  }
+}
+```
+
+**Phòng ngừa**: dùng abstraction cho storage/platform, audit thư viện third-party trước khi đưa vào vùng SSR và chạy smoke test SSR cho route có integration browser.
+
+### Hydration mismatch
+
+**Triệu chứng**: Console cảnh báo hydration node mismatch, UI bị render lại, nhấp nháy hoặc event handler hoạt động không ổn định chỉ ở lượt tải đầu.
+
+**Nguyên nhân**: HTML server và lượt render browser khác nhau. Các nguồn phổ biến là `Date.now()`, `Math.random()`, locale/time zone khác, dữ liệu server/client không đồng nhất, DOM bị script bên thứ ba sửa trước hydration hoặc markup HTML không hợp lệ.
+
+**Cách xác minh**: so sánh HTML response gốc với DOM trước/sau hydration; tạm cố định thời gian/dữ liệu mẫu; kiểm tra console hydration warning và extension/script thao tác DOM. Nếu chỉ một node lệch, truy về expression/render path tạo node đó.
+
+**Xử lý**: làm output ban đầu xác định và chia sẻ cùng dữ liệu giữa server/client qua cơ chế transfer state phù hợp. Hoãn widget phụ thuộc browser cho đến sau hydration. Chỉ dùng `ngSkipHydration` cho subtree đã hiểu rõ và không thể hydrate; nó đổi performance/SEO và không sửa nguyên nhân mismatch ở phần còn lại.
+
+**Phòng ngừa**: không render giá trị ngẫu nhiên/thời gian cục bộ trực tiếp trong template SSR; test route SSR với locale/time zone đại diện; giới hạn third-party DOM mutation trước hydration.
+
+### SSR request lỗi hoặc treo
+
+**Triệu chứng**: TTFB tăng mạnh, server trả 500, request không kết thúc, hoặc một route SSR chỉ lỗi khi backend chậm.
+
+**Nguyên nhân**: request dữ liệu server-side không có timeout, resolver/Observable không hoàn tất, API nội bộ gọi sai origin, cookie/credential không được forward theo policy, hoặc lỗi render không được observability bắt lại.
+
+**Cách xác minh**: dùng server log/tracing với release, route và correlation ID; đo thời gian từng dependency; tái hiện bằng request HTTP trực tiếp tới SSR server. Phân biệt request server → API với request browser → API, vì proxy/CORS/cookie có thể khác hoàn toàn.
+
+**Xử lý**: đặt timeout, fallback/error state và cancellation cho dependency; dùng URL nội bộ/config runtime đúng môi trường; giữ response SSR không chứa dữ liệu bí mật. Khi dependency quan trọng hỏng, chọn rõ giữa error page, skeleton client-side hoặc degraded content theo yêu cầu sản phẩm.
+
+**Phòng ngừa**: budget TTFB, synthetic check SSR cho route quan trọng, tracing server-to-backend, test failure/timeout của API và runbook rollback khi SSR release tăng lỗi.
+
+## Checklist trước khi đóng lỗi
+
+- [ ] Có bước tái hiện tối thiểu, hoặc có ghi rõ vì sao chưa tái hiện được và bằng chứng còn thiếu.
+- [ ] Đã lưu route, release, thời điểm, phạm vi tác động và dữ liệu điều tra đã được scrub.
+- [ ] Đã kiểm tra lớp phù hợp: template/DOM, DI, router, forms, HTTP, state/change detection, build/deploy hoặc SSR/hydration.
+- [ ] Giả thuyết nguyên nhân có bằng chứng xác nhận và ít nhất một giả thuyết quan trọng đã được loại trừ.
+- [ ] Bản sửa nằm ở lớp sở hữu nguyên nhân, không chỉ che triệu chứng bằng `any`, schema rộng, `setTimeout()` hay `detectChanges()`.
+- [ ] Mọi nhánh bất đồng bộ dọn loading/error state; dữ liệu nhạy cảm không xuất hiện trong log/telemetry.
+- [ ] Có regression test ở lớp nhỏ nhất phù hợp: mapper/service, component, router hoặc E2E/deep-link khi cần.
+- [ ] Đã xác minh lại đúng kịch bản cũ trên artefact/release dự kiến và theo dõi tín hiệu sau deploy khi lỗi từng xảy ra ở production.
+
+## Tóm tắt
+
+Để xử lý lỗi Angular nhanh và bền vững, đừng suy luận từ một thông báo duy nhất. Xác định triệu chứng, thu bằng chứng ở boundary đúng, rồi sửa nguyên nhân gần nơi nó được sở hữu: import/template, provider, route, form contract, mapper HTTP, state, pipeline hoặc môi trường SSR.
+
+Bản sửa hoàn chỉnh còn cần một hàng rào chống tái diễn. Đó có thể là test mapper, component test, deep-link smoke test, validation runtime, cache policy hoặc telemetry có release ID. Xem trang debugging để thực hành điều tra chi tiết và monitoring để thiết kế tín hiệu production an toàn.
+
+<Cards>
+  <Card title="Kỹ thuật debugging Angular" href="/docs/production-troubleshooting/debugging" description="Quy trình tái hiện, dùng DevTools, Network, source map và kiểm tra state." />
+  <Card title="Monitoring frontend Angular" href="/docs/production-troubleshooting/monitoring" description="Theo dõi lỗi, release, telemetry và alert có thể hành động." />
+  <Card title="Angular Router" href="/docs/routing-forms/angular-router" description="Hiểu route config, điều hướng và các thành phần của Router." />
+  <Card title="SSR và hydration" href="/docs/testing-performance-deploy/ssr-hydration" description="Triển khai rendering server và hydration một cách có kiểm soát." />
+</Cards>

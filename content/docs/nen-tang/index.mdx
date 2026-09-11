@@ -1,23 +1,108 @@
 ---
 title: Nền tảng Angular
-description: Các khái niệm nền tảng cần nắm trước khi xây dựng ứng dụng Angular.
+description: Lộ trình nắm vững các khái niệm cốt lõi trước khi bắt đầu xây dựng ứng dụng Angular.
 ---
 
-Đây là trang khung cho nhóm **Nền tảng Angular**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+Angular không chỉ là cách viết giao diện. Để học hiệu quả, hãy hiểu trước framework này giải quyết vấn đề gì, các khối của ứng dụng phối hợp ra sao, rồi mới đi sâu vào component, routing hay dữ liệu từ API.
+
+<Callout type="info" title="Dành cho ai?">
+  Nhóm này phù hợp nếu bạn đã biết HTML, CSS và JavaScript cơ bản. Bạn không cần thuộc hết TypeScript trước khi bắt đầu; hãy học phần TypeScript trong lộ trình và áp dụng ngay vào Angular.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Bắt đầu từ đâu?](#bắt-đầu-từ-đâu)
+- [Lộ trình tự học](#lộ-trình-tự-học)
+  - [Chặng 1: Định vị Angular](#chặng-1-định-vị-angular)
+  - [Chặng 2: Bổ sung TypeScript](#chặng-2-bổ-sung-typescript)
+  - [Chặng 3: Ghép các khối của ứng dụng](#chặng-3-ghép-các-khối-của-ứng-dụng)
+  - [Chặng 4: Hiểu đường đi đến giao diện](#chặng-4-hiểu-đường-đi-đến-giao-diện)
+  - [Chặng 5: Nắm mô hình phản ứng](#chặng-5-nắm-mô-hình-phản-ứng)
+- [Cách học để nhớ lâu](#cách-học-để-nhớ-lâu)
+- [Sau nhóm này, học gì tiếp?](#sau-nhóm-này-học-gì-tiếp)
+- [Đi tới bài học](#đi-tới-bài-học)
 
-## Phạm vi dự kiến
+## Bắt đầu từ đâu?
 
-Các khái niệm nền tảng cần nắm trước khi xây dựng ứng dụng Angular. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+Mục tiêu của nhóm **Nền tảng Angular** là tạo một mô hình tinh thần đúng: dữ liệu thay đổi ở đâu, Angular cập nhật giao diện như thế nào và mã nguồn nên được chia thành những phần nào. Đây là nền để các phần sau không trở thành việc ghi nhớ cú pháp rời rạc.
 
-## Các bài trong nhóm
+Bạn nên hoàn thành các bài theo đúng thứ tự. Mỗi bài trả lời một câu hỏi, rồi tạo tiền đề trực tiếp cho bài tiếp theo:
 
-- **[Angular là gì?](/docs/nen-tang/angular-la-gi)** — Bối cảnh, ưu điểm, giới hạn và trường hợp nên sử dụng Angular.
-- **[Kiến trúc Angular](/docs/nen-tang/kien-truc-angular)** — Các khối chính của framework và cách chúng phối hợp trong một ứng dụng.
-- **[TypeScript cần thiết](/docs/nen-tang/typescript-can-thiet)** — Những kiến thức TypeScript quan trọng nhất khi làm việc với Angular.
-- **[DOM và template](/docs/nen-tang/dom-va-template)** — Mối quan hệ giữa DOM trình duyệt, template và quá trình render.
-- **[Signals và Zone.js](/docs/nen-tang/signals-va-zonejs)** — Hai cơ chế liên quan đến reactivity và change detection trong Angular hiện đại.
+```text
+Angular dùng để làm gì?
+          │
+          ▼
+Cần TypeScript nào để đọc và viết mã?
+          │
+          ▼
+Các khối Angular được tổ chức ra sao?
+          │
+          ▼
+Template biến dữ liệu thành DOM thế nào?
+          │
+          ▼
+Khi dữ liệu đổi, Angular biết cập nhật phần nào?
+```
+
+<Callout type="idea" title="Kết quả cần đạt">
+  Khi kết thúc, bạn có thể đọc cấu trúc một ứng dụng Angular nhỏ, giải thích vai trò của component và template, đồng thời phân biệt được Signals với cơ chế phát hiện thay đổi truyền thống dựa trên Zone.js.
+</Callout>
+
+## Lộ trình tự học
+
+Mỗi chặng nên được học trong một phiên ngắn. Đọc bài, tự diễn giải lại bằng ví dụ của bạn, rồi mới sang chặng kế tiếp.
+
+### Chặng 1: Định vị Angular
+
+Bắt đầu với **[Angular là gì?](/docs/nen-tang/angular-la-gi)** để biết Angular phù hợp với loại sản phẩm nào, điểm mạnh của framework và các đánh đổi đi kèm. Đừng cài công cụ vội; trước hết hãy xác định vì sao bạn chọn Angular thay vì chỉ dùng JavaScript hoặc một thư viện giao diện khác.
+
+**Hoàn thành khi:** bạn có thể mô tả Angular là một framework xây dựng ứng dụng web và nêu được một tình huống nên dùng nó.
+
+### Chặng 2: Bổ sung TypeScript
+
+Tiếp tục với **[TypeScript cần thiết](/docs/nen-tang/typescript-can-thiet)**. TypeScript bổ sung kiểu dữ liệu cho JavaScript, giúp IDE phát hiện lỗi và làm rõ dữ liệu mà component nhận hoặc trả về. Chỉ tập trung vào các phần phục vụ Angular, thay vì cố học mọi tính năng của ngôn ngữ trong một lần.
+
+**Hoàn thành khi:** bạn đọc được kiểu của biến, hàm và object; đồng thời hiểu vì sao một lỗi kiểu có thể được phát hiện trước lúc chạy ứng dụng.
+
+### Chặng 3: Ghép các khối của ứng dụng
+
+Đọc **[Kiến trúc Angular](/docs/nen-tang/kien-truc-angular)** để liên kết những khái niệm rời rạc thành một ứng dụng: component quản lý một phần giao diện, template mô tả phần hiển thị, còn các cơ chế nền tảng giúp Angular khởi tạo và phối hợp chúng.
+
+**Hoàn thành khi:** bạn nhìn vào một thư mục Angular và có thể chỉ ra nơi phù hợp để đặt giao diện, logic của giao diện và phần dùng chung.
+
+### Chặng 4: Hiểu đường đi đến giao diện
+
+Đến **[DOM và template](/docs/nen-tang/dom-va-template)**. DOM là cấu trúc đối tượng mà trình duyệt dùng để biểu diễn trang; template là phần khai báo Angular dùng để tạo và cập nhật cấu trúc đó. Nắm mối liên hệ này giúp bạn hiểu binding, sự kiện và điều kiện hiển thị ở các nhóm bài tiếp theo.
+
+**Hoàn thành khi:** bạn giải thích được rằng thay đổi dữ liệu không tự biến thành giao diện; Angular phải đánh giá template rồi cập nhật DOM cần thiết.
+
+### Chặng 5: Nắm mô hình phản ứng
+
+Kết thúc bằng **[Signals và Zone.js](/docs/nen-tang/signals-va-zonejs)**. Signals biểu diễn trạng thái có thể theo dõi trực tiếp. Zone.js hỗ trợ Angular nhận biết nhiều tác vụ bất đồng bộ để kiểm tra giao diện cần cập nhật. Hiểu hai cơ chế này ở mức nền tảng trước khi học quản lý state sâu hơn.
+
+**Hoàn thành khi:** bạn phân biệt được “dữ liệu thay đổi” với “Angular quyết định cập nhật giao diện”, và biết Signals là hướng tiếp cận quan trọng trong Angular hiện đại.
+
+## Cách học để nhớ lâu
+
+1. **Học theo câu hỏi.** Trước mỗi bài, đọc câu hỏi mở đầu của chặng và thử trả lời bằng lời của mình.
+2. **Luôn gắn với một ví dụ nhỏ.** Ví dụ, tạo một biến tên người dùng, hiển thị nó trong template, rồi thay đổi giá trị để quan sát giao diện. Ví dụ ngắn giúp khái niệm DOM, template và reactivity có điểm bám cụ thể.
+3. **Ghi lại quan hệ, không chỉ cú pháp.** Một sơ đồ ba mũi tên như `state → template → DOM` hữu ích hơn việc ghi nhớ một đoạn mã mà chưa hiểu dữ liệu đi qua đâu.
+4. **Chỉ sang phần kế tiếp khi đạt mốc.** Nếu chưa tự giải thích được mốc “Hoàn thành khi” của chặng hiện tại, hãy đọc lại và làm lại ví dụ trước khi mở bài mới.
+
+<Callout type="warn" title="Tránh học nhảy cóc">
+  Không nên bắt đầu bằng state management, routing phức tạp hoặc gọi API khi chưa hiểu component, template và cơ chế cập nhật giao diện. Bạn vẫn có thể chạy được ví dụ, nhưng sẽ khó chẩn đoán lỗi khi ứng dụng lớn hơn.
+</Callout>
+
+## Sau nhóm này, học gì tiếp?
+
+Sau khi hoàn thành năm chặng, bạn đã sẵn sàng thiết lập môi trường, dùng Angular CLI và tạo ứng dụng đầu tiên. Hãy chuyển sang nhóm **[Bắt đầu](/docs/bat-dau)**, rồi tiếp tục theo thứ tự của sidebar.
+
+## Đi tới bài học
+
+<Cards>
+  <Card title="1. Angular là gì?" href="/docs/nen-tang/angular-la-gi" description="Xác định vai trò, ưu điểm và phạm vi phù hợp của Angular." />
+  <Card title="2. TypeScript cần thiết" href="/docs/nen-tang/typescript-can-thiet" description="Trang bị kiến thức TypeScript dùng thường xuyên trong Angular." />
+  <Card title="3. Kiến trúc Angular" href="/docs/nen-tang/kien-truc-angular" description="Nhìn tổng thể các khối tạo nên một ứng dụng Angular." />
+  <Card title="4. DOM và template" href="/docs/nen-tang/dom-va-template" description="Theo dõi cách Angular biến dữ liệu thành giao diện." />
+  <Card title="5. Signals và Zone.js" href="/docs/nen-tang/signals-va-zonejs" description="Hiểu nền tảng reactivity và change detection hiện đại." />
+</Cards>

@@ -1,10 +1,766 @@
 ---
-title: Data binding
-description: Interpolation, property binding, event binding và two-way binding.
+title: Data binding trong Angular
+description: Hiểu cách template đọc dữ liệu, phát sự kiện và đồng bộ biểu mẫu với component bằng các dạng data binding của Angular.
 ---
 
-Trang này sẽ trình bày **Data binding** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Bạn sẽ học gì?">
+  Data binding là cầu nối giữa state của component và DOM. Trang này đi từ bốn cú pháp cơ bản đến signals, biểu mẫu, lỗi thường gặp và cách viết template dễ bảo trì.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Data binding là gì](#data-binding-là-gì)
+  - [Bốn dạng binding](#bốn-dạng-binding)
+  - [Luồng dữ liệu nên hình dung](#luồng-dữ-liệu-nên-hình-dung)
+- [Cơ chế Angular cập nhật giao diện](#cơ-chế-angular-cập-nhật-giao-diện)
+  - [Biểu thức template](#biểu-thức-template)
+  - [Property của DOM và attribute HTML](#property-của-dom-và-attribute-html)
+  - [Khi nào binding được đánh giá lại](#khi-nào-binding-được-đánh-giá-lại)
+- [Interpolation](#interpolation)
+  - [Cú pháp và kết quả](#cú-pháp-và-kết-quả)
+  - [Tránh đặt logic nặng trong interpolation](#tránh-đặt-logic-nặng-trong-interpolation)
+- [Property binding](#property-binding)
+  - [Binding property của phần tử](#binding-property-của-phần-tử)
+  - [Binding attribute class và style](#binding-attribute-class-và-style)
+  - [Binding input của component con](#binding-input-của-component-con)
+- [Event binding](#event-binding)
+  - [Nhận sự kiện và đối tượng `$event`](#nhận-sự-kiện-và-đối-tượng-event)
+  - [Cập nhật state từ handler](#cập-nhật-state-từ-handler)
+  - [Sự kiện submit của biểu mẫu](#sự-kiện-submit-của-biểu-mẫu)
+- [Two-way binding](#two-way-binding)
+  - [Cú pháp banana in a box](#cú-pháp-banana-in-a-box)
+  - [Dùng `ngModel` với native control](#dùng-ngmodel-với-native-control)
+  - [Tạo two-way binding cho component](#tạo-two-way-binding-cho-component)
+- [Signals và forms](#signals-và-forms)
+  - [Đọc và ghi signal trong template](#đọc-và-ghi-signal-trong-template)
+  - [Template-driven forms](#template-driven-forms)
+  - [Reactive forms](#reactive-forms)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Chọn đúng chiều binding](#chọn-đúng-chiều-binding)
+  - [Kiểu dữ liệu và giá trị rỗng](#kiểu-dữ-liệu-và-giá-trị-rỗng)
+  - [Hiệu năng và tính dễ đọc](#hiệu-năng-và-tính-dễ-đọc)
+  - [Bảo mật khi hiển thị dữ liệu](#bảo-mật-khi-hiển-thị-dữ-liệu)
+- [Best practices](#best-practices)
+- [Tóm tắt](#tóm-tắt)
+
+## Tổng quan
+
+### Data binding là gì
+
+**Data binding** là cơ chế để Angular nối state của component với template. State là dữ liệu mà component đang giữ, chẳng hạn tên người dùng, trạng thái đang lưu, hay giá trị một ô nhập. Template là phần mô tả giao diện sẽ hiển thị dữ liệu đó và nhận thao tác từ người dùng.
+
+Không cần tự tìm phần tử bằng `document.querySelector()` rồi gán `textContent` hoặc đăng ký listener thủ công. Thay vào đó, template khai báo *dữ liệu nào đi đến đâu* và *sự kiện nào gọi hàm nào*. Angular quản lý phần DOM tương ứng khi state thay đổi.
+
+Ví dụ, dòng sau nói rằng nội dung của thẻ `h2` phụ thuộc vào `userName`:
+
+```html
+<h2>Xin chào, {{ userName }}</h2>
+```
+
+Còn dòng này nói rằng khi người dùng nhấn nút, component sẽ chạy `save()`:
+
+```html
+<button type="button" (click)="save()">Lưu</button>
+```
+
+Hai chiều dữ liệu này là nền tảng của gần như mọi component Angular. Hãy luôn bắt đầu bằng câu hỏi: **đây là dữ liệu đi từ component ra view, hay là thao tác đi từ view vào component?**
+
+### Bốn dạng binding
+
+Angular dùng dấu ngoặc trong template để biểu đạt bốn trường hợp chính:
+
+| Dạng | Cú pháp | Chiều dữ liệu | Mục đích điển hình |
+| --- | --- | --- | --- |
+| Interpolation | `{{ expression }}` | Component → view | Chèn giá trị dạng text vào nội dung hoặc attribute thường |
+| Property binding | `[property]="expression"` | Component → view | Gán giá trị cho property DOM hoặc input của component/directive |
+| Event binding | `(event)="statement"` | View → component | Phản hồi `click`, `input`, `change`, sự kiện custom |
+| Two-way binding | `[(property)]="target"` | Cả hai chiều | Ghép một property binding với sự kiện thay đổi tương ứng |
+
+<Callout type="idea" title="Đọc nhanh cú pháp">
+  Dấu vuông `[]` nghĩa là Angular **ghi giá trị ra giao diện**. Dấu tròn `()` nghĩa là Angular **lắng nghe dữ liệu đi vào component**. Cú pháp `[()]` chỉ là cách viết gộp của hai việc đó, không phải một cơ chế ma thuật riêng.
+</Callout>
+
+### Luồng dữ liệu nên hình dung
+
+Phần lớn component nên giữ luồng một chiều rõ ràng: component cung cấp state cho template; sự kiện từ template gọi một handler; handler thay đổi state; Angular phản ánh state mới ra template.
+
+```text
+┌──────────────────┐   property / interpolation   ┌──────────────────┐
+│ State component  │ ───────────────────────────► │ DOM / template   │
+│ name, signal,    │                              │ text, disabled,  │
+│ form control     │ ◄─────────────────────────── │ input, click     │
+└────────┬─────────┘       event / $event         └──────────────────┘
+         │
+         │ Handler cập nhật state
+         ▼
+┌──────────────────┐
+│ Angular đồng bộ  │
+│ phần giao diện   │
+│ phụ thuộc state  │
+└──────────────────┘
+```
+
+Two-way binding rút ngắn đoạn đường này cho các giá trị có thể chỉnh sửa, ví dụ ô nhập liệu. Tuy vậy, phía trong nó vẫn là một đầu vào và một thông báo thay đổi. Hiểu luồng một chiều trước sẽ giúp bạn biết khi nào two-way binding làm mã rõ hơn, khi nào nó che khuất logic cập nhật.
+
+## Cơ chế Angular cập nhật giao diện
+
+### Biểu thức template
+
+Phần nằm trong `{{ ... }}`, `[...]` và `(...)` là **biểu thức template**. Biểu thức đọc các field, gọi method hoặc đọc signal của instance component hiện tại. Nó không phải là một tệp JavaScript hoàn chỉnh: template được Angular biên dịch và chỉ hỗ trợ tập cú pháp phục vụ việc hiển thị, điều kiện và gọi handler.
+
+Ví dụ dưới đây đều đọc state từ component:
+
+```html
+<p>{{ profile.name }}</p>
+<img [src]="profile.avatarUrl" [alt]="profile.name" />
+<button [disabled]="isSaving">Lưu</button>
+```
+
+Bạn có thể dùng toán tử an toàn và biểu thức đơn giản khi cần. Ví dụ `user?.address?.city ?? 'Chưa cập nhật'` tránh lỗi khi dữ liệu chưa về. Tuy nhiên, template không phải nơi tốt để tạo side effect, gán state, hoặc thực hiện tính toán khó đọc. Hãy đưa phần việc đó vào component, `computed`, pipe hoặc service tùy trách nhiệm.
+
+### Property của DOM và attribute HTML
+
+HTML **attribute** là dữ liệu khai báo trong markup ban đầu, ví dụ `disabled` trong `<button disabled>`. DOM **property** là thuộc tính sống của đối tượng phần tử trong trình duyệt, ví dụ `button.disabled`. Sau khi trang chạy, property thường là thứ quyết định hành vi thực tế của control.
+
+Property binding ghi vào property, không đơn thuần nối chuỗi vào HTML:
+
+```html
+<button [disabled]="isSaving">Lưu thay đổi</button>
+<input [value]="searchTerm" />
+```
+
+Khi `isSaving` là `true`, `button.disabled` là boolean `true` và nút thực sự bị vô hiệu hóa. Nếu chỉ viết `disabled="false"`, browser vẫn xem attribute boolean này là có mặt, nên nút vẫn disabled. Đây là lý do binding boolean cần dùng `[]`.
+
+Có lúc phần tử không có property bạn cần, nhưng cần đặt attribute cho ngữ nghĩa hoặc khả năng truy cập. Khi đó dùng tiền tố `attr.`:
+
+```html
+<td [attr.colspan]="columnCount">Tổng cộng</td>
+<button [attr.aria-label]="'Xóa ' + item.name">×</button>
+```
+
+Nếu giá trị `attr.*` là `null` hoặc `undefined`, Angular loại attribute đó khỏi phần tử. Điều này hữu ích cho các attribute tùy chọn như `aria-describedby`.
+
+### Khi nào binding được đánh giá lại
+
+Angular cập nhật view khi nó xử lý một thay đổi có liên quan, chẳng hạn handler của `(click)` vừa đổi state, dữ liệu bất đồng bộ đã trả về, hoặc signal được ghi giá trị mới. Với signal, Angular theo dõi signal được đọc trong template để biết view nào phụ thuộc vào nó.
+
+Một biểu thức binding có thể được đánh giá nhiều hơn một lần trong vòng đời render. Vì vậy, biểu thức phải **không có side effect**: không gọi API, không đẩy phần tử vào mảng, không tăng biến đếm, và không thay đổi signal trong lúc Angular đang đọc template.
+
+```ts
+// Không nên: mỗi lần template được kiểm tra lại có thể gọi hàm này.
+nextOrderNumber(): number {
+  this.orderNumber += 1;
+  return this.orderNumber;
+}
+```
+
+Thay vào đó, hãy tính hoặc cập nhật `orderNumber` trong một handler rõ ràng. Quy tắc thực hành là: **template đọc state; handler và logic nghiệp vụ thay đổi state**.
+
+## Interpolation
+
+### Cú pháp và kết quả
+
+Interpolation dùng cặp dấu ngoặc nhọn `{{ expression }}` để đưa kết quả biểu thức vào text. Angular chuyển kết quả thành chuỗi để hiển thị. Đây là lựa chọn tự nhiên cho tiêu đề, nhãn, số liệu và thông báo.
+
+```ts
+export class WelcomeComponent {
+  userName = 'An';
+  unreadCount = 3;
+  lastLogin: Date | null = new Date('2025-03-08T09:30:00');
+}
+```
+
+```html
+<h2>Chào {{ userName }}!</h2>
+<p>Bạn có {{ unreadCount }} thông báo chưa đọc.</p>
+<p>Đăng nhập gần nhất: {{ lastLogin ?? 'Chưa có dữ liệu' }}</p>
+```
+
+Interpolation cũng có thể xuất hiện trong một attribute dạng chuỗi:
+
+```html
+<img alt="Ảnh đại diện của {{ userName }}" />
+```
+
+Cách này phù hợp khi bạn đang tạo một chuỗi. Nếu mục tiêu là truyền giá trị thật, đặc biệt là boolean, object, số hoặc giá trị có thể `null`, hãy ưu tiên property binding. Ví dụ `[disabled]="hasErrors"` rõ nghĩa và đúng kiểu hơn `disabled="{{ hasErrors }}"`.
+
+<Callout type="info" title="Hiển thị text an toàn">
+  Khi interpolation dữ liệu không tin cậy vào nội dung text, Angular không coi chuỗi đó là HTML để thực thi. Ví dụ `{{ comment }}` hiển thị các ký tự thẻ HTML như text thay vì tự chạy script. Dù vậy, điều này không thay thế việc kiểm soát dữ liệu ở server hoặc xử lý đúng ngữ cảnh URL và HTML.
+</Callout>
+
+### Tránh đặt logic nặng trong interpolation
+
+Interpolation chấp nhận biểu thức ngắn, nhưng một chuỗi điều kiện dài sẽ làm template khó đọc và có thể bị tính lại thường xuyên:
+
+```html
+<!-- Khó đọc và dễ lặp lại trong nhiều nơi -->
+<p>{{ items.filter(isAvailable).sort(byPrice)[0]?.price ?? 0 }}</p>
+```
+
+Hãy đưa phép tính dẫn xuất vào component. Với state thường, một getter đơn giản có thể đủ nếu công việc thật sự nhỏ. Với signal, `computed` diễn tả rõ đây là dữ liệu được suy ra và có thể được Angular cache theo dependency:
+
+```ts
+import { computed, signal } from '@angular/core';
+
+export class CartSummaryComponent {
+  readonly items = signal<CartItem[]>([]);
+
+  readonly cheapestAvailablePrice = computed(() => {
+    const available = this.items().filter((item) => item.available);
+    return available.reduce(
+      (lowest, item) => Math.min(lowest, item.price),
+      Number.POSITIVE_INFINITY,
+    );
+  });
+}
+```
+
+```html
+<p>Giá thấp nhất: {{ cheapestAvailablePrice() }}</p>
+```
+
+Tên `cheapestAvailablePrice` cho người đọc biết ý nghĩa của giá trị. Nó cũng giúp template chỉ còn nhiệm vụ hiển thị.
+
+## Property binding
+
+### Binding property của phần tử
+
+Property binding có dạng `[tênProperty]="biểuThức"`. Angular đánh giá biểu thức rồi ghi kết quả vào property của phần tử, directive hoặc component ở bên trái.
+
+```ts
+export class ProductPageComponent {
+  product = {
+    name: 'Tai nghe không dây',
+    imageUrl: '/products/headphones.png',
+    inStock: false,
+  };
+  isSaving = false;
+}
+```
+
+```html
+<img [src]="product.imageUrl" [alt]="product.name" />
+<p [hidden]="product.inStock">Sản phẩm hiện tạm hết hàng.</p>
+<button type="button" [disabled]="isSaving || !product.inStock">
+  {{ isSaving ? 'Đang lưu...' : 'Thêm vào giỏ' }}
+</button>
+```
+
+Dấu `[]` cho Angular biết phần bên phải là biểu thức, không phải text cố định. So sánh:
+
+```html
+<!-- Gán đúng giá trị của biến imageUrl -->
+<img [src]="imageUrl" />
+
+<!-- Gán nguyên văn bốn ký tự i-m-a-g-e... vào thuộc tính src -->
+<img src="imageUrl" />
+```
+
+Bạn vẫn nên dùng attribute tĩnh khi giá trị thực sự cố định, ví dụ `type="button"`, `role="status"` hoặc `loading="lazy"`. Binding cho mọi giá trị tĩnh chỉ làm template dài hơn.
+
+### Binding attribute class và style
+
+Ngoài property thông thường, Angular cung cấp cú pháp chuyên biệt giúp tránh ghép chuỗi class/style bằng tay:
+
+```html
+<article
+  [class.is-selected]="isSelected"
+  [class.is-out-of-stock]="!product.inStock"
+  [style.width.px]="progress"
+  [style.--accent-color]="themeColor"
+>
+  {{ product.name }}
+</article>
+```
+
+- `[class.is-selected]` thêm hoặc xóa class `is-selected` theo boolean.
+- `[style.width.px]` gán số và tự thêm đơn vị `px`; dùng `[style.width]` khi bạn đã có chuỗi như `'50%'`.
+- `[style.--accent-color]` gán CSS custom property. Giá trị `themeColor` nên đến từ danh sách màu hợp lệ của ứng dụng, thay vì ghép CSS tùy ý từ nguồn không tin cậy.
+
+Khi cần gán nguyên một tập class, có thể dùng `[class]="className"` hoặc `[ngClass]` nếu dự án đã dùng `NgClass`. Với một vài điều kiện độc lập, cú pháp `[class.tên-class]` thường ngắn và dễ tìm hơn.
+
+### Binding input của component con
+
+Dấu `[]` không chỉ dành cho phần tử HTML. Với component Angular, nó truyền dữ liệu vào **input** của component con:
+
+```ts
+import { Component, DecimalPipe, input } from '@angular/core';
+
+@Component({
+  selector: 'app-product-card',
+  imports: [DecimalPipe],
+  template: `
+    <h3>{{ product().name }}</h3>
+    <p>{{ product().price | number }} đ</p>
+  `,
+})
+export class ProductCardComponent {
+  readonly product = input.required<{ name: string; price: number }>();
+}
+```
+
+```html
+<app-product-card [product]="selectedProduct"></app-product-card>
+```
+
+Ở đây `product` bên trái là API public của component con; `selectedProduct` bên phải là state của component cha. Không đặt dấu ngoặc sẽ truyền string literal `"selectedProduct"`, không phải object đang được chọn.
+
+<Callout type="warn" title="Input signal cần được gọi">
+  Hàm `input()` tạo input dạng signal. Bên trong component con, đọc nó bằng `product()`, không phải `product`. Ngược lại, component cha vẫn binding như bình thường: `[product]="selectedProduct"`.
+</Callout>
+
+## Event binding
+
+### Nhận sự kiện và đối tượng `$event`
+
+Event binding có dạng `(tênSựKiện)="statement"`. Angular đăng ký listener cho sự kiện DOM hoặc output của component/directive. Khi sự kiện xảy ra, statement được chạy trong ngữ cảnh component.
+
+```html
+<button type="button" (click)="archive()">Lưu trữ</button>
+<input (input)="onSearchInput($event)" />
+<select (change)="selectCategory($event)">
+  <option value="all">Tất cả</option>
+  <option value="book">Sách</option>
+</select>
+```
+
+Biến đặc biệt `$event` là đối tượng sự kiện gốc đối với DOM event. Kiểu của `EventTarget` rất rộng nên TypeScript không biết nó chắc chắn là input hay select. Hãy ép kiểu ở trong handler, thay vì nhét ép kiểu phức tạp vào template:
+
+```ts
+onSearchInput(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  this.searchTerm = input.value;
+}
+
+selectCategory(event: Event): void {
+  const select = event.target as HTMLSelectElement;
+  this.category = select.value;
+}
+```
+
+Nếu handler chỉ cần báo một hành động và không cần dữ liệu event, không truyền `$event` là rõ nhất: `(click)="archive()"`.
+
+### Cập nhật state từ handler
+
+Handler là nơi phù hợp để kiểm tra điều kiện, cập nhật state và gọi service. Ví dụ sau dùng signal để quản lý số lượng sản phẩm:
+
+```ts
+import { Component, computed, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-quantity-picker',
+  templateUrl: './quantity-picker.component.html',
+})
+export class QuantityPickerComponent {
+  readonly quantity = signal(1);
+  readonly canDecrease = computed(() => this.quantity() > 1);
+
+  decrease(): void {
+    if (this.canDecrease()) {
+      this.quantity.update((value) => value - 1);
+    }
+  }
+
+  increase(): void {
+    this.quantity.update((value) => value + 1);
+  }
+}
+```
+
+```html
+<button type="button" [disabled]="!canDecrease()" (click)="decrease()">
+  −
+</button>
+<span>{{ quantity() }}</span>
+<button type="button" (click)="increase()">+</button>
+```
+
+Các binding đọc `quantity()` và `canDecrease()` sẽ phản ánh giá trị mới sau handler. Việc đặt quy tắc “không nhỏ hơn 1” trong `decrease()` bảo vệ state dù sau này component có thêm một nút khác hoặc một lời gọi từ mã TypeScript.
+
+### Sự kiện submit của biểu mẫu
+
+Với form, đừng chỉ dựa vào `(click)` của nút lưu. Người dùng có thể nhấn <kbd>Enter</kbd> trong input và trình duyệt sẽ submit form. Hãy xử lý submit ở chính thẻ `form`.
+
+Trong template-driven form, `ngSubmit` là sự kiện phù hợp:
+
+```html
+<form #profileForm="ngForm" (ngSubmit)="save(profileForm)">
+  <input name="displayName" [(ngModel)]="profile.displayName" required />
+  <button type="submit" [disabled]="profileForm.invalid">Lưu hồ sơ</button>
+</form>
+```
+
+Trong reactive form, cũng dùng `(ngSubmit)` và truyền `FormGroup` đã tạo. `ngSubmit` là API của forms directive; đừng giả định Angular tự ngăn hành vi submit mặc định nếu bạn chỉ dùng `(submit)` của DOM. Chọn API biểu mẫu giúp luồng validate và submit rõ ràng hơn.
+
+## Two-way binding
+
+### Cú pháp banana in a box
+
+`[(value)]="quantity"` được gọi vui là **banana in a box**: dấu tròn là “banana”, dấu vuông là “box”. Nó là cú pháp rút gọn cho một input và output có tên theo quy ước:
+
+```html
+<!-- Cú pháp ngắn -->
+<app-quantity-picker [(value)]="quantity"></app-quantity-picker>
+
+<!-- Ý nghĩa tương đương -->
+<app-quantity-picker
+  [value]="quantity"
+  (valueChange)="quantity = $event"
+></app-quantity-picker>
+```
+
+Tên output phải là tên input cộng hậu tố `Change`: `value` đi với `valueChange`, `open` đi với `openChange`. Với signal model hiện đại, Angular tạo cặp API này cho bạn.
+
+Two-way binding rất hợp với giá trị chỉnh sửa trực tiếp: nội dung input, trạng thái mở của panel, số lượng trong picker. Nó không nên là lựa chọn mặc định cho dữ liệu nghiệp vụ phức tạp, vì người đọc khó nhìn thấy quy tắc nào được chạy trước khi state đổi.
+
+### Dùng `ngModel` với native control
+
+`[(ngModel)]` là two-way binding do Angular Forms cung cấp cho control native và một số custom control. Standalone component phải import `FormsModule` trước khi dùng nó:
+
+```ts
+import { Component } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+
+@Component({
+  selector: 'app-profile-editor',
+  imports: [FormsModule],
+  templateUrl: './profile-editor.component.html',
+})
+export class ProfileEditorComponent {
+  profile = {
+    displayName: '',
+    receiveNewsletter: true,
+  };
+}
+```
+
+```html
+<label>
+  Tên hiển thị
+  <input name="displayName" [(ngModel)]="profile.displayName" />
+</label>
+
+<label>
+  <input type="checkbox" name="receiveNewsletter" [(ngModel)]="profile.receiveNewsletter" />
+  Nhận bản tin
+</label>
+
+<p>Xin chào {{ profile.displayName || 'bạn' }}</p>
+```
+
+Về mặt khái niệm, `[(ngModel)]="profile.displayName"` ghép `[ngModel]="profile.displayName"` và `(ngModelChange)="profile.displayName = $event"`. Tách hai nửa ra khi bạn cần chuẩn hóa hoặc kiểm soát thời điểm ghi:
+
+```html
+<input
+  [ngModel]="profile.displayName"
+  (ngModelChange)="profile.displayName = $event.trimStart()"
+/>
+```
+
+Việc tách này làm logic biến đổi hiện ra trong template. Nếu biến đổi dài, cần validate phức tạp hoặc ảnh hưởng nhiều field, chuyển logic vào handler hoặc dùng reactive forms sẽ dễ kiểm thử hơn.
+
+<Callout type="warn" title="`ngModel` trong form cần `name`">
+  Khi một `ngModel` nằm trong thẻ `<form>`, Angular cần thuộc tính `name` để đăng ký control với form. Nếu control không thuộc form, có thể đánh dấu `[ngModelOptions]="{ standalone: true }"`; đừng dùng cách này để né việc thiết kế form.
+</Callout>
+
+### Tạo two-way binding cho component
+
+Với Angular hiện đại, `model()` là cách gọn để khai báo một input có thể được component con cập nhật. Ví dụ slider con sở hữu thao tác input, còn component cha sở hữu state `volume`:
+
+```ts
+import { Component, model } from '@angular/core';
+
+@Component({
+  selector: 'app-volume-slider',
+  template: `
+    <label>
+      Âm lượng: {{ value() }}
+      <input
+        type="range"
+        min="0"
+        max="100"
+        [value]="value()"
+        (input)="setValue($event)"
+      />
+    </label>
+  `,
+})
+export class VolumeSliderComponent {
+  readonly value = model(50);
+
+  setValue(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.value.set(Number(input.value));
+  }
+}
+```
+
+```ts
+import { Component, signal } from '@angular/core';
+import { VolumeSliderComponent } from './volume-slider.component';
+
+@Component({
+  selector: 'app-settings',
+  imports: [VolumeSliderComponent],
+  template: `
+    <app-volume-slider [(value)]="volume" />
+    <p>Âm lượng đã chọn: {{ volume() }}</p>
+  `,
+})
+export class SettingsComponent {
+  readonly volume = signal(30);
+}
+```
+
+Khi `value` được khai báo bằng `model()`, Angular công khai input `value` và output thay đổi tương ứng cho phép `[(value)]`. Khi cha truyền một writable signal như `volume`, hai bên đồng bộ giá trị signal đó. API của component vẫn nên nói lên ý nghĩa nghiệp vụ, ví dụ `[(open)]`, `[(selectedId)]` hoặc `[(value)]`, thay vì phát mọi field nội bộ ra ngoài.
+
+Nếu dự án đang dùng API `@Input()`/`@Output()`, quy ước thủ công vẫn hoạt động:
+
+```ts
+import { EventEmitter, Input, Output } from '@angular/core';
+
+@Input() value = 0;
+@Output() readonly valueChange = new EventEmitter<number>();
+
+setValue(nextValue: number): void {
+  this.valueChange.emit(nextValue);
+}
+```
+
+Đừng trộn hai cách cho cùng một API trừ khi bạn có lý do tương thích rõ ràng. Chọn phong cách phù hợp với phiên bản Angular và quy ước hiện có của codebase.
+
+## Signals và forms
+
+### Đọc và ghi signal trong template
+
+Signal là một hộp chứa giá trị có thể đọc bằng lời gọi hàm, ví dụ `count()`. Khi template đọc signal, Angular biết template phụ thuộc vào signal đó. Khi bạn gọi `set()` hoặc `update()`, phần view phụ thuộc sẽ được lên lịch đồng bộ lại.
+
+```ts
+import { Component, computed, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-search-box',
+  templateUrl: './search-box.component.html',
+})
+export class SearchBoxComponent {
+  readonly query = signal('');
+  readonly normalizedQuery = computed(() => this.query().trim().toLowerCase());
+
+  updateQuery(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.query.set(input.value);
+  }
+}
+```
+
+```html
+<input
+  type="search"
+  [value]="query()"
+  (input)="updateQuery($event)"
+  placeholder="Tìm sản phẩm"
+/>
+<p>Từ khóa dùng để tìm: {{ normalizedQuery() || 'chưa có' }}</p>
+```
+
+Đây là phiên bản tường minh của two-way binding: `[value]` đẩy signal ra input, `(input)` đọc lại thao tác và gọi `query.set(...)`. Nó là lựa chọn tốt khi cần normalize, ghi log, debounce hoặc áp dụng quy tắc trước khi cập nhật state.
+
+Không ghi đè trực tiếp lên giá trị bên trong signal. Ví dụ với mảng hoặc object, mutation như `this.items().push(item)` không tạo một giá trị signal mới. Hãy dùng `update()` hoặc `set()`:
+
+```ts
+readonly items = signal<string[]>([]);
+
+addItem(item: string): void {
+  this.items.update((currentItems) => [...currentItems, item]);
+}
+```
+
+### Template-driven forms
+
+Template-driven forms phù hợp với form nhỏ, cấu trúc đơn giản và UI được mô tả tự nhiên trong template. `FormsModule` cung cấp `ngModel`, `ngForm`, các validator attribute như `required`, đồng thời theo dõi `valid`, `dirty`, `touched` cho control.
+
+```ts
+import { Component } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+
+@Component({
+  selector: 'app-newsletter-form',
+  imports: [FormsModule],
+  templateUrl: './newsletter-form.component.html',
+})
+export class NewsletterFormComponent {
+  email = '';
+
+  subscribe(): void {
+    // Gửi this.email khi form hợp lệ.
+  }
+}
+```
+
+```html
+<form #newsletterForm="ngForm" (ngSubmit)="subscribe()" novalidate>
+  <label for="newsletter-email">Email</label>
+  <input
+    id="newsletter-email"
+    type="email"
+    name="email"
+    [(ngModel)]="email"
+    #emailControl="ngModel"
+    required
+    email
+  />
+
+  @if (emailControl.invalid && emailControl.touched) {
+    <p role="alert">Hãy nhập một địa chỉ email hợp lệ.</p>
+  }
+
+  <button type="submit" [disabled]="newsletterForm.invalid">
+    Đăng ký
+  </button>
+</form>
+```
+
+Trong ví dụ này, model `email` là nguồn dữ liệu cho control. `emailControl` và `newsletterForm` là trạng thái do Angular Forms quản lý. `novalidate` tắt popup validation mặc định của browser để ứng dụng hiển thị thông báo theo thiết kế riêng; nó không tắt validator của Angular.
+
+### Reactive forms
+
+Reactive forms phù hợp khi model có nhiều field, validation động, dependency giữa field, hoặc khi bạn muốn xây dựng và kiểm thử form chủ yếu bằng TypeScript. Form model được khai báo trong component; template binding vào `FormGroup` và các control có tên.
+
+```ts
+import { Component } from '@angular/core';
+import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+
+@Component({
+  selector: 'app-account-form',
+  imports: [ReactiveFormsModule],
+  templateUrl: './account-form.component.html',
+})
+export class AccountFormComponent {
+  readonly form = new FormGroup({
+    displayName: new FormControl('', {
+      nonNullable: true,
+      validators: [Validators.required, Validators.minLength(2)],
+    }),
+    email: new FormControl('', {
+      nonNullable: true,
+      validators: [Validators.required, Validators.email],
+    }),
+  });
+
+  save(): void {
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
+
+    const value = this.form.getRawValue();
+    // Gọi service với value.displayName và value.email.
+  }
+}
+```
+
+```html
+<form [formGroup]="form" (ngSubmit)="save()" novalidate>
+  <label for="display-name">Tên hiển thị</label>
+  <input id="display-name" formControlName="displayName" />
+
+  @if (form.controls.displayName.invalid && form.controls.displayName.touched) {
+    <p role="alert">Tên cần có ít nhất 2 ký tự.</p>
+  }
+
+  <label for="account-email">Email</label>
+  <input id="account-email" type="email" formControlName="email" />
+
+  <button type="submit" [disabled]="form.invalid">Lưu</button>
+</form>
+```
+
+`[formGroup]` là property binding tới directive `FormGroupDirective`. `formControlName` kết nối mỗi phần tử với control tương ứng. Event `(ngSubmit)` chuyển thao tác submit vào `save()`. Như vậy reactive forms vẫn dùng cùng các khái niệm binding, nhưng form model và validation được tổ chức tập trung hơn.
+
+<Callout type="info" title="Không gắn đồng thời hai form API lên một control">
+  Tránh dùng `[(ngModel)]` cùng `formControlName` cho một input. Hai cơ chế có thể cùng ghi vào control và làm ownership của state không rõ ràng. Chọn template-driven forms hoặc reactive forms cho một form cụ thể.
+</Callout>
+
+## Lỗi thường gặp và trade-off
+
+### Chọn đúng chiều binding
+
+Các lỗi data binding thường xuất phát từ dùng sai chiều dữ liệu:
+
+| Nhu cầu | Cách nên dùng | Lỗi dễ gặp |
+| --- | --- | --- |
+| Chỉ hiển thị `name` | `{{ name }}` | Dùng `[(ngModel)]` cho text không thể sửa |
+| Bật/tắt button theo boolean | `[disabled]="isSaving"` | `disabled="{{ isSaving }}"` hoặc `disabled="false"` |
+| Phản hồi thao tác người dùng | `(click)="save()"` | Gọi `save()` trong interpolation hoặc property binding |
+| Đồng bộ input đơn giản | `[(ngModel)]="name"` | Quên import `FormsModule` |
+| Đẩy object vào component con | `[product]="selectedProduct"` | `product="selectedProduct"` khiến con nhận string |
+
+Hãy ưu tiên binding một chiều nếu có thể nói rõ luồng bằng một câu: “cha truyền `product` xuống con” hoặc “nút gọi `save()`”. Chỉ dùng two-way binding khi cả việc đọc lẫn ghi là API tự nhiên của control/component.
+
+### Kiểu dữ liệu và giá trị rỗng
+
+Giá trị từ DOM thường là string, kể cả `<input type="number">`. Vì vậy `Number(input.value)` trong handler slider là quan trọng nếu state của bạn cần number. Checkbox đọc `HTMLInputElement.checked`, không phải `value`. Select nhiều lựa chọn cần đọc các option được chọn thay vì chỉ lấy `select.value`.
+
+Cũng cần xác định `null`, `undefined` và chuỗi rỗng có nghĩa gì trong domain. Ví dụ, `[attr.aria-label]="label"` sẽ xóa attribute khi `label` là `null`, còn interpolation `{{ label }}` không phải là cách tốt để biểu diễn một trạng thái dữ liệu không xác định. Dùng fallback rõ ràng khi người dùng cần thấy thông tin:
+
+```html
+<p>{{ deliveryDate ? (deliveryDate | date: 'dd/MM/yyyy') : 'Chưa chọn ngày giao' }}</p>
+```
+
+Nếu template cần pipe như `date` hoặc `number`, hãy bảo đảm component standalone đã import pipe/directive tương ứng, hoặc dùng những API đã được dự án cung cấp. Lỗi “pipe not found” và “is not a known property” thường là lỗi import/scope, không phải lỗi cú pháp binding.
+
+### Hiệu năng và tính dễ đọc
+
+Một template không tự nhiên chậm chỉ vì có binding. Vấn đề thường xuất hiện khi binding kích hoạt công việc đắt tiền, tạo object/array mới liên tục, hoặc gọi method có side effect. Ví dụ dưới đây vừa khó đọc vừa có nguy cơ tốn chi phí mỗi lần view được kiểm tra:
+
+```html
+<li>{{ getFilteredOrders().length }}</li>
+```
+
+Hãy tính trước state dẫn xuất, dùng `computed` cho signal, hoặc pipe phù hợp. Với danh sách dài, kết hợp dữ liệu ổn định với `track` trong `@for` để Angular nhận diện item nào thực sự thay đổi:
+
+```html
+@for (product of products(); track product.id) {
+  <app-product-card [product]="product" />
+}
+```
+
+Mặt khác, đừng tối ưu bằng cách ép mọi dòng thành signal hoặc tách một biểu thức rõ ràng thành nhiều biến chỉ để tránh một phép tính nhỏ. Đo đạc trước khi tối ưu. Mục tiêu đầu tiên là ownership của state và luồng dữ liệu phải dễ hiểu.
+
+### Bảo mật khi hiển thị dữ liệu
+
+Angular escape text trong interpolation và áp dụng sanitization theo ngữ cảnh với các binding nhạy cảm. Tuy nhiên, mỗi ngữ cảnh có rủi ro khác nhau:
+
+- Với text người dùng nhập, dùng interpolation như `{{ review.body }}`.
+- Với HTML từ CMS, `[innerHTML]` có thể cần thiết nhưng nội dung sẽ được Angular sanitize. Thiết kế thêm chính sách lọc nội dung ở nguồn.
+- Với URL động như `[href]` hoặc `[src]`, chỉ chấp nhận scheme/domain mà ứng dụng cho phép khi dữ liệu đến từ bên ngoài.
+- Không gọi API `DomSanitizer.bypassSecurityTrust...` chỉ để loại cảnh báo. API đó chuyển trách nhiệm kiểm tra an toàn hoàn toàn sang mã của bạn.
+
+<Callout type="error" title="Không biến dữ liệu không tin cậy thành template">
+  Không ghép chuỗi từ người dùng rồi mong Angular biên dịch nó thành template. Angular biên dịch template của ứng dụng, không dùng binding để thực thi HTML hay JavaScript động. Với nội dung giàu định dạng, dùng một renderer có sanitization và policy rõ ràng.
+</Callout>
+
+## Best practices
+
+1. **Giữ một nguồn sự thật cho mỗi giá trị.** Nếu `FormControl` sở hữu email, đừng đồng thời duy trì một biến `email` khác rồi cố đồng bộ hai nơi bằng nhiều handler.
+2. **Chọn cú pháp nói đúng ý định.** Text dùng interpolation; boolean/object/URL dùng property binding; thao tác dùng event binding. Cú pháp đúng giúp review code nhanh hơn.
+3. **Giữ biểu thức template nhỏ và thuần.** Một lời gọi `userName()` hoặc `totalPrice()` là dễ đọc; chuỗi lọc, sắp xếp và map dài nên được đặt tên trong TypeScript.
+4. **Đặt validation gần nơi ownership của form.** Form đơn giản có thể dùng template-driven. Form nhiều điều kiện nên dùng reactive forms để validator và trạng thái có cấu trúc.
+5. **Luôn xử lý submit ở thẻ `form`.** Điều này hỗ trợ bàn phím, accessibility và tránh bỏ sót đường submit không qua nút click.
+6. **Dùng `attr.` cho attribute không phải DOM property.** Đặc biệt chú ý ARIA, `colspan`, `aria-describedby` và các attribute SVG.
+7. **Đọc signal bằng `()`, ghi bằng `set()` hoặc `update()`.** Không mutate object/mảng trả về từ signal rồi mong view tự nhận biết thay đổi.
+8. **Đặt tên output theo quy ước `valueChange`.** Quy ước này làm `[(value)]` có thể dùng được và làm API component dễ đoán.
+9. **Không dùng `[(ngModel)]` và reactive directive trên cùng control.** Chúng cạnh tranh quyền quản lý giá trị và validation.
+10. **Xem thông báo compiler như tín hiệu thiết kế.** “Can't bind to ...” thường cho biết property/input không tồn tại hoặc directive/pipe chưa được import vào scope của component standalone.
+
+## Tóm tắt
+
+- `{{ expression }}` đưa một giá trị ra text. Dùng nó cho nội dung hiển thị đơn giản.
+- `[property]="expression"` ghi state vào DOM property, directive hoặc input của component. Nó cần thiết cho boolean, object và giá trị động.
+- `(event)="handler($event)"` đưa thao tác từ view về component. Handler là nơi cập nhật state và thực hiện nghiệp vụ.
+- `[(property)]="target"` ghép property binding với event thay đổi theo quy ước. Dùng nó cho control có nhu cầu đọc/ghi tự nhiên, không dùng để che logic phức tạp.
+- Signals làm dependency giữa state và template rõ ràng qua `signal()`, `computed()`, `set()` và `update()`.
+- `FormsModule`/`ngModel` phù hợp cho form đơn giản; `ReactiveFormsModule` phù hợp khi form cần model và validation có cấu trúc.
+
+Khi không chắc nên dùng cú pháp nào, hãy quay lại luồng dữ liệu: **state nào sở hữu giá trị, view chỉ hiển thị gì, và sự kiện nào được phép thay đổi nó?** Câu trả lời rõ ràng thường dẫn thẳng đến binding phù hợp.

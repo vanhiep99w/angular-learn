@@ -1,10 +1,697 @@
 ---
 title: Kiến trúc standalone
-description: Tổ chức ứng dụng hiện đại không phụ thuộc NgModule.
+description: Tổ chức bootstrap, cấu hình ứng dụng, route lazy, provider và ranh giới feature trong Angular standalone.
 ---
 
-Trang này sẽ trình bày **Kiến trúc standalone** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu trang này">
+  Trang này nhìn standalone ở cấp **ứng dụng**: ứng dụng khởi động ở đâu, cấu
+  hình dùng chung đặt ở đâu, feature được tải thế nào và state nên sống trong
+  phạm vi nào. Bạn không cần bỏ qua `NgModule` đang có; mục tiêu là chuyển đổi
+  có kiểm soát và giữ dependency dễ đọc.
 </Callout>
+
+## Mục lục
+
+- [Standalone architecture là gì?](#standalone-architecture-là-gì)
+  - [Từ component standalone đến ứng dụng standalone](#từ-component-standalone-đến-ứng-dụng-standalone)
+  - [Bốn ranh giới cần phân biệt](#bốn-ranh-giới-cần-phân-biệt)
+- [Bootstrap và cấu hình ứng dụng](#bootstrap-và-cấu-hình-ứng-dụng)
+  - [`main.ts` chỉ khởi động ứng dụng](#maints-chỉ-khởi-động-ứng-dụng)
+  - [`app.config.ts` là composition root](#appconfigts-là-composition-root)
+  - [Đọc luồng khởi động](#đọc-luồng-khởi-động)
+  - [Chọn nội dung cho application config](#chọn-nội-dung-cho-application-config)
+- [Routing và lazy loading theo feature](#routing-và-lazy-loading-theo-feature)
+  - [Route là bản đồ điều hướng, không phải thư mục](#route-là-bản-đồ-điều-hướng-không-phải-thư-mục)
+  - [`loadComponent` và `loadChildren`](#loadcomponent-và-loadchildren)
+  - [Một feature lazy có route riêng](#một-feature-lazy-có-route-riêng)
+  - [Preloading và giới hạn của lazy loading](#preloading-và-giới-hạn-của-lazy-loading)
+- [Providers và vòng đời dependency](#providers-và-vòng-đời-dependency)
+  - [Ba phạm vi provider thực dụng](#ba-phạm-vi-provider-thực-dụng)
+  - [Provider ở route tạo ranh giới feature](#provider-ở-route-tạo-ranh-giới-feature)
+  - [Đừng nhầm `imports` với `providers`](#đừng-nhầm-imports-với-providers)
+- [Tổ chức ranh giới feature](#tổ-chức-ranh-giới-feature)
+  - [Cấu trúc thư mục phục vụ việc thay đổi](#cấu-trúc-thư-mục-phục-vụ-việc-thay-đổi)
+  - [Hướng phụ thuộc nên đi vào trong](#hướng-phụ-thuộc-nên-đi-vào-trong)
+  - [Chia sẻ sau khi có nhu cầu thật](#chia-sẻ-sau-khi-có-nhu-cầu-thật)
+- [Ví dụ xuyên suốt: feature danh mục](#ví-dụ-xuyên-suốt-feature-danh-mục)
+  - [Cấu hình gốc](#cấu-hình-gốc)
+  - [Routes của feature và state theo route](#routes-của-feature-và-state-theo-route)
+  - [Page standalone và facade](#page-standalone-và-facade)
+  - [Đi theo một lần điều hướng](#đi-theo-một-lần-điều-hướng)
+- [Chuyển dần từ NgModule](#chuyển-dần-từ-ngmodule)
+  - [Chuẩn bị trước khi chuyển](#chuẩn-bị-trước-khi-chuyển)
+  - [Lộ trình chuyển đổi an toàn](#lộ-trình-chuyển-đổi-an-toàn)
+  - [Tương thích với thư viện và mã cũ](#tương-thích-với-thư-viện-và-mã-cũ)
+- [Trade-off và lỗi thường gặp](#trade-off-và-lỗi-thường-gặp)
+  - [Lợi ích thực tế](#lợi-ích-thực-tế)
+  - [Điều standalone không tự giải quyết](#điều-standalone-không-tự-giải-quyết)
+  - [Các dấu hiệu cần chẩn đoán](#các-dấu-hiệu-cần-chẩn-đoán)
+- [Checklist thiết kế](#checklist-thiết-kế)
+- [Tóm tắt](#tóm-tắt)
+
+## Standalone architecture là gì?
+
+**Standalone architecture** là cách ghép một ứng dụng Angular bằng component, directive, pipe, route và provider độc lập, thay vì dùng `NgModule` làm điểm trung tâm để khai báo và tập hợp chúng. `NgModule` vẫn được Angular hỗ trợ và có thể cùng tồn tại với standalone. Tuy nhiên, ứng dụng mới thường bắt đầu trực tiếp từ root component và cấu hình ứng dụng.
+
+Điểm thay đổi quan trọng không phải chỉ là xóa tệp `app.module.ts`. Kiến trúc standalone đưa mỗi quyết định về gần nơi sở hữu nó:
+
+- Component nói rõ template của nó dùng directive, pipe và component nào qua `imports`.
+- `app.config.ts` nói rõ các năng lực dùng cho toàn ứng dụng, như Router và `HttpClient`.
+- Route nói rõ URL nào dẫn đến feature nào, feature nào được tải muộn và provider nào sống cùng nhánh route.
+- Feature giữ UI, logic điều phối và truy cập dữ liệu gần nhau để một thay đổi nghiệp vụ không bị rải khắp dự án.
+
+### Từ component standalone đến ứng dụng standalone
+
+Một **standalone component** có thể được component khác import trực tiếp hoặc được Router tải trực tiếp. Một **ứng dụng standalone** dùng `bootstrapApplication()` để khởi động root standalone component, rồi đưa provider dùng chung vào `ApplicationConfig`.
+
+```text
+main.ts                         app.config.ts
+   │                                  │
+   │ bootstrapApplication(            │ providers: Router, HTTP,
+   │   AppComponent, appConfig) ◄─────┘ cấu hình và tích hợp toàn cục
+   ▼
+┌─────────────────────────────────────────────┐
+│ AppComponent                                │
+│ <router-outlet />                           │
+└──────────────────────┬──────────────────────┘
+                       │ Router chọn route
+                       ▼
+             feature/page standalone
+             imports + provider theo phạm vi
+```
+
+`AppComponent` không cần import tất cả màn hình của hệ thống. Nếu nó chỉ chứa thanh điều hướng và `RouterOutlet`, Router sẽ chọn page phù hợp. Nhờ đó một feature có thể được tải khi người dùng thật sự vào URL của feature đó.
+
+### Bốn ranh giới cần phân biệt
+
+Standalone làm dependency hiện ra rõ hơn, nhưng chỉ hữu ích nếu phân biệt đúng các loại ranh giới sau:
+
+| Ranh giới         | Câu hỏi cần trả lời                                         | Ví dụ phù hợp                                                                       |
+| ----------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **Template**      | Template này được phép dùng API UI nào?                     | `RouterLink`, `CurrencyPipe`, `ProductCardComponent` trong `imports` của component. |
+| **Ứng dụng**      | Điều gì chỉ cần cấu hình một lần cho toàn app?              | `provideRouter`, `provideHttpClient`, interceptor, cấu hình API.                    |
+| **Route/feature** | State hoặc dependency nào chỉ có ý nghĩa khi ở feature này? | `CatalogFacade`, quyền riêng của nhánh `admin`, resolver.                           |
+| **Component**     | State nào chỉ thuộc một cây UI đang hiển thị?               | State của hộp thoại, bộ lọc tạm hoặc presenter cục bộ.                              |
+
+Không dùng cùng một cơ chế cho cả bốn việc. Chẳng hạn, thêm `RouterLink` vào `providers` không làm template hiểu directive đó; nó phải nằm trong `imports`. Ngược lại, thêm `CatalogFacade` vào `imports` không tạo instance để inject.
+
+## Bootstrap và cấu hình ứng dụng
+
+Bootstrap là thời điểm Angular tạo injector cấp ứng dụng và render root component vào phần tử host. Đây là **composition root**: nơi một ứng dụng nối các năng lực hạ tầng với phần còn lại của mã. Hãy giữ nó khai báo, mỏng và ổn định.
+
+### `main.ts` chỉ khởi động ứng dụng
+
+Tệp khởi động thường không chứa quy tắc nghiệp vụ hay danh sách route dài. Nó gọi `bootstrapApplication()` với root component và cấu hình đã đặt tên.
+
+```ts
+// src/main.ts
+import { bootstrapApplication } from "@angular/platform-browser";
+import { appConfig } from "./app/app.config";
+import { AppComponent } from "./app/app.component";
+
+bootstrapApplication(AppComponent, appConfig).catch((error) =>
+  console.error(error),
+);
+```
+
+`AppComponent` phải là standalone để được bootstrap theo cách này. Nếu bootstrap thất bại vì thiếu provider, lỗi thường chỉ ra token không tìm thấy. Hãy sửa ở phạm vi sở hữu dependency, không vội thêm provider vào mọi component.
+
+### `app.config.ts` là composition root
+
+`ApplicationConfig` gom các provider có phạm vi ứng dụng. Ví dụ dưới tạo Router, `HttpClient`, và một interceptor hàm. Các API `provide...` trả về environment provider để Angular đăng ký đúng injector ứng dụng.
+
+```ts
+// src/app/app.config.ts
+import { ApplicationConfig } from "@angular/core";
+import { provideHttpClient, withInterceptors } from "@angular/common/http";
+import { provideRouter, withComponentInputBinding } from "@angular/router";
+import { routes } from "./app.routes";
+import { authInterceptor } from "./core/http/auth.interceptor";
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideRouter(routes, withComponentInputBinding()),
+    provideHttpClient(withInterceptors([authInterceptor])),
+  ],
+};
+```
+
+`withComponentInputBinding()` là tùy chọn. Khi được bật, Router có thể gắn dữ liệu route như params, query params hoặc `data` vào input phù hợp của component. Chỉ bật tính năng khi dự án có quy ước rõ ràng về cách page nhận dữ liệu route.
+
+<Callout type="idea" title="Giữ cấu hình có mục đích">
+  `app.config.ts` là nơi nối hạ tầng với app, không phải nơi đặt mọi service.
+  Một service nghiệp vụ không trạng thái có thể dùng `providedIn: 'root'`; state
+  của một màn hình thường nên ở route hoặc component. Đặt provider ở đây chỉ vì
+  “dễ tìm” sẽ vô tình biến nó thành singleton toàn ứng dụng.
+</Callout>
+
+### Đọc luồng khởi động
+
+Khi trình duyệt tải ứng dụng, Angular đi theo luồng sau:
+
+1. `main.ts` gọi `bootstrapApplication(AppComponent, appConfig)`.
+2. Angular tạo injector phạm vi ứng dụng và đăng ký các provider từ `appConfig`.
+3. Angular tạo `AppComponent`. Các dependency root như Router hoặc `HttpClient` có thể được inject từ injector này.
+4. Template root render `RouterOutlet`.
+5. Router đọc URL hiện tại, chạy các bước điều hướng cần thiết và tạo component hoặc tải routes của feature tương ứng.
+
+Ví dụ, `provideHttpClient()` phải có mặt trước khi một repository inject `HttpClient`. Nhưng `CatalogFacade` không cần được tạo ở bước 2 nếu nó chỉ tồn tại khi route `/catalog` được kích hoạt.
+
+### Chọn nội dung cho application config
+
+Một mục phù hợp với `ApplicationConfig.providers` thường có ít nhất một trong các tính chất sau:
+
+| Nên đặt ở application config          | Vì sao                                  | Ví dụ                                                   |
+| ------------------------------------- | --------------------------------------- | ------------------------------------------------------- |
+| Hạ tầng cần dùng xuyên feature        | Mọi feature cần cùng cách kết nối.      | `provideHttpClient()`, router, animation, hydration.    |
+| Chính sách toàn cục                   | Thứ tự và cách áp dụng phải thống nhất. | HTTP interceptor, error handler, client-side hydration. |
+| Cấu hình runtime dùng chung           | Không thuộc riêng màn hình nào.         | `API_URL`, cờ tính năng đã tải trước bootstrap.         |
+| Provider của thư viện cần đăng ký gốc | Thư viện yêu cầu môi trường ứng dụng.   | provider của router, state library hoặc i18n.           |
+
+Ngược lại, đừng đặt state form, bộ lọc của trang, wizard đang làm dở hoặc facade chỉ phục vụ một feature vào đây. Các giá trị đó có vòng đời ngắn hơn và cần một ranh giới hẹp hơn.
+
+## Routing và lazy loading theo feature
+
+Router ánh xạ URL sang UI. Trong standalone architecture, cấu hình route là một mảng `Routes`; route có thể tham chiếu trực tiếp standalone component, tải component muộn hoặc tải cả cây route của một feature.
+
+### Route là bản đồ điều hướng, không phải thư mục
+
+Tệp `app.routes.ts` nên mô tả những nhánh điều hướng lớn. Nó không cần liệt kê mọi component nội bộ. Một URL có thể dẫn đến page, nhưng không nên biến mỗi component tái sử dụng thành route chỉ để “phân loại” tệp.
+
+```ts
+// src/app/app.routes.ts
+import { Routes } from "@angular/router";
+
+export const routes: Routes = [
+  { path: "", pathMatch: "full", redirectTo: "catalog" },
+  {
+    path: "catalog",
+    loadChildren: () =>
+      import("./features/catalog/catalog.routes").then((m) => m.CATALOG_ROUTES),
+  },
+  {
+    path: "**",
+    loadComponent: () =>
+      import("./shared/ui/not-found-page.component").then(
+        (m) => m.NotFoundPageComponent,
+      ),
+  },
+];
+```
+
+`import()` là dynamic import. Bundler tách phần mã có thể tải muộn thành chunk phù hợp; Router chỉ yêu cầu chunk khi người dùng điều hướng đến route. Điều này giảm JavaScript cần cho lần tải đầu, đặc biệt khi feature lớn hoặc ít được dùng.
+
+### `loadComponent` và `loadChildren`
+
+Hai API đều lazy-load, nhưng phục vụ mức độ khác nhau:
+
+| API             | Dùng khi                                                         | Ví dụ                         |
+| --------------- | ---------------------------------------------------------------- | ----------------------------- |
+| `component`     | Page nhỏ đã sẵn trong bundle ban đầu.                            | Trang landing rất nhẹ.        |
+| `loadComponent` | Một route có một page độc lập, không cần route con đáng kể.      | `help`, `legal`, `not-found`. |
+| `loadChildren`  | Một feature có page con, guard, provider hoặc điều hướng nội bộ. | `catalog`, `orders`, `admin`. |
+
+`loadChildren` trong standalone không nhất thiết tải một `NgModule`. Nó có thể trả về mảng `Routes`, như ví dụ `CATALOG_ROUTES` bên dưới. Đây là lựa chọn tốt khi feature cần giữ route con gần mã feature.
+
+<Callout type="warn" title="Lazy load không thay thế ranh giới kiến trúc">
+  Lazy loading chỉ trì hoãn tải code. Nếu `catalog` import trực tiếp page nội bộ
+  của `orders`, hai feature vẫn ghép chặt với nhau dù chúng nằm trong hai chunk.
+  Hãy để feature giao tiếp qua API dùng chung có chủ đích, URL, dữ liệu hoặc một
+  contract ở lớp phù hợp.
+</Callout>
+
+### Một feature lazy có route riêng
+
+Một feature có nhiều màn hình nên export routes riêng. Route cha của feature là nơi tốt để đặt guard, resolver hoặc provider dùng chung cho tất cả page con của feature.
+
+```ts
+// src/app/features/catalog/catalog.routes.ts
+import { Routes } from "@angular/router";
+import { CatalogFacade } from "./data-access/catalog.facade";
+
+export const CATALOG_ROUTES: Routes = [
+  {
+    path: "",
+    providers: [CatalogFacade],
+    children: [
+      {
+        path: "",
+        title: "Danh mục",
+        loadComponent: () =>
+          import("./pages/catalog-page.component").then(
+            (m) => m.CatalogPageComponent,
+          ),
+      },
+      {
+        path: ":id",
+        title: "Chi tiết sản phẩm",
+        loadComponent: () =>
+          import("./pages/product-detail-page.component").then(
+            (m) => m.ProductDetailPageComponent,
+          ),
+      },
+    ],
+  },
+];
+```
+
+`providers` trên route tạo một environment injector cho nhánh route đó. `CatalogFacade` có thể được page danh sách và page chi tiết inject; code ngoài `/catalog` không thấy instance này. Khi nhánh route không còn hoạt động, Angular có thể hủy injector cùng các dependency của nó theo vòng đời route. Route reuse strategy tùy chỉnh có thể làm thời điểm tái sử dụng hoặc hủy khác đi, vì vậy đừng dựa vào việc điều hướng để thay thế cleanup nghiệp vụ rõ ràng.
+
+### Preloading và giới hạn của lazy loading
+
+Lazy route mặc định tải ở lần điều hướng đầu tiên đến route. Nếu một feature gần như chắc chắn sẽ được mở sau màn hình đầu tiên, có thể preload nó khi ứng dụng rảnh:
+
+```ts
+import {
+  PreloadAllModules,
+  provideRouter,
+  withPreloading,
+} from "@angular/router";
+
+provideRouter(routes, withPreloading(PreloadAllModules));
+```
+
+Preload không làm feature render sớm; nó chỉ tải code sớm hơn. `PreloadAllModules` là chính sách đơn giản, không phải mặc định tốt cho mọi app. Với ứng dụng lớn hoặc mạng đắt tiền, hãy đo bundle và cân nhắc chiến lược preload chọn lọc trước khi tải mọi lazy route.
+
+## Providers và vòng đời dependency
+
+Provider trả lời câu hỏi: khi mã `inject(TOKEN)`, Angular phải trả về giá trị hoặc instance nào? Injector lưu provider và cache instance theo phạm vi của provider. Vì vậy vị trí đăng ký provider cũng là quyết định về **quyền sở hữu** và **vòng đời**.
+
+### Ba phạm vi provider thực dụng
+
+| Phạm vi       | Cách khai báo thường gặp                                | Phù hợp với                                              | Cần tránh                                              |
+| ------------- | ------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------ |
+| Ứng dụng      | `providedIn: 'root'` hoặc `ApplicationConfig.providers` | Hạ tầng dùng chung, service stateless, cấu hình.         | State riêng của màn hình.                              |
+| Route/feature | `providers` trong `Route`                               | Facade, session wizard, quyền hoặc state của cả feature. | Dependency thực sự chỉ dùng trong một component con.   |
+| Component     | `providers` trong metadata component                    | State UI của một cây component, adapter cục bộ.          | Một service cần được chia sẻ với sibling ngoài cây đó. |
+
+Ví dụ, `HttpClient` là năng lực hạ tầng dùng bởi nhiều feature nên đặt ở application config. `CatalogFacade` nắm state tải và lọc danh mục nên đặt ở route `catalog`. Một `ProductQuickViewState` chỉ phục vụ một hộp thoại có thể đặt trong component hộp thoại.
+
+### Provider ở route tạo ranh giới feature
+
+Ví dụ facade dưới có state chỉ cần tồn tại trong feature danh mục. Vì nó không khai báo `providedIn: 'root'`, nơi sở hữu phải đăng ký provider — ở đây là route feature.
+
+```ts
+// src/app/features/catalog/data-access/catalog.facade.ts
+import { Injectable, computed, inject, signal } from "@angular/core";
+import { CatalogApi } from "./catalog.api";
+import type { Product } from "../model/product";
+
+@Injectable()
+export class CatalogFacade {
+  private readonly api = inject(CatalogApi);
+  private readonly productsState = signal<readonly Product[]>([]);
+  private readonly queryState = signal("");
+
+  readonly query = this.queryState.asReadonly();
+  readonly products = computed(() => {
+    const query = this.queryState().trim().toLowerCase();
+    return this.productsState().filter((product) =>
+      product.name.toLowerCase().includes(query),
+    );
+  });
+
+  load(): void {
+    this.api.list().subscribe((products) => this.productsState.set(products));
+  }
+
+  setQuery(query: string): void {
+    this.queryState.set(query);
+  }
+}
+```
+
+`CatalogApi` có thể là service root vì nó chỉ chứa cách gọi API, không sở hữu state của màn hình. `CatalogFacade` là stateful service: đặt nó ở route giúp rời feature không để bộ lọc cũ trở thành state toàn ứng dụng.
+
+Ví dụ đã lược bỏ xử lý `loading`, `error` và hủy request để làm rõ phạm vi provider. Ở mã production, facade cần biểu diễn các trạng thái đó và quản lý side effect theo yêu cầu nghiệp vụ.
+
+### Đừng nhầm `imports` với `providers`
+
+Hai metadata này nhìn giống danh sách nhưng giải quyết hai vấn đề khác nhau:
+
+```ts
+@Component({
+  imports: [RouterLink, ProductCardComponent],
+  providers: [ProductQuickViewState],
+  templateUrl: "./catalog-page.component.html",
+})
+export class CatalogPageComponent {}
+```
+
+- `imports` mở khả năng cho **template**: component, directive hoặc pipe nào được dùng trong HTML của component.
+- `providers` đăng ký cách Angular tạo **dependency** để class trong cây component có thể `inject()`.
+
+Nếu template báo `routerLink` không phải thuộc tính hợp lệ, hãy kiểm tra `imports`. Nếu Angular báo `NullInjectorError`, hãy kiểm tra provider và scope. Hai lỗi có nguyên nhân khác nhau.
+
+## Tổ chức ranh giới feature
+
+Standalone không bắt buộc một cây thư mục cụ thể. Một cấu trúc tốt là cấu trúc giúp trả lời nhanh: “Tôi thay đổi khả năng nghiệp vụ này ở đâu?” Với ứng dụng có `catalog`, giữ phần lớn mã liên quan dưới cùng feature thường dễ bảo trì hơn việc tìm lần lượt trong thư mục toàn cục `components`, `services` và `models`.
+
+### Cấu trúc thư mục phục vụ việc thay đổi
+
+Ví dụ một feature có thể được tổ chức như sau:
+
+```text
+src/app/
+├── app.config.ts
+├── app.routes.ts
+├── core/
+│   ├── http/
+│   │   └── auth.interceptor.ts
+│   └── config/
+│       └── app-config.token.ts
+├── shared/
+│   └── ui/
+│       └── not-found-page.component.ts
+└── features/
+    └── catalog/
+        ├── catalog.routes.ts
+        ├── pages/
+        │   ├── catalog-page.component.ts
+        │   └── product-detail-page.component.ts
+        ├── ui/
+        │   └── product-card.component.ts
+        ├── data-access/
+        │   ├── catalog.api.ts
+        │   └── catalog.facade.ts
+        └── model/
+            └── product.ts
+```
+
+Các tên như `pages`, `ui`, `data-access` và `model` chỉ là nhãn. Không cần tạo đủ thư mục cho feature nhỏ. `catalog` ban đầu có thể chỉ có một page và một file route. Tách thêm khi có trách nhiệm khác biệt thật sự, chẳng hạn gọi API hoặc UI được dùng trong nhiều page của chính feature.
+
+### Hướng phụ thuộc nên đi vào trong
+
+Một quy ước dễ áp dụng là UI phụ thuộc vào logic feature, còn logic feature phụ thuộc vào API dữ liệu hoặc contract; lớp dữ liệu không import page hay component UI.
+
+```text
+CatalogPage ─────► CatalogFacade ─────► CatalogApi ─────► HttpClient
+     │                    │
+     │ imports            └──► Product model
+     ▼
+ProductCard
+```
+
+Ví dụ, `CatalogPageComponent` được phép gọi `facade.load()` khi page khởi tạo và đọc `facade.products()`. `CatalogApi` không nên import `CatalogPageComponent` để quyết định URL hay hiển thị toast. Nếu API cần báo lỗi, nó trả dữ liệu hoặc lỗi theo contract; feature/UI quyết định cách trình bày theo ngữ cảnh.
+
+Quy ước này không phải kiến trúc nhiều tầng bắt buộc. Một page hiển thị dữ liệu đơn giản có thể inject `CatalogApi` trực tiếp. Chỉ thêm facade khi nó gom được state, use case hoặc phối hợp mà page không nên sở hữu.
+
+### Chia sẻ sau khi có nhu cầu thật
+
+`shared/` chỉ nên chứa phần thật sự có ý nghĩa xuyên feature và có API ổn định, ví dụ `NotFoundPageComponent`, một button UI chung hoặc hàm định dạng không biết nghiệp vụ. Đừng chuyển `ProductCardComponent` sang `shared/` chỉ vì nó có tên “component”; nó thường thuộc ngữ cảnh catalog.
+
+Khi `orders` cũng cần hiển thị sản phẩm, có ba lựa chọn cần cân nhắc:
+
+1. Giữ UI riêng nếu hai màn hình chỉ tình cờ giống nhau và sẽ thay đổi độc lập.
+2. Trích một component trình bày thuần, nhận input/output rõ ràng, nếu hai feature thực sự dùng chung cách hiển thị.
+3. Chia sẻ model hoặc contract ở lớp không phụ thuộc UI, thay vì để `orders` import page của `catalog`.
+
+Nói ngắn gọn: trùng lặp nhỏ thường rẻ hơn một abstraction dùng chung nhưng mơ hồ. Chỉ chia sẻ khi thay đổi cần diễn ra đồng thời vì cùng một lý do.
+
+## Ví dụ xuyên suốt: feature danh mục
+
+Phần này ghép bootstrap, Router, provider route và page standalone thành một luồng hoàn chỉnh. Các file minh họa có thể đổi tên theo dự án, nhưng ranh giới không đổi: cấu hình toàn cục ở gốc, route theo feature, và state màn hình ở feature.
+
+### Cấu hình gốc
+
+Root component chỉ cần khả năng điều hướng. Vì template dùng `RouterOutlet`, component import directive đó. Router và HTTP được cấu hình một lần trong `app.config.ts`.
+
+```ts
+// src/app/app.component.ts
+import { Component } from "@angular/core";
+import { RouterOutlet } from "@angular/router";
+
+@Component({
+  selector: "app-root",
+  imports: [RouterOutlet],
+  template: `<router-outlet />`,
+})
+export class AppComponent {}
+```
+
+```ts
+// src/app/app.config.ts
+import { ApplicationConfig } from "@angular/core";
+import { provideHttpClient } from "@angular/common/http";
+import { provideRouter } from "@angular/router";
+import { routes } from "./app.routes";
+
+export const appConfig: ApplicationConfig = {
+  providers: [provideRouter(routes), provideHttpClient()],
+};
+```
+
+Ở đây `provideHttpClient()` không làm mọi component phải inject `HttpClient`. Nó chỉ làm hạ tầng HTTP khả dụng cho dependency cần nó, ví dụ `CatalogApi`.
+
+### Routes của feature và state theo route
+
+Route gốc lazy-load danh mục. Feature export `CATALOG_ROUTES`, đồng thời đăng ký `CatalogFacade` ở route cha để các page con chia sẻ state trong cùng nhánh.
+
+```ts
+// src/app/app.routes.ts
+import { Routes } from "@angular/router";
+
+export const routes: Routes = [
+  {
+    path: "catalog",
+    loadChildren: () =>
+      import("./features/catalog/catalog.routes").then((m) => m.CATALOG_ROUTES),
+  },
+  { path: "", pathMatch: "full", redirectTo: "catalog" },
+];
+```
+
+```ts
+// src/app/features/catalog/catalog.routes.ts
+import { Routes } from "@angular/router";
+import { CatalogFacade } from "./data-access/catalog.facade";
+
+export const CATALOG_ROUTES: Routes = [
+  {
+    path: "",
+    providers: [CatalogFacade],
+    loadComponent: () =>
+      import("./pages/catalog-page.component").then(
+        (m) => m.CatalogPageComponent,
+      ),
+  },
+];
+```
+
+Nếu thêm route `:id` là con của route có `providers`, chi tiết và danh sách có thể nhìn cùng một `CatalogFacade`. Nếu muốn từng page có state độc lập, đặt provider trực tiếp ở mỗi route page hoặc ở component page thay vì route cha.
+
+### Page standalone và facade
+
+Page import đúng các dependency template. Nó inject facade đã được route cung cấp và để facade giữ việc tải/lọc dữ liệu.
+
+```ts
+// src/app/features/catalog/pages/catalog-page.component.ts
+import { Component, inject, OnInit } from "@angular/core";
+import { FormsModule } from "@angular/forms";
+import { CatalogFacade } from "../data-access/catalog.facade";
+import { ProductCardComponent } from "../ui/product-card.component";
+
+@Component({
+  imports: [FormsModule, ProductCardComponent],
+  template: `
+    <label>
+      Tìm sản phẩm
+      <input
+        [ngModel]="facade.query()"
+        (ngModelChange)="facade.setQuery($event)"
+      />
+    </label>
+
+    @for (product of facade.products(); track product.id) {
+      <app-product-card [product]="product" />
+    }
+  `,
+})
+export class CatalogPageComponent implements OnInit {
+  protected readonly facade = inject(CatalogFacade);
+
+  ngOnInit(): void {
+    this.facade.load();
+  }
+}
+```
+
+`FormsModule` xuất hiện vì template dùng `ngModel`; `ProductCardComponent` xuất hiện vì template dùng selector của card. `CatalogFacade` không xuất hiện trong `imports` vì nó là dependency của class, không phải khả năng của template.
+
+### Đi theo một lần điều hướng
+
+Khi người dùng mở `/catalog`, thứ tự khái niệm là:
+
+1. Router đã có sẵn vì `provideRouter(routes)` chạy trong bootstrap.
+2. Router gặp `loadChildren`, tải `catalog.routes.ts` và chunk của feature nếu nó chưa có.
+3. Router tạo injector cho route `catalog`, đăng ký `CatalogFacade` trong injector đó.
+4. Router tải và tạo `CatalogPageComponent`.
+5. Page inject `CatalogFacade`; facade inject `CatalogApi`, còn `CatalogApi` inject `HttpClient` từ injector ứng dụng.
+6. Page gọi `load()`, rồi template đọc signal `products()` để render card.
+
+Chuỗi này giải thích vì sao `HttpClient` ở app config còn facade ở route: chúng có phạm vi và vòng đời khác nhau. Không cần đưa facade lên root để nó “nhìn thấy” HTTP.
+
+## Chuyển dần từ NgModule
+
+Chuyển standalone là thay đổi cấu trúc. Hãy tách nó khỏi thay đổi nghiệp vụ, đổi UI hoặc nâng nhiều thư viện trong cùng một pull request. Migration nhỏ, có thể kiểm tra, an toàn hơn việc viết lại toàn bộ `AppModule` trong một lần.
+
+### Chuẩn bị trước khi chuyển
+
+Trước mỗi feature, lập một danh sách ngắn:
+
+- Component nào đang được `declarations` của module sở hữu?
+- Module đó import directive, pipe và component nào cho template?
+- Provider nào đang đặt ở module, và instance đó nên sống toàn app, feature hay component?
+- Route nào trỏ đến module qua `loadChildren` và có guard/resolver nào?
+- Test nào bảo vệ màn hình hoặc service chính của feature?
+
+Đây là lúc dễ phát hiện provider stateful đang vô tình là singleton do được đăng ký trong `AppModule`. Đừng chuyển cơ học mọi provider sang `app.config.ts`; hãy phân loại vòng đời trước.
+
+### Lộ trình chuyển đổi an toàn
+
+<Steps>
+
+<Step>
+
+### Chuyển component, directive và pipe trước
+
+Đặt dependency template trực tiếp vào `imports` của từng declaration được chuyển. Chạy test hoặc mở màn hình sau mỗi nhóm nhỏ để phát hiện directive/pipe thiếu import.
+
+</Step>
+
+<Step>
+
+### Chuyển route của một feature
+
+Tạo tệp `feature.routes.ts` trả về `Routes`. Đổi route gốc sang `loadChildren` trả về mảng route, hoặc dùng `loadComponent` với page đơn. Giữ URL cũ nếu sản phẩm không chủ đích đổi điều hướng.
+
+</Step>
+
+<Step>
+
+### Di chuyển provider theo phạm vi
+
+Đưa hạ tầng toàn cục sang `ApplicationConfig`; đưa state feature sang `Route.providers`; giữ state UI rất cục bộ ở component. Kiểm tra lại hành vi khi rời rồi quay về route.
+
+</Step>
+
+<Step>
+
+### Bootstrap standalone và xóa module thừa
+
+Sau khi root component đã standalone và provider đã có vị trí mới, chuyển từ `bootstrapModule(AppModule)` sang `bootstrapApplication(AppComponent, appConfig)`. Chỉ xóa `NgModule` khi không còn declaration, provider hoặc entry point nào cần nó.
+
+</Step>
+
+</Steps>
+
+Angular CLI có schematic hỗ trợ quá trình này qua `ng generate @angular/core:standalone`. Schematic hữu ích để thực hiện thay đổi lặp lại, nhưng không thể quyết định ranh giới state thay bạn. Hãy chạy theo từng chế độ/bước mà CLI đề xuất, xem kỹ diff, rồi kiểm tra route và provider thủ công.
+
+### Tương thích với thư viện và mã cũ
+
+Standalone và `NgModule` có thể cùng tồn tại trong thời gian chuyển đổi:
+
+- Standalone component có thể thêm một `NgModule` tương thích vào `imports` để dùng các declaration mà module export.
+- NgModule hiện có có thể import standalone component, directive hoặc pipe.
+- Với thư viện chỉ cung cấp provider qua `forRoot()`, có thể dùng `importProvidersFrom()` tạm thời tại application config.
+
+```ts
+import { ApplicationConfig, importProvidersFrom } from "@angular/core";
+import { LegacyAnalyticsModule } from "legacy-analytics";
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    importProvidersFrom(LegacyAnalyticsModule.forRoot({ enabled: true })),
+  ],
+};
+```
+
+`importProvidersFrom()` là cầu nối provider, không phải lý do để bọc mọi mã mới trong module. Khi thư viện có API `provide...` hiện đại, ưu tiên API đó vì phạm vi provider và dependency thường rõ hơn.
+
+<Callout type="warn" title="Đừng xóa module chỉ vì nó có tên AppModule">
+  Một module cũ có thể còn khai báo provider, route, bootstrap hoặc module của
+  thư viện. Nếu xóa trước khi di chuyển các trách nhiệm này, lỗi có thể chỉ xuất
+  hiện ở lazy route hoặc production build. Luôn xác định từng trách nhiệm rồi
+  mới xóa tệp.
+</Callout>
+
+## Trade-off và lỗi thường gặp
+
+Standalone làm ít bước gián tiếp hơn. Đổi lại, danh sách `imports` hiện diện trên nhiều component và đội ngũ cần thống nhất cách đặt ranh giới. Đây là trade-off lành mạnh: dependency được đọc tại nơi dùng thay vì ẩn trong module lớn.
+
+### Lợi ích thực tế
+
+- **Đọc dependency nhanh hơn:** mở page component là thấy template cần directive, pipe và UI component nào.
+- **Lazy load tự nhiên theo route:** feature routes trả trực tiếp `Routes`, không cần module trung gian chỉ để lazy-load.
+- **Provider có phạm vi rõ:** app config, route và component biểu đạt ba vòng đời phổ biến.
+- **Migration tăng dần:** component standalone và NgModule tương tác được, nên không buộc phải viết lại ứng dụng.
+- **Test cô lập thuận tiện hơn:** page có dependency rõ có thể cung cấp fake cho token/facade trong test thay vì kéo cả feature module.
+
+### Điều standalone không tự giải quyết
+
+Standalone không tự tạo domain model tốt, không ngăn component inject quá nhiều service và không quyết định state cần Signals, RxJS hay store. Nó cũng không tự giảm bundle nếu root component vẫn import cả feature nặng hoặc route lazy có import ngược về mã eager.
+
+Ví dụ, một `AppComponent` import trực tiếp `AdminDashboardComponent` sẽ kéo mã admin vào bundle ban đầu ngay cả khi routes dùng `loadComponent` ở nơi khác. Nói ngắn gọn: dùng lazy API ở ranh giới route và tránh import eager xuyên feature.
+
+### Các dấu hiệu cần chẩn đoán
+
+| Dấu hiệu                                                     | Nguyên nhân thường gặp                                                  | Cách xử lý                                                                               |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Template không nhận `routerLink`, pipe hoặc selector.        | Thiếu dependency trong `imports` của component sở hữu template.         | Thêm đúng standalone API hoặc NgModule export nó; không thêm vào `providers`.            |
+| `NullInjectorError` khi mở một lazy page.                    | Provider chỉ có ở module cũ hoặc được đăng ký sai scope.                | Xác định token cần ở root, route hay component rồi đăng ký tại đó.                       |
+| Rời route rồi quay lại vẫn thấy state cũ.                    | State đặt ở root, route được tái sử dụng, hoặc state còn ở URL/store.   | Kiểm tra scope và route reuse; quyết định state nào cần được giữ thay vì reset mù quáng. |
+| Hai page trong cùng feature có state khác nhau ngoài ý muốn. | Facade được provide ở từng component thay vì route cha.                 | Đưa provider lên route chung nếu hai page cần cùng một instance.                         |
+| Bundle đầu vẫn lớn.                                          | Lazy route import ngược mã eager, hoặc feature nặng bị import từ root.  | Kiểm tra dependency graph và bundle analyzer; chỉ lazy config chưa đủ.                   |
+| `imports` của page rất dài.                                  | Page đang gánh quá nhiều UI hoặc thiếu component con có trách nhiệm rõ. | Tách UI thành component con trước; không tạo module chỉ để che danh sách import.         |
+
+## Checklist thiết kế
+
+Trước khi thêm hoặc chuyển một feature standalone, tự trả lời các câu sau:
+
+- [ ] Root component có thật sự chỉ import UI mà template gốc dùng không?
+- [ ] Router, HTTP và chính sách toàn cục đã ở `ApplicationConfig` chưa?
+- [ ] Feature lớn có một route entry lazy và routes nằm gần feature chưa?
+- [ ] `imports` chỉ dùng cho dependency template, còn `providers` chỉ dùng cho dependency inject được chưa?
+- [ ] Stateful service đã được đặt theo vòng đời: root, route hay component chưa?
+- [ ] Feature có tránh import page/UI nội bộ của feature khác không?
+- [ ] Mã trong `shared/` đã có ít nhất hai consumer với cùng nhu cầu thay đổi chưa?
+- [ ] Khi migration, từng module cũ đã được kiểm tra declaration, import, provider và route trước khi xóa chưa?
+
+Nếu câu trả lời cho nhiều mục là “chưa rõ”, đừng thêm abstraction hoặc chuyển cả ứng dụng cùng lúc. Hãy bắt đầu với một feature, đo bundle và kiểm tra điều hướng của feature đó.
+
+## Tóm tắt
+
+Standalone architecture thay `NgModule` như điểm ghép chính bằng các ranh giới rõ hơn:
+
+1. `bootstrapApplication()` khởi động root standalone component.
+2. `ApplicationConfig` cấu hình hạ tầng và chính sách toàn ứng dụng.
+3. `Routes` ghép URL với page/feature, còn `loadComponent` và `loadChildren` tạo điểm lazy loading.
+4. Provider ở route phù hợp với facade hoặc state chỉ tồn tại trong feature; provider root dành cho hạ tầng dùng chung.
+5. Feature giữ UI, logic và data access gần nhau; chỉ chia sẻ API khi có nhu cầu thay đổi chung thật sự.
+
+Khi áp dụng, ưu tiên câu hỏi “ai sở hữu dependency này và nó cần sống bao lâu?” hơn câu hỏi “đặt tệp này vào module nào?”. Câu hỏi đầu dẫn tới scope và ranh giới dễ bảo trì hơn.
+
+<Cards>
+  <Card
+    title="Standalone component"
+    href="/docs/component-template/component-standalone"
+    description="Ôn `imports`, metadata và cách một component standalone ghép template."
+  />
+  <Card
+    title="Dependency Injection"
+    href="/docs/di-kien-truc/dependency-injection"
+    description="Hiểu injector, provider và vòng đời dependency theo phạm vi."
+  />
+  <Card
+    title="Provider và InjectionToken"
+    href="/docs/di-kien-truc/provider-token"
+    description="Chọn token và chiến lược provider cho cấu hình hoặc implementation."
+  />
+  <Card
+    title="Kiến trúc theo feature"
+    href="/docs/di-kien-truc/feature-architecture"
+    description="Tiếp tục thiết kế ranh giới nghiệp vụ giữa các feature."
+  />
+</Cards>

@@ -1,10 +1,553 @@
 ---
-title: Unit testing
-description: Kiểm thử hàm, service và logic độc lập.
+title: Unit testing Angular
+description: Viết unit test nhanh, cô lập và đáng tin cậy cho logic, service, dependency, component, async code và signals trong Angular.
 ---
 
-Trang này sẽ trình bày **Unit testing** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi trang này">
+  Unit test kiểm tra một đơn vị hành vi trong môi trường được kiểm soát. Trang này dùng API Angular hiện đại và ví dụ theo Vitest; nếu dự án còn Jasmine/Karma, cấu trúc test và API `TestBed` vẫn tương tự.
 </Callout>
+
+## Mục lục
+
+- [Unit test nằm ở đâu trong chiến lược kiểm thử?](#unit-test-nằm-ở-đâu-trong-chiến-lược-kiểm-thử)
+  - [Đơn vị cần kiểm tra là hành vi](#đơn-vị-cần-kiểm-tra-là-hành-vi)
+  - [Test runner làm gì?](#test-runner-làm-gì)
+- [Quy trình viết một unit test](#quy-trình-viết-một-unit-test)
+- [Kiểm tra logic thuần trước](#kiểm-tra-logic-thuần-trước)
+- [TestBed: injector và môi trường Angular của test](#testbed-injector-và-môi-trường-angular-của-test)
+- [Kiểm thử service, DI và HTTP](#kiểm-thử-service-di-và-http)
+  - [Service không cần TestBed](#service-không-cần-testbed)
+  - [Thay dependency bằng fake hoặc spy](#thay-dependency-bằng-fake-hoặc-spy)
+  - [Test HTTP mà không gọi mạng](#test-http-mà-không-gọi-mạng)
+- [Kiểm thử standalone component](#kiểm-thử-standalone-component)
+- [Async code và signals](#async-code-và-signals)
+  - [Chọn cơ chế chờ đúng loại bất đồng bộ](#chọn-cơ-chế-chờ-đúng-loại-bất-đồng-bộ)
+  - [Signals: đọc state và cập nhật template](#signals-đọc-state-và-cập-nhật-template)
+- [Chất lượng test và các trade-off](#chất-lượng-test-và-các-trade-off)
+  - [Dấu hiệu của một test có ích](#dấu-hiệu-của-một-test-có-ích)
+  - [Lỗi thường gặp](#lỗi-thường-gặp)
+- [Checklist tóm tắt](#checklist-tóm-tắt)
+
+## Unit test nằm ở đâu trong chiến lược kiểm thử?
+
+**Unit test** kiểm tra một phần nhỏ của hệ thống: một hàm tính giá, một nhánh xử lý của service, hay trạng thái công khai của component. Test cấp này chạy nhanh vì không mở trình duyệt thật, không gọi backend thật và không cần ghép toàn bộ ứng dụng.
+
+Test pyramid giúp phân bổ số lượng test theo chi phí và độ tin cậy:
+
+```text
+                         ┌───────────────┐
+                         │ E2E: ít       │
+                         │ Luồng thật    │
+                    ┌────┴───────────────┴────┐
+                    │ Integration/component   │
+                    │ Vừa phải                │
+              ┌─────┴─────────────────────────┴─────┐
+              │ Unit: nhiều, nhanh, cô lập          │
+              │ Hàm, service, state, validator      │
+              └─────────────────────────────────────┘
+```
+
+- **Unit test** bắt lỗi quy tắc nghiệp vụ sớm nhất. Ví dụ: đơn hàng thành viên vàng được giảm đúng 10%.
+- **Component/integration test** xác nhận các phần ghép với nhau. Ví dụ: click nút gọi service và template hiển thị kết quả.
+- **E2E test** bảo vệ một số luồng quan trọng xuyên qua ứng dụng đang chạy. Ví dụ: người dùng đăng nhập rồi thanh toán.
+
+Pyramid không có nghĩa mọi thứ đều phải là unit test. Một lỗi chỉ xuất hiện khi router, template và provider phối hợp với nhau cần component hoặc integration test. Ngược lại, không nên dùng E2E chỉ để kiểm tra phép tính giảm giá.
+
+### Đơn vị cần kiểm tra là hành vi
+
+"Unit" không nhất thiết bằng một file hay một method private. Đơn vị tốt là **một hành vi quan sát được** với đầu vào, đầu ra và tác dụng phụ rõ ràng.
+
+| Hành vi | Đầu vào | Khẳng định nên có | Không cần khẳng định |
+| --- | --- | --- | --- |
+| Tính tổng giỏ hàng | items, mã giảm giá | tổng tiền và giới hạn giảm giá | các biến trung gian bên trong hàm |
+| Tải sản phẩm | `id` | URL đúng, mapping DTO đúng | chi tiết `HttpClient` cài đặt nội bộ |
+| Component bộ đếm | click người dùng | số hiển thị thay đổi | method private nào đã chạy |
+
+Kiểm tra qua public API, DOM hoặc lời gọi dependency. Cách này cho phép refactor cấu trúc bên trong mà không phải sửa test không liên quan.
+
+### Test runner làm gì?
+
+Test runner tìm file `*.spec.ts`, nạp môi trường Angular, chạy `describe`/`it`, rồi báo assertion thành công hoặc thất bại. Dự án Angular mới thường dùng **Vitest** qua Angular CLI. Nhiều codebase cũ vẫn dùng **Jasmine + Karma**.
+
+Ví dụ sau dùng cú pháp Vitest:
+
+```ts
+import { describe, expect, it } from 'vitest';
+
+describe('add', () => {
+  it('cộng hai số', () => {
+    expect(2 + 3).toBe(5);
+  });
+});
+```
+
+`describe` nhóm ngữ cảnh, `it` mô tả một hành vi và `expect` đưa ra bằng chứng. Jasmine có cùng ba khái niệm với cú pháp gần như giống hệt. Tuy nhiên, không trộn `vi.fn()` của Vitest với `jasmine.createSpy()` trong cùng một test suite.
+
+<Callout type="warn" title="Kiểm tra cấu hình dự án">
+  Đừng đổi runner chỉ vì copy một snippet. Hãy xem `angular.json`, `package.json` và các file `*.spec.ts` hiện có để dùng đúng lệnh, matcher và API mock của repository.
+</Callout>
+
+## Quy trình viết một unit test
+
+Mỗi test nên chỉ kể một câu chuyện ngắn theo cấu trúc **Arrange – Act – Assert (AAA)**:
+
+1. **Arrange**: tạo dữ liệu đầu vào và dependency giả.
+2. **Act**: gọi public API hoặc thực hiện một tương tác.
+3. **Assert**: xác nhận kết quả hoặc tác dụng phụ có ý nghĩa.
+
+```ts
+it('áp dụng 10% cho khách vàng', () => {
+  // Arrange
+  const order = { subtotal: 200_000, tier: 'gold' as const };
+
+  // Act
+  const total = calculateTotal(order);
+
+  // Assert
+  expect(total).toBe(180_000);
+});
+```
+
+Trước khi viết, trả lời ba câu hỏi:
+
+1. Hành vi nào sẽ gây thiệt hại nếu sai?
+2. Kết quả công khai nào chứng minh hành vi đó đúng?
+3. Dependency nào làm test chậm, không xác định hoặc chạm hạ tầng thật?
+
+Tên test nên mô tả kết quả thay vì mô tả implementation. `trả về 0 khi giỏ hàng rỗng` tốt hơn `should call calculateTotal`.
+
+## Kiểm tra logic thuần trước
+
+Hàm thuần là hàm có cùng input thì luôn cho cùng output và không tạo tác dụng phụ. Nó không cần Angular, `TestBed`, DOM hay mock. Đây là nơi rẻ nhất để đưa quy tắc nghiệp vụ vào test.
+
+```ts
+export type CartItem = {
+  price: number;
+  quantity: number;
+};
+
+export function calculateSubtotal(items: readonly CartItem[]): number {
+  return items.reduce((total, item) => total + item.price * item.quantity, 0);
+}
+
+export function calculateShipping(subtotal: number): number {
+  if (subtotal === 0 || subtotal >= 500_000) return 0;
+  return 30_000;
+}
+```
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { calculateShipping, calculateSubtotal } from './cart-total';
+
+describe('cart total', () => {
+  it('tính subtotal từ giá và số lượng', () => {
+    expect(
+      calculateSubtotal([
+        { price: 40_000, quantity: 2 },
+        { price: 15_000, quantity: 1 },
+      ]),
+    ).toBe(95_000);
+  });
+
+  it('miễn phí vận chuyển từ 500.000 đồng', () => {
+    expect(calculateShipping(500_000)).toBe(0);
+  });
+
+  it('không tính phí vận chuyển cho giỏ rỗng', () => {
+    expect(calculateShipping(0)).toBe(0);
+  });
+});
+```
+
+Hai test biên ở trên quan trọng hơn việc lặp lại nhiều ví dụ trung tâm. Quy tắc có mốc `500_000` dễ hỏng ở `499_999`, `500_000` và `500_001`; hãy chọn test case đại diện cho các nhánh đó.
+
+<Callout type="idea" title="Thiết kế để dễ test">
+  Tách phép tính, mapping và quyết định nghiệp vụ khỏi component/service càng sớm càng tốt. Service giữ điều phối và I/O; hàm thuần giữ quy tắc. Test sẽ nhỏ hơn và lỗi sẽ dễ khoanh vùng hơn.
+</Callout>
+
+## TestBed: injector và môi trường Angular của test
+
+`TestBed` là harness kiểm thử của Angular. Nó tạo injector riêng cho test, áp dụng provider/import giống một phần ứng dụng, sau đó cho phép test lấy dependency bằng `inject()` hoặc tạo component bằng `createComponent()`.
+
+```text
+TestBed.configureTestingModule(...)
+              │
+              ▼
+      Test injector riêng
+       ├── provider thật
+       ├── provider fake/spy
+       └── import standalone component
+              │
+       ┌──────┴──────┐
+       ▼             ▼
+TestBed.inject()  createComponent()
+       │             │
+    service      fixture + DOM
+```
+
+Dùng `TestBed` khi class cần Angular DI, component cần template hoặc test phải dùng provider Angular như `HttpClient`. Không dùng nó cho hàm thuần hay class có thể khởi tạo trực tiếp; setup thừa làm suite chậm và che mờ ý định test.
+
+```ts
+import { TestBed } from '@angular/core/testing';
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [CurrencyFormatter],
+  });
+});
+
+it('lấy service từ injector của test', () => {
+  const formatter = TestBed.inject(CurrencyFormatter);
+
+  expect(formatter.format(120_000)).toBe('120.000 ₫');
+});
+```
+
+`configureTestingModule()` chỉ đăng ký metadata. Injector và instance được tạo khi gọi `TestBed.inject()` hoặc `TestBed.createComponent()`. Vì vậy, override provider phải xảy ra **trước** lần inject/create đầu tiên.
+
+## Kiểm thử service, DI và HTTP
+
+Service thường phối hợp quy tắc với dependency: repository, gateway thanh toán, storage hoặc `HttpClient`. Mục tiêu không phải chứng minh Angular có thể inject dependency; mục tiêu là chứng minh service phản ứng đúng với đầu ra có kiểm soát từ dependency đó.
+
+### Service không cần TestBed
+
+Nếu constructor nhận dependency bình thường, khởi tạo trực tiếp là test nhanh và rõ nhất. Fake dưới đây là implementation nhỏ, có hành vi thật đủ cho kịch bản test.
+
+```ts
+export interface DiscountGateway {
+  percentFor(memberId: string): number;
+}
+
+export class CheckoutService {
+  constructor(private readonly discountGateway: DiscountGateway) {}
+
+  finalPrice(memberId: string, subtotal: number): number {
+    const percent = this.discountGateway.percentFor(memberId);
+    return subtotal * (1 - percent / 100);
+  }
+}
+
+class DiscountGatewayFake implements DiscountGateway {
+  percentFor(memberId: string): number {
+    return memberId === 'gold-member' ? 10 : 0;
+  }
+}
+
+it('giảm 10% cho thành viên vàng', () => {
+  const service = new CheckoutService(new DiscountGatewayFake());
+
+  expect(service.finalPrice('gold-member', 200_000)).toBe(180_000);
+});
+```
+
+Test này không phụ thuộc metadata Angular. Nếu `CheckoutService` chỉ cần abstraction `DiscountGateway`, đây là trade-off tốt: tốc độ cao đổi lấy việc không kiểm tra wiring DI. Wiring đó phù hợp với một test `TestBed` nhỏ hoặc integration test riêng.
+
+### Thay dependency bằng fake hoặc spy
+
+Dùng **fake** khi một implementation nhỏ giúp đọc kịch bản tự nhiên. Dùng **spy** khi test cần xác nhận lời gọi, số lần gọi hoặc đối số.
+
+```ts
+import { InjectionToken } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { describe, expect, it, vi } from 'vitest';
+
+export interface PaymentGateway {
+  charge(input: { orderId: string; amount: number }): PaymentReceipt;
+}
+
+export const PAYMENT_GATEWAY = new InjectionToken<PaymentGateway>(
+  'PAYMENT_GATEWAY',
+);
+
+const paymentGateway = {
+  charge: vi.fn(),
+};
+
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [
+      OrderService,
+      { provide: PAYMENT_GATEWAY, useValue: paymentGateway },
+    ],
+  });
+
+  paymentGateway.charge.mockReset();
+});
+
+it('gửi đúng số tiền sang cổng thanh toán', () => {
+  paymentGateway.charge.mockReturnValue({ id: 'pay_123', status: 'paid' });
+  const service = TestBed.inject(OrderService);
+
+  const receipt = service.pay({ id: 'order_1', total: 120_000 });
+
+  expect(paymentGateway.charge).toHaveBeenCalledWith({
+    orderId: 'order_1',
+    amount: 120_000,
+  });
+  expect(receipt.status).toBe('paid');
+});
+```
+
+`PAYMENT_GATEWAY` là injection token gắn interface TypeScript với provider runtime. `OrderService` inject token này thay vì implementation thật. `useValue` thay implementation thật bằng object test. Reset spy trong `beforeEach` để lời gọi của test trước không làm test sau xanh giả.
+
+Khi provider được khai báo ngay trên component, injector của component có thể che provider ở root TestBed. Hãy override đúng component trước khi tạo fixture:
+
+```ts
+TestBed.overrideComponent(CheckoutPanelComponent, {
+  set: {
+    providers: [{ provide: PaymentGateway, useValue: paymentGateway }],
+  },
+});
+
+const fixture = TestBed.createComponent(CheckoutPanelComponent);
+```
+
+<Callout type="warn" title="Đừng mock mọi thứ">
+  Mock object có nhiều method dễ sao chép implementation và tạo test giả. Chỉ thay ranh giới không ổn định hoặc tốn kém như HTTP, clock, storage và service ngoài. Với hàm thuần nội bộ, dùng implementation thật thường đáng tin hơn.
+</Callout>
+
+### Test HTTP mà không gọi mạng
+
+`provideHttpClientTesting()` thay backend thật bằng testing backend. `HttpTestingController` bắt request, cho test kiểm tra request đó và chủ động trả response. Thứ tự provider quan trọng: đặt `provideHttpClient()` trước testing provider để backend test ghi đè backend thật.
+
+```ts
+import { provideHttpClient } from '@angular/common/http';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+
+describe('ProductRepository', () => {
+  let repository: ProductRepository;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        ProductRepository,
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
+    });
+
+    repository = TestBed.inject(ProductRepository);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    http.verify();
+  });
+
+  it('lấy sản phẩm và map DTO thành model', () => {
+    let product: Product | undefined;
+    repository.getById('42').subscribe((value) => (product = value));
+
+    const request = http.expectOne('/api/products/42');
+    expect(request.request.method).toBe('GET');
+
+    request.flush({ id: '42', display_name: 'Angular Book', price_cents: 9900 });
+
+    expect(product).toEqual({ id: '42', name: 'Angular Book', price: 99 });
+  });
+});
+```
+
+`http.verify()` bắt request còn treo. Bỏ qua nó có thể khiến test vẫn xanh dù service đã phát sinh thêm request ngoài ý muốn. Không dùng `fetch` thật, URL môi trường thật hoặc backend đang chạy trong unit test; các yếu tố đó biến lỗi mạng thành kết quả không xác định.
+
+## Kiểm thử standalone component
+
+Component test ở mức unit kiểm tra public input, output, DOM hoặc tương tác thuộc về chính component. Nó không cần đi qua router hay gọi API thật.
+
+```ts
+import { Component, input, signal } from '@angular/core';
+
+@Component({
+  standalone: true,
+  selector: 'app-quantity-picker',
+  template: `
+    <button type="button" (click)="decrease()">-</button>
+    <output data-testid="quantity">{{ quantity() }}</output>
+    <button type="button" (click)="increase()">+</button>
+  `,
+})
+export class QuantityPickerComponent {
+  readonly initialQuantity = input(1);
+  readonly quantity = signal(1);
+
+  ngOnInit(): void {
+    this.quantity.set(this.initialQuantity());
+  }
+
+  increase(): void {
+    this.quantity.update((value) => value + 1);
+  }
+
+  decrease(): void {
+    this.quantity.update((value) => Math.max(0, value - 1));
+  }
+}
+```
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { QuantityPickerComponent } from './quantity-picker.component';
+
+describe('QuantityPickerComponent', () => {
+  it('tăng số lượng khi người dùng click nút cộng', () => {
+    const fixture = TestBed.createComponent(QuantityPickerComponent);
+    fixture.componentRef.setInput('initialQuantity', 2);
+    fixture.detectChanges();
+
+    const buttons = fixture.nativeElement.querySelectorAll('button');
+    buttons[1].click();
+    fixture.detectChanges();
+
+    const quantity = fixture.nativeElement.querySelector(
+      '[data-testid="quantity"]',
+    ) as HTMLOutputElement;
+    expect(quantity.textContent?.trim()).toBe('3');
+  });
+});
+```
+
+`createComponent()` tạo `ComponentFixture`, gồm instance component và root DOM. `setInput()` mô phỏng việc Angular nhận input từ parent. `detectChanges()` chạy change detection để đồng bộ state với template trước khi đọc DOM.
+
+Trade-off quan trọng là mức assert. Kiểm tra `quantity` hiển thị `3` bảo vệ trải nghiệm người dùng. Kiểm tra `component.quantity.set` đã được gọi lại khóa test vào implementation và ngăn refactor sang reducer hoặc method khác.
+
+## Async code và signals
+
+Test bất đồng bộ chỉ đáng tin khi test kiểm soát được thời điểm hoàn tất. Đầu tiên hãy nhận diện nguồn bất đồng bộ: `Promise`/`async` function, Observable có scheduler/timer, hay Angular effect/template cần ổn định sau change detection.
+
+### Chọn cơ chế chờ đúng loại bất đồng bộ
+
+Dùng `async`/`await` khi API trả `Promise` hoặc khi có thể chờ Observable bằng `firstValueFrom`. Đây là cách dễ đọc cho tác vụ thật sự bất đồng bộ.
+
+```ts
+import { firstValueFrom, of } from 'rxjs';
+
+it('trả về nhãn đã định dạng', async () => {
+  const service = new LabelService({ getLabel: () => of('angular') });
+
+  await expect(firstValueFrom(service.load())).resolves.toBe('ANGULAR');
+});
+```
+
+Dùng `fakeAsync`, `tick()` và `flushMicrotasks()` khi code phụ thuộc virtual timer. Angular chạy thời gian giả trong vùng test, vì vậy test không phải ngủ thật 300 ms.
+
+```ts
+import { fakeAsync, tick } from '@angular/core/testing';
+import { of, timer } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
+
+it('chỉ tìm kiếm sau 300 ms', fakeAsync(() => {
+  const search = (term: string) =>
+    timer(300).pipe(switchMap(() => of([`${term} guide`])));
+  let result: string[] = [];
+
+  search('angular').subscribe((value) => (result = value));
+  expect(result).toEqual([]);
+
+  tick(300);
+  expect(result).toEqual(['angular guide']);
+}));
+```
+
+Không trộn `fakeAsync` với callback `done` hoặc đánh dấu body test là `async`. Ba cơ chế cạnh tranh quyền hoàn tất test và thường dẫn đến timer còn treo hoặc assertion chạy quá sớm. Nếu dùng HTTP testing controller, `request.flush()` phát response đồng bộ; không cần `tick()` chỉ để xử lý response đó.
+
+### Signals: đọc state và cập nhật template
+
+Signal đồng bộ khi đọc trực tiếp. `computed()` cũng được tính lại khi dependency thay đổi, nên test state thuần có thể không cần `TestBed`.
+
+```ts
+import { computed, signal } from '@angular/core';
+
+class CartState {
+  readonly quantity = signal(1);
+  readonly totalItems = computed(() => this.quantity());
+
+  add(): void {
+    this.quantity.update((value) => value + 1);
+  }
+}
+
+it('tính lại computed signal khi state đổi', () => {
+  const state = new CartState();
+
+  state.add();
+
+  expect(state.quantity()).toBe(2);
+  expect(state.totalItems()).toBe(2);
+});
+```
+
+Khi signal được render trong template, cập nhật signal rồi gọi `fixture.detectChanges()` trước khi assert DOM. Với effect, resource hoặc một luồng tạo microtask, hãy chờ fixture ổn định thay vì đoán số lần change detection.
+
+```ts
+it('hiển thị trạng thái signal mới', async () => {
+  const fixture = TestBed.createComponent(SaveStatusComponent);
+  fixture.detectChanges();
+
+  fixture.componentInstance.status.set('Đã lưu');
+  fixture.detectChanges();
+  await fixture.whenStable();
+
+  expect(fixture.nativeElement.textContent).toContain('Đã lưu');
+});
+```
+
+<Callout type="info" title="Không test cơ chế của Angular">
+  Không cần test rằng signal tự thông báo dependency hay Angular chạy change detection. Hãy test quy tắc của ứng dụng: state nào được tạo sau hành động nào, và người dùng nhìn thấy gì.
+</Callout>
+
+## Chất lượng test và các trade-off
+
+Coverage cao không tự động có nghĩa là test tốt. Một dòng được chạy nhưng không có assertion hữu ích vẫn không bảo vệ hành vi. Hãy ưu tiên rủi ro nghiệp vụ, nhánh lỗi, giá trị biên và regression từng xảy ra.
+
+### Dấu hiệu của một test có ích
+
+Một test chất lượng có các đặc điểm sau:
+
+- **Deterministic**: chạy lại cho cùng kết quả; không phụ thuộc thời gian thực, thứ tự mạng hay dữ liệu production.
+- **Cô lập vừa đủ**: dependency ngoài ranh giới được fake, nhưng không mock chính logic đang cần chứng minh.
+- **Tập trung**: một nguyên nhân thất bại rõ ràng. Nhiều assertion liên quan cùng một hành vi vẫn chấp nhận được.
+- **Đọc như đặc tả**: tên test, Arrange và assertion cho thấy yêu cầu mà không cần biết code nội bộ.
+- **Chạy nhanh**: test đơn vị không khởi động server, trình duyệt hoặc TestBed khi không cần.
+
+Khi sửa lỗi, hãy viết test tái hiện lỗi trước hoặc cùng lúc với bản sửa. Test đó trở thành hàng rào regression có ý nghĩa hơn một assertion coverage chung chung.
+
+### Lỗi thường gặp
+
+| Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
+| --- | --- | --- |
+| Test qua máy này nhưng hỏng ở CI | Dùng thời gian, random, locale hoặc mạng thật | Inject clock/random, fake dependency, cố định input. |
+| Fake không có tác dụng | Override sau khi service/fixture đã được tạo, hoặc provider component che provider test | Override trước `inject()`/`createComponent()` và kiểm tra đúng injector scope. |
+| `Expected one matching request` thất bại | URL, method hoặc query params không đúng | Assert bằng predicate nếu query có thứ tự thay đổi; vẫn kiểm tra các params quan trọng. |
+| `1 timer(s) still in the queue` | Timer chưa được chạy/hủy trong `fakeAsync` | `tick()`/`flush()` đúng ý định hoặc hủy subscription/timer. |
+| Test component rất dài | Test đang kiểm tra router, HTTP và nhiều child cùng lúc | Tách logic thành service/hàm thuần; mock child hoặc chuyển kịch bản đó sang integration test. |
+| Test hỏng sau refactor vô hại | Assert private method, class CSS không có ý nghĩa, hoặc số lần gọi nội bộ | Assert output, DOM, event hoặc contract ở ranh giới. |
+
+Không có một tỷ lệ mock cố định cho mọi dự án. Quy tắc thực dụng là: mock ở ranh giới làm test không ổn định; giữ implementation thật khi nó là một phần của hành vi cần chứng minh. Nói ngắn gọn: test contract, không test cách viết code.
+
+## Checklist tóm tắt
+
+Trước khi gửi pull request, kiểm tra các điểm sau:
+
+- [ ] Test mô tả một hành vi công khai và có tên nói rõ kết quả mong đợi.
+- [ ] Đã chọn cấp test rẻ nhất nhưng vẫn đủ chứng minh hành vi.
+- [ ] Logic thuần được test trực tiếp, không có `TestBed` thừa.
+- [ ] Provider fake/spy được cấu hình trước khi inject hoặc tạo fixture.
+- [ ] HTTP dùng `provideHttpClientTesting()` và có `http.verify()`.
+- [ ] Async dùng một cơ chế hoàn tất nhất quán: `await`, `fakeAsync` hoặc `done`.
+- [ ] Signal được đọc trực tiếp khi test state; DOM được `detectChanges()` trước khi assert.
+- [ ] Có test cho nhánh lỗi, giá trị biên hoặc regression quan trọng.
+- [ ] Test không phụ thuộc API, clock, random hay thứ tự chạy bên ngoài.
+
+Unit test tốt không cố tái hiện toàn bộ ứng dụng. Nó tạo bằng chứng nhanh và chính xác rằng một quyết định nghiệp vụ hoặc contract nhỏ vẫn đúng sau mỗi lần thay đổi.
+
+<Cards>
+  <Card title="Component testing" href="/docs/testing-performance-deploy/component-testing" description="Mở rộng từ unit component sang template, tương tác và dependency của component." />
+  <Card title="E2E testing" href="/docs/testing-performance-deploy/e2e-testing" description="Kiểm tra một số luồng người dùng quan trọng trên ứng dụng đang chạy." />
+  <Card title="Dependency injection" href="/docs/di-kien-truc/dependency-injection" description="Hiểu injector scope, provider token và cách thay dependency trong Angular." />
+</Cards>

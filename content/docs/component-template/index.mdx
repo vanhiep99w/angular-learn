@@ -1,25 +1,166 @@
 ---
 title: Component & Template
-description: Xây dựng giao diện bằng component, template và cơ chế binding.
+description: Lộ trình xây dựng giao diện Angular bằng standalone component, template, binding, luồng điều khiển và tái sử dụng UI.
 ---
 
-Đây là trang khung cho nhóm **Component & Template**, giúp định hướng các nội dung sẽ được viết chi tiết trong những lượt tiếp theo.
+<Callout type="info" title="Đích đến của nhóm bài">
+  Sau nhóm này, bạn có thể chia một giao diện thành các component nhỏ, đưa dữ liệu vào template, nhận tương tác của người dùng và ghép các component thành một UI có thể bảo trì.
+</Callout>
 
 ## Mục lục
 
-- [Phạm vi dự kiến](#phạm-vi-dự-kiến)
-- [Các bài trong nhóm](#các-bài-trong-nhóm)
+- [Bạn sẽ học được gì](#bạn-sẽ-học-được-gì)
+- [Kiến thức đầu vào](#kiến-thức-đầu-vào)
+- [Bản đồ tư duy](#bản-đồ-tư-duy)
+- [Lộ trình học theo thứ tự](#lộ-trình-học-theo-thứ-tự)
+  - [Chặng 1: tạo đơn vị giao diện](#chặng-1-tạo-đơn-vị-giao-diện)
+  - [Chặng 2: kết nối dữ liệu và tương tác](#chặng-2-kết-nối-dữ-liệu-và-tương-tác)
+  - [Chặng 3: tổ chức template theo trạng thái](#chặng-3-tổ-chức-template-theo-trạng-thái)
+  - [Chặng 4: ghép và tái sử dụng component](#chặng-4-ghép-và-tái-sử-dụng-component)
+  - [Chặng 5: hoàn thiện vòng đời và giao diện](#chặng-5-hoàn-thiện-vòng-đời-và-giao-diện)
+- [Lộ trình thực hành](#lộ-trình-thực-hành)
+- [Nguyên tắc học hiệu quả](#nguyên-tắc-học-hiệu-quả)
+- [Đi tiếp sau nhóm này](#đi-tiếp-sau-nhóm-này)
+- [Tóm tắt](#tóm-tắt)
 
-## Phạm vi dự kiến
+## Bạn sẽ học được gì
 
-Xây dựng giao diện bằng component, template và cơ chế binding. Nội dung sẽ đi từ khái niệm đến thực hành, tập trung vào cách tiếp cận Angular hiện đại.
+**Component** là đơn vị đóng gói một phần giao diện cùng dữ liệu và hành vi của nó. **Template** là phần HTML mở rộng của Angular: ngoài thẻ HTML, template có thể đọc dữ liệu của component, lắng nghe sự kiện và quyết định phần tử nào được hiển thị.
 
-## Các bài trong nhóm
+Nhóm bài này giúp bạn trả lời năm câu hỏi thực tế khi xây dựng UI:
 
-- **[Standalone component](/docs/component-template/component-standalone)** — Cấu trúc, metadata và cách tạo component standalone.
-- **[Data binding](/docs/component-template/data-binding)** — Interpolation, property binding, event binding và two-way binding.
-- **[Control flow](/docs/component-template/control-flow)** — Sử dụng cú pháp @if, @for và @switch trong template.
-- **[Giao tiếp giữa component](/docs/component-template/giao-tiep-component)** — Truyền dữ liệu và sự kiện giữa component cha, con và các nhánh.
-- **[Lifecycle hooks](/docs/component-template/lifecycle-hooks)** — Thời điểm và mục đích sử dụng các hook vòng đời component.
-- **[Content projection](/docs/component-template/content-projection)** — Thiết kế component linh hoạt với ng-content và nhiều slot.
-- **[Styling component](/docs/component-template/styling-component)** — Encapsulation, style cục bộ, style toàn cục và tổ chức CSS.
+- Tách một màn hình thành các component ở ranh giới nào?
+- Làm sao đưa dữ liệu từ TypeScript ra HTML, rồi nhận thao tác từ người dùng?
+- Hiển thị danh sách, trạng thái rỗng và trạng thái đang tải như thế nào?
+- Làm sao để component cha và component con hợp tác mà không phụ thuộc quá chặt?
+- Khi nào nên dùng lifecycle hook, content projection và CSS cục bộ?
+
+<Callout type="idea" title="Cách nhìn đúng">
+  Đừng xem template là chuỗi HTML được nối bằng TypeScript. Hãy xem component là nơi giữ trạng thái và quy tắc, còn template là mô tả giao diện được suy ra từ trạng thái đó.
+</Callout>
+
+## Kiến thức đầu vào
+
+Bạn nên hoàn thành hoặc ít nhất nắm được các phần sau trước khi bắt đầu:
+
+- TypeScript cơ bản: biến, hàm, class, `interface`, `import` và `export`.
+- HTML/CSS cơ bản: phần tử, thuộc tính, biểu mẫu, selector và box model.
+- Cấu trúc một ứng dụng Angular: nơi đặt mã nguồn, lệnh chạy ứng dụng và cách Angular tổ chức workspace.
+
+<Cards>
+  <Card title="TypeScript cần thiết" href="/docs/nen-tang/typescript-can-thiet" description="Ôn lại các cú pháp TypeScript xuất hiện trong component." />
+  <Card title="DOM và template" href="/docs/nen-tang/dom-va-template" description="Hiểu DOM, template compiler và lý do Angular cập nhật giao diện." />
+  <Card title="Cấu trúc workspace" href="/docs/bat-dau/cau-truc-workspace" description="Biết vị trí các tệp trước khi tạo và sửa component." />
+</Cards>
+
+Nếu chưa vững cả ba phần, hãy đọc chúng trước. Bạn không cần thuộc mọi API; mục tiêu là có thể đọc một component nhỏ và đoán được dữ liệu đi từ đâu đến đâu.
+
+## Bản đồ tư duy
+
+Một thao tác quen thuộc, chẳng hạn người dùng bấm nút tăng số lượng trong một thẻ sản phẩm, đi qua các phần kiến thức của nhóm này theo luồng sau:
+
+```text
+┌──────────────────┐     (click)      ┌─────────────────────┐
+│ Người dùng bấm   │ ───────────────► │ Template của con    │
+│ nút “Thêm”       │                  │ phát sự kiện        │
+└──────────────────┘                  └──────────┬──────────┘
+                                                   │
+                                                   ▼
+┌──────────────────┐   dữ liệu mới    ┌─────────────────────┐
+│ Template hiển thị │ ◄────────────── │ Component cha       │
+│ danh sách / tổng  │                  │ cập nhật trạng thái │
+└────────┬─────────┘                  └──────────┬──────────┘
+         │                                        │
+         │ @if, @for                              │ input / output
+         ▼                                        ▼
+┌──────────────────┐                  ┌─────────────────────┐
+│ Control flow     │                  │ Giao tiếp component │
+│ quyết định UI    │                  │ giữ ranh giới rõ    │
+└──────────────────┘                  └─────────────────────┘
+```
+
+Ở đây, data binding nối trạng thái với template. Control flow quyết định UI nào tồn tại. Giao tiếp component giữ cho từng phần UI có trách nhiệm riêng. Những bài sau bổ sung cách khởi tạo, tái sử dụng, theo dõi vòng đời và tạo kiểu cho các phần đó.
+
+## Lộ trình học theo thứ tự
+
+Đi theo thứ tự dưới đây để mỗi khái niệm mới đều dựa trên một kỹ năng vừa học. Mỗi bài có thể đọc độc lập, nhưng đảo thứ tự thường khiến bạn phải dùng API trước khi hiểu vấn đề nó giải quyết.
+
+### Chặng 1: tạo đơn vị giao diện
+
+1. **[Standalone component](/docs/component-template/component-standalone)** — bắt đầu từ cấu trúc component, `@Component` metadata, template, style và `imports`. Đây là nền để hiểu Angular biết một phần UI gồm những gì.
+2. Tạo một `ProductCardComponent` tối giản. Component chỉ nhận một sản phẩm tĩnh và hiển thị tên, giá, ảnh thay thế.
+
+**Mốc hoàn thành:** bạn tạo được một standalone component, import được dependency cần thiết và dùng được component đó trong template khác.
+
+### Chặng 2: kết nối dữ liệu và tương tác
+
+1. **[Data binding](/docs/component-template/data-binding)** — học interpolation, property binding, event binding và two-way binding. Đây là bốn cách cơ bản để dữ liệu đi giữa class và template.
+2. Thay dữ liệu tĩnh bằng thuộc tính của component. Thêm nút yêu thích, ô tìm kiếm hoặc bộ đếm số lượng để quan sát dữ liệu thay đổi trên màn hình.
+
+**Mốc hoàn thành:** bạn phân biệt được `{{ value }}`, `[property]`, `(event)` và `[(ngModel)]`; đồng thời chọn được cú pháp theo chiều dữ liệu cần đi.
+
+### Chặng 3: tổ chức template theo trạng thái
+
+1. **[Control flow](/docs/component-template/control-flow)** — dùng `@if`, `@for` và `@switch` để biểu diễn các trạng thái giao diện một cách rõ ràng.
+2. Hiển thị danh sách sản phẩm. Bổ sung trạng thái không có kết quả và nhãn khác nhau theo tình trạng còn hàng.
+
+**Mốc hoàn thành:** template không còn phụ thuộc vào việc sao chép HTML cho từng trường hợp. Bạn có thể nhìn vào trạng thái và dự đoán phần UI sẽ xuất hiện.
+
+### Chặng 4: ghép và tái sử dụng component
+
+1. **[Giao tiếp giữa component](/docs/component-template/giao-tiep-component)** — truyền dữ liệu xuống component con và đưa sự kiện lên component cha; sau đó nhận biết khi nào nên dùng một kênh dùng chung cho các component xa nhau.
+2. **[Content projection](/docs/component-template/content-projection)** — dùng `ng-content` để component vỏ nhận nội dung do nơi sử dụng quyết định, thay vì tạo nhiều biến thể gần giống nhau.
+3. Tách màn hình danh sách thành `ProductList`, `ProductCard` và `CartSummary`. Sau đó tạo một `PanelComponent` có vùng header và body bằng content projection.
+
+**Mốc hoàn thành:** component con không tự sửa trực tiếp trạng thái thuộc component cha. Bạn tái sử dụng được một component khung mà vẫn thay đổi được nội dung bên trong.
+
+### Chặng 5: hoàn thiện vòng đời và giao diện
+
+1. **[Lifecycle hooks](/docs/component-template/lifecycle-hooks)** — hiểu các thời điểm Angular tạo, kiểm tra, cập nhật và hủy component; chỉ đặt công việc vào hook khi đúng thời điểm.
+2. **[Styling component](/docs/component-template/styling-component)** — tổ chức style cục bộ, style toàn cục và view encapsulation để giao diện không vô tình ảnh hưởng lẫn nhau.
+3. Thêm trạng thái tải dữ liệu giả lập, kiểm tra lúc component nhận input hoặc bị hủy, rồi hoàn thiện responsive CSS cho màn hình đã tách component.
+
+**Mốc hoàn thành:** bạn biết lý do của một hook trước khi dùng nó và có thể tìm đúng nơi đặt style khi CSS không áp dụng như mong đợi.
+
+<Callout type="warn" title="Đừng học lifecycle hook quá sớm">
+  Nhiều tác vụ UI thông thường chỉ cần state và binding. Hãy dùng hook khi bạn cần phản ứng với một mốc vòng đời cụ thể, không dùng hook như nơi chứa mọi logic khởi tạo.
+</Callout>
+
+## Lộ trình thực hành
+
+Hãy xây dựng một **danh sách sản phẩm có giỏ hàng nhỏ**. Bài tập đủ nhỏ để hoàn thành trong vài buổi, nhưng buộc bạn sử dụng liên kết giữa các bài thay vì học từng API rời rạc.
+
+1. **Dựng khung:** tạo `ProductListComponent`, `ProductCardComponent` và `CartSummaryComponent` dưới dạng standalone component. Mỗi component chỉ cần template tĩnh ở bước này.
+2. **Đưa state vào UI:** khai báo mảng sản phẩm, số lượng đã chọn và từ khóa tìm kiếm. Dùng binding để hiển thị chúng và nhận sự kiện bấm nút.
+3. **Thể hiện mọi trạng thái:** dùng `@for` cho danh sách, `@if` cho trạng thái rỗng và `@switch` nếu sản phẩm có nhiều trạng thái như `in-stock`, `low-stock`, `out-of-stock`.
+4. **Thiết kế ranh giới:** để `ProductCardComponent` nhận dữ liệu và phát yêu cầu thêm vào giỏ. `CartSummaryComponent` chỉ hiển thị dữ liệu mà cha cung cấp. Component cha sở hữu state của trang.
+5. **Tái sử dụng khung UI:** tạo `PanelComponent` chứa `ng-content`, sau đó bọc danh sách và giỏ hàng bằng cùng khung nhưng nội dung khác nhau.
+6. **Rà soát:** thêm style cục bộ cho card, style dùng chung cho ứng dụng nếu cần, và chỉ dùng lifecycle hook khi có tình huống cụ thể để kiểm chứng.
+
+<Callout type="idea" title="Tiêu chí tự kiểm tra">
+  Khi xoá một `ProductCardComponent`, giỏ hàng vẫn phải giữ dữ liệu ở component cha. Khi thay nội dung trong `PanelComponent`, bạn không nên phải sao chép CSS và cấu trúc khung. Nếu hai điều này đúng, ranh giới component của bạn đang hợp lý.
+</Callout>
+
+## Nguyên tắc học hiệu quả
+
+- **Đọc rồi gõ lại ví dụ.** Template có nhiều ký hiệu ngắn; tự viết giúp bạn nhận ra dấu ngoặc nào là binding, event hay control flow.
+- **Thay đổi một biến mỗi lần.** Ví dụ, trước tiên đổi dữ liệu hiển thị, sau đó mới thêm sự kiện. Cách này giúp xác định lỗi nằm ở state, binding hay template.
+- **Đặt tên theo trách nhiệm UI.** `CartSummaryComponent` nói rõ vai trò hơn một component tên `CommonComponent`. Tên tốt làm ranh giới tái sử dụng rõ hơn.
+- **Để dữ liệu thuộc nơi hiểu nó nhất.** State của cả trang nên ở component cha hoặc lớp state phù hợp. Component con nhận dữ liệu và báo ý định của người dùng.
+- **Kiểm tra trên giao diện.** Mỗi chặng nên có một thay đổi nhìn thấy được: text đổi, nút phản hồi, danh sách lọc hoặc layout hiển thị đúng.
+
+## Đi tiếp sau nhóm này
+
+Khi đã tách được UI thành component và quản lý template rõ ràng, bạn có thể chọn hướng đi tiếp theo theo nhu cầu ứng dụng:
+
+<Cards>
+  <Card title="Reactivity & State" href="/docs/reactivity-state" description="Quản lý state cục bộ, signals, RxJS và các luồng dữ liệu phức tạp hơn." />
+  <Card title="Routing & Forms" href="/docs/routing-forms" description="Ghép component thành trang, điều hướng và xử lý dữ liệu biểu mẫu." />
+  <Card title="DI & Kiến trúc" href="/docs/di-kien-truc" description="Đưa logic dùng chung ra service, dùng dependency injection và tổ chức tính năng." />
+</Cards>
+
+## Tóm tắt
+
+Component và template là nền của mọi giao diện Angular. Hãy học theo tuyến: tạo standalone component, nối dữ liệu bằng binding, biểu diễn trạng thái bằng control flow, rồi mới ghép component bằng giao tiếp và content projection. Lifecycle hooks cùng styling là bước hoàn thiện để UI vừa đúng hành vi vừa dễ bảo trì.
+
+Kết quả cần đạt không phải là nhớ mọi cú pháp. Bạn cần có thể nhìn một yêu cầu giao diện, tách nó thành các component có trách nhiệm rõ ràng và mô tả giao diện từ state thay vì cập nhật DOM thủ công.

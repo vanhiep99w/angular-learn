@@ -1,10 +1,470 @@
 ---
 title: Kiến trúc Angular
-description: Các khối chính của framework và cách chúng phối hợp trong một ứng dụng.
+description: Hiểu các khối của ứng dụng Angular hiện đại, luồng dữ liệu giữa chúng và cách tổ chức mã cho người mới.
 ---
 
-Trang này sẽ trình bày **Kiến trúc Angular** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu">
+  Trang này dùng kiến trúc **standalone** mà Angular ưu tiên cho ứng dụng mới. Sau khi đọc, bạn có thể lần theo một thao tác của người dùng từ URL hoặc nút bấm đến component, service, trạng thái và DOM.
 </Callout>
+
+## Mục lục
+
+- [Kiến trúc Angular giải quyết vấn đề gì?](#kiến-trúc-angular-giải-quyết-vấn-đề-gì)
+  - [Đích đến: giao diện nhất quán từ trạng thái](#đích-đến-giao-diện-nhất-quán-từ-trạng-thái)
+  - [Đừng đồng nhất Angular với cấu trúc thư mục](#đừng-đồng-nhất-angular-với-cấu-trúc-thư-mục)
+- [Bản đồ các khối chính](#bản-đồ-các-khối-chính)
+  - [Điểm vào và component gốc](#điểm-vào-và-component-gốc)
+  - [Component và template](#component-và-template)
+  - [Router và các trang](#router-và-các-trang)
+  - [Service, provider và dependency injection](#service-provider-và-dependency-injection)
+  - [Trạng thái, RxJS và dữ liệu từ xa](#trạng-thái-rxjs-và-dữ-liệu-từ-xa)
+- [Ứng dụng khởi động như thế nào?](#ứng-dụng-khởi-động-như-thế-nào)
+  - [Bước 1: bootstrap tạo application injector](#bước-1-bootstrap-tạo-application-injector)
+  - [Bước 2: Angular tạo cây component](#bước-2-angular-tạo-cây-component)
+  - [Bước 3: router chọn nội dung theo URL](#bước-3-router-chọn-nội-dung-theo-url)
+- [Luồng dữ liệu nên đi theo hướng nào?](#luồng-dữ-liệu-nên-đi-theo-hướng-nào)
+  - [Một chiều từ cha xuống con](#một-chiều-từ-cha-xuống-con)
+  - [Sự kiện đi ngược lên](#sự-kiện-đi-ngược-lên)
+  - [Dữ liệu bất đồng bộ đi qua service](#dữ-liệu-bất-đồng-bộ-đi-qua-service)
+- [Ví dụ: trang danh sách sản phẩm](#ví-dụ-trang-danh-sách-sản-phẩm)
+  - [Cấu hình ứng dụng và route](#cấu-hình-ứng-dụng-và-route)
+  - [Service giao tiếp API](#service-giao-tiếp-api)
+  - [Component trang sở hữu trạng thái hiển thị](#component-trang-sở-hữu-trạng-thái-hiển-thị)
+  - [Đọc ví dụ theo dòng chảy](#đọc-ví-dụ-theo-dòng-chảy)
+- [Đặt ranh giới trách nhiệm](#đặt-ranh-giới-trách-nhiệm)
+  - [Khi nào tạo component, service hay utility?](#khi-nào-tạo-component-service-hay-utility)
+  - [Tổ chức theo feature thay vì theo loại tệp](#tổ-chức-theo-feature-thay-vì-theo-loại-tệp)
+- [Các lựa chọn kiến trúc phổ biến](#các-lựa-chọn-kiến-trúc-phổ-biến)
+  - [Standalone và NgModule](#standalone-và-ngmodule)
+  - [Signals và Observable](#signals-và-observable)
+  - [Trạng thái cục bộ và trạng thái dùng chung](#trạng-thái-cục-bộ-và-trạng-thái-dùng-chung)
+- [Lỗi phổ biến khi mới tổ chức ứng dụng](#lỗi-phổ-biến-khi-mới-tổ-chức-ứng-dụng)
+- [Checklist trước khi thêm một feature](#checklist-trước-khi-thêm-một-feature)
+- [Tóm tắt](#tóm-tắt)
+- [Bước tiếp theo](#bước-tiếp-theo)
+
+## Kiến trúc Angular giải quyết vấn đề gì?
+
+Một ứng dụng có thể bắt đầu bằng một form và một nút bấm. Khi có thêm màn hình, API, quyền truy cập và nhiều người cùng sửa mã, câu hỏi quan trọng không còn là “đặt HTML ở đâu?” mà là “mỗi phần chịu trách nhiệm cho điều gì?”. **Kiến trúc** là cách trả lời nhất quán cho câu hỏi đó.
+
+Angular cung cấp các khối ghép sẵn: component cho UI, template cho cách UI được khai báo, service cho logic dùng chung, dependency injection để cấp service, router để gắn URL với màn hình, và công cụ reactive để đưa trạng thái ra DOM. Những khối này không tự tạo ra kiến trúc hoàn hảo. Chúng giúp đội ngũ đặt ranh giới rõ ràng thay vì để mọi logic dồn vào một tệp.
+
+### Đích đến: giao diện nhất quán từ trạng thái
+
+Mô hình hữu ích nhất là: **UI là ảnh chụp của trạng thái hiện tại**. Ví dụ, khi danh sách sản phẩm đang tải, trạng thái là `loading`; khi API trả dữ liệu, trạng thái chứa danh sách; khi API lỗi, trạng thái chứa thông báo lỗi. Template đọc trạng thái đó để hiện đúng giao diện.
+
+```text
+Người dùng / URL / phản hồi API
+              │
+              ▼
+   Component hoặc service xử lý sự kiện
+              │
+              ▼
+      Cập nhật trạng thái ứng dụng
+              │
+              ▼
+ Template đọc trạng thái và Angular render DOM
+              │
+              ▼
+       Giao diện người dùng nhìn thấy
+```
+
+Bạn không cần tự tìm phần tử rồi đổi `textContent` trong luồng thông thường. Thay vào đó, thay đổi dữ liệu mà template đang đọc. Angular sẽ đồng bộ phần giao diện phụ thuộc vào dữ liệu ấy.
+
+### Đừng đồng nhất Angular với cấu trúc thư mục
+
+Angular không bắt buộc mọi dự án phải có đúng một cây thư mục. `src/app/features/products` hay `src/app/components` chỉ là quy ước do đội ngũ chọn. Điều Angular thực sự quy định là quan hệ kỹ thuật: component có metadata và template, dependency được cung cấp qua provider, route cần khai báo, còn template chỉ dùng được các dependency đã import.
+
+Vì vậy, đừng sao chép một cấu trúc thư mục chỉ vì thấy nó trong dự án khác. Hãy bắt đầu bằng feature của sản phẩm, chẳng hạn `products`, `orders` hoặc `auth`, rồi đặt mã phục vụ feature đó gần nhau.
+
+## Bản đồ các khối chính
+
+Trước khi đọc mã, hãy biết mỗi khối đứng ở đâu trong luồng. Sơ đồ dưới đây là mô hình đơn giản của ứng dụng Angular chạy ở trình duyệt.
+
+```text
+main.ts
+  │ bootstrapApplication(...)
+  ▼
+Application injector ───────► providers: router, HTTP, service dùng chung
+  │
+  ▼
+AppComponent
+  │ template có <router-outlet>
+  ▼
+Router ─────────────────────► Page component theo URL
+                                  │
+                                  ├──► UI component con
+                                  │         │ input / output
+                                  │         ▼
+                                  │      Template ───► DOM
+                                  │
+                                  └──► Service ───► HTTP API
+                                           │
+                                           ▼
+                                      state cho UI
+```
+
+### Điểm vào và component gốc
+
+`main.ts` là điểm vào của ứng dụng. Tệp này thường gọi `bootstrapApplication(AppComponent, appConfig)`. Lời gọi đó khởi động Angular, tạo injector cấp ứng dụng và render `AppComponent` vào phần tử host trong trang HTML.
+
+`AppComponent` là **component gốc**. Nó thường chứa layout chung như thanh điều hướng, footer và `<router-outlet>`. Nó không nên trở thành nơi chứa logic của mọi trang. Hãy xem nó như khung của ngôi nhà, không phải kho chứa toàn bộ đồ đạc.
+
+### Component và template
+
+Component là đơn vị sở hữu một phần giao diện và hành vi gần với giao diện đó. Một component gồm class TypeScript, metadata `@Component`, template và có thể có styles. Ví dụ, `ProductListPageComponent` sở hữu việc hiển thị danh sách; `ProductRowComponent` chỉ sở hữu một dòng trong danh sách.
+
+Template là HTML có cú pháp Angular. Nó có thể:
+
+- đọc giá trị bằng nội suy như `{{ product.name }}`;
+- nghe sự kiện như `(click)="reload()"`;
+- truyền dữ liệu xuống component con bằng input;
+- nhận thông báo từ con bằng output;
+- hiển thị điều kiện và danh sách với control flow như `@if` và `@for`.
+
+Component standalone khai báo những gì template dùng trong mảng `imports`. Chẳng hạn, một template có `<router-outlet>` phải import `RouterOutlet`. Quy tắc này làm dependency của template hiện rõ ngay trong component.
+
+### Router và các trang
+
+Router ánh xạ URL đến component. Ví dụ, route `/products` có thể render `ProductListPageComponent`, còn `/products/42` render `ProductDetailPageComponent`. URL là một phần trạng thái có thể chia sẻ: người dùng có thể bookmark, tải lại trang hoặc gửi liên kết cho người khác.
+
+Router không chỉ đổi màn hình. Nó còn có thể tải component theo nhu cầu qua lazy loading, đọc tham số URL, chạy guard để quyết định có được vào route hay không, và xử lý route không tồn tại. Nhưng guard ở client chỉ phục vụ trải nghiệm; API phía server vẫn phải xác thực quyền độc lập.
+
+### Service, provider và dependency injection
+
+**Service** là class chứa logic không gắn với một DOM cụ thể. Ví dụ quen thuộc là gọi API, lưu phiên đăng nhập, format tiền theo quy tắc nghiệp vụ, cache kết quả hoặc điều phối state dùng chung.
+
+**Dependency injection (DI)** là cơ chế Angular cấp một dependency cho nơi cần nó. Thay vì component tự viết `new ProductService()`, component yêu cầu service bằng `inject(ProductService)`. Angular tìm **provider** tương ứng và trả về instance phù hợp.
+
+Provider có phạm vi. `providedIn: 'root'` thường tạo một instance dùng chung cho toàn ứng dụng. Provider đặt ở component tạo instance theo cây component đó; cách này phù hợp khi state phải bị cô lập giữa các bản sao của component. Phạm vi provider quyết định nơi state được chia sẻ, vì vậy hãy chọn nó có chủ đích.
+
+### Trạng thái, RxJS và dữ liệu từ xa
+
+**Trạng thái** là dữ liệu quyết định UI: dữ liệu form, tab đang chọn, trạng thái tải hoặc lỗi. Với trạng thái đồng bộ, cục bộ trong component, signal là lựa chọn rõ ràng. Component đọc signal trong template; khi signal đổi, Angular biết UI phụ thuộc cần cập nhật.
+
+`Observable` của RxJS biểu diễn một dòng giá trị theo thời gian. Nó hợp với dữ liệu bất đồng bộ, sự kiện hoặc phép biến đổi nhiều bước. `HttpClient.get()` trả Observable; bạn có thể xử lý nó trong service rồi cập nhật signal hoặc để template dùng `async` pipe khi phù hợp.
+
+Không cần biến mọi giá trị thành global state. Trước hết, đặt state gần nơi dùng nhất. Chỉ đưa nó vào service dùng chung khi nhiều component ở xa nhau thực sự cần cùng một nguồn sự thật.
+
+## Ứng dụng khởi động như thế nào?
+
+Ba bước sau giúp bạn lần theo mã khi mở một dự án Angular mới. Tên tệp có thể khác, nhưng quan hệ giữa chúng thường giữ nguyên.
+
+### Bước 1: bootstrap tạo application injector
+
+Trong ứng dụng standalone, `main.ts` khởi động component gốc cùng cấu hình ứng dụng. Cấu hình là nơi đăng ký các provider có phạm vi toàn app, chẳng hạn router và HTTP client.
+
+```ts title="src/main.ts"
+import { bootstrapApplication } from '@angular/platform-browser';
+import { appConfig } from './app/app.config';
+import { AppComponent } from './app/app.component';
+
+bootstrapApplication(AppComponent, appConfig).catch((error) =>
+  console.error(error),
+);
+```
+
+Ở thời điểm này Angular chưa chọn trang cụ thể. Nó chuẩn bị môi trường chung để bất kỳ component nào trong cây có thể yêu cầu những dependency đã được cung cấp.
+
+### Bước 2: Angular tạo cây component
+
+Angular tạo `AppComponent`, đọc template của nó và tiếp tục tạo các component được template yêu cầu. Kết quả là **cây component**. Component cha đưa dữ liệu xuống con; component con phát tín hiệu ra ngoài; mỗi component render một vùng DOM của riêng nó.
+
+Không phải mọi thẻ HTML là component. `<section>` và `<button>` là phần tử DOM thông thường. `app-product-row` là component nếu selector của một component khớp với nó.
+
+### Bước 3: router chọn nội dung theo URL
+
+Nếu template gốc có `<router-outlet>`, router quan sát URL hiện tại và đặt page component khớp route vào vị trí đó. Khi người dùng điều hướng tới `/products`, router thay nội dung outlet bằng trang danh sách sản phẩm. Khung chung của `AppComponent` vẫn tồn tại.
+
+Điều này lý giải vì sao logic riêng của một trang nên nằm trong page component thay vì `AppComponent`: router có thể tạo, hủy và thay page component khi URL thay đổi.
+
+## Luồng dữ liệu nên đi theo hướng nào?
+
+Một ứng dụng dễ sửa khi người đọc có thể trả lời: dữ liệu bắt đầu từ đâu, ai được quyền sửa nó, và ai hiển thị nó. Hãy ưu tiên luồng rõ ràng thay vì cho mọi component gọi trực tiếp lẫn nhau.
+
+### Một chiều từ cha xuống con
+
+Component cha truyền dữ liệu xuống con qua input. Ví dụ, page component có danh sách `products`; mỗi `ProductRowComponent` nhận một `product` để render. Component con không nên tự thay đổi object của cha chỉ vì nó nhận được object đó.
+
+Lợi ích là dễ dự đoán: để biết UI con hiển thị gì, bạn xem input của nó; để biết input đổi ở đâu, bạn lần lên component cha. Khi con cần yêu cầu thay đổi, nó nên phát sự kiện thay vì sửa lén state bên ngoài.
+
+### Sự kiện đi ngược lên
+
+Component con dùng output để báo ý định của người dùng, chẳng hạn “đã bấm xóa” hoặc “đã chọn sản phẩm”. Cha quyết định hành động thực tế: mở hộp thoại, gọi service, cập nhật state hoặc điều hướng.
+
+```text
+ProductListPage
+  │ truyền [product] xuống
+  ▼
+ProductRow
+  │ phát (removeRequested) khi người dùng bấm Xóa
+  ▼
+ProductListPage
+  │ xác nhận, gọi service, cập nhật state
+  ▼
+Template render danh sách mới
+```
+
+Con không phải lúc nào cũng cần output. Nếu UI quá nhỏ và không tái sử dụng, logic có thể ở cùng page component. Tách component khi nó có trách nhiệm UI rõ ràng hoặc cần được tái sử dụng, không phải chỉ để giảm số dòng trong một tệp.
+
+### Dữ liệu bất đồng bộ đi qua service
+
+Đặt lời gọi HTTP trong service thay vì rải `HttpClient` vào nhiều component. Service trở thành một ranh giới: nó biết endpoint, kiểu dữ liệu trả về và cách chuyển lỗi kỹ thuật thành dữ liệu mà UI hiểu được. Component chỉ quyết định khi nào tải và hiển thị loading, lỗi hoặc dữ liệu.
+
+Luồng điển hình là:
+
+1. Người dùng mở route hoặc bấm nút.
+2. Component gọi một method của service.
+3. Service gọi API và trả về dữ liệu bất đồng bộ.
+4. Component cập nhật state của UI theo kết quả.
+5. Template render lại từ state mới.
+
+## Ví dụ: trang danh sách sản phẩm
+
+Ví dụ nhỏ này ghép các khối vừa học. Mục tiêu không phải là tạo kiến trúc duy nhất đúng, mà là thấy mỗi phần có một vai trò cụ thể.
+
+### Cấu hình ứng dụng và route
+
+`provideRouter()` đăng ký router ở application injector. `provideHttpClient()` đăng ký `HttpClient`. Route `/products` trỏ đến page component của feature sản phẩm.
+
+```ts title="src/app/app.config.ts"
+import { ApplicationConfig } from '@angular/core';
+import { provideHttpClient } from '@angular/common/http';
+import { provideRouter } from '@angular/router';
+import { routes } from './app.routes';
+
+export const appConfig: ApplicationConfig = {
+  providers: [provideRouter(routes), provideHttpClient()],
+};
+```
+
+```ts title="src/app/app.routes.ts"
+import { Routes } from '@angular/router';
+import { ProductListPageComponent } from './features/products/product-list-page.component';
+
+export const routes: Routes = [
+  { path: 'products', component: ProductListPageComponent },
+  { path: '', pathMatch: 'full', redirectTo: 'products' },
+];
+```
+
+Component gốc chỉ cần cung cấp nơi router đặt trang hiện tại.
+
+```ts title="src/app/app.component.ts"
+import { Component } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
+
+@Component({
+  selector: 'app-root',
+  standalone: true,
+  imports: [RouterOutlet],
+  template: `
+    <header><strong>Cửa hàng</strong></header>
+    <main><router-outlet /></main>
+  `,
+})
+export class AppComponent {}
+```
+
+### Service giao tiếp API
+
+Service dưới đây chỉ biết cách lấy sản phẩm. Nó không quyết định spinner nào hiển thị hoặc câu lỗi nào xuất hiện trên trang; đó là trách nhiệm của component UI.
+
+```ts title="src/app/features/products/product-api.service.ts"
+import { Injectable, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+
+export interface Product {
+  id: number;
+  name: string;
+  price: number;
+}
+
+@Injectable({ providedIn: 'root' })
+export class ProductApiService {
+  private readonly http = inject(HttpClient);
+
+  getAll(): Observable<Product[]> {
+    return this.http.get<Product[]>('/api/products');
+  }
+}
+```
+
+`providedIn: 'root'` giúp Angular đăng ký provider cho service ở phạm vi ứng dụng. Mỗi nơi inject `ProductApiService` sẽ dùng cùng instance, trừ khi một provider gần hơn chủ động thay thế nó.
+
+### Component trang sở hữu trạng thái hiển thị
+
+Page component gọi service khi được tạo. Nó giữ ba phần state mà template cần: danh sách, cờ đang tải và thông báo lỗi. `finalize()` luôn chạy khi Observable hoàn tất hoặc lỗi, nên loading được tắt ở cả hai trường hợp.
+
+```ts title="src/app/features/products/product-list-page.component.ts"
+import { Component, inject, signal } from '@angular/core';
+import { finalize } from 'rxjs';
+import { Product, ProductApiService } from './product-api.service';
+
+@Component({
+  selector: 'app-product-list-page',
+  standalone: true,
+  template: `
+    <h2>Sản phẩm</h2>
+
+    @if (loading()) {
+      <p>Đang tải...</p>
+    } @else if (error()) {
+      <p role="alert">{{ error() }}</p>
+      <button type="button" (click)="loadProducts()">Thử lại</button>
+    } @else {
+      <ul>
+        @for (product of products(); track product.id) {
+          <li>{{ product.name }} — {{ product.price }} đ</li>
+        } @empty {
+          <li>Chưa có sản phẩm.</li>
+        }
+      </ul>
+    }
+  `,
+})
+export class ProductListPageComponent {
+  private readonly productApi = inject(ProductApiService);
+
+  readonly products = signal<Product[]>([]);
+  readonly loading = signal(true);
+  readonly error = signal<string | null>(null);
+
+  constructor() {
+    this.loadProducts();
+  }
+
+  loadProducts(): void {
+    this.loading.set(true);
+    this.error.set(null);
+
+    this.productApi
+      .getAll()
+      .pipe(finalize(() => this.loading.set(false)))
+      .subscribe({
+        next: (products) => this.products.set(products),
+        error: () => this.error.set('Không thể tải sản phẩm. Hãy thử lại.'),
+      });
+  }
+}
+```
+
+Ví dụ giữ `subscribe()` trong component để luồng bắt đầu từ hành động UI và kết thúc ở state UI, nên rất dễ đọc. Với luồng phức tạp hoặc cần tái sử dụng, có thể đưa phần điều phối vào facade/service riêng. Điều quan trọng là mỗi subscription cần có vòng đời rõ ràng; các HTTP Observable của `HttpClient` thường hoàn tất sau một phản hồi, nhưng các luồng dài như WebSocket hoặc `interval` phải được hủy đúng lúc.
+
+### Đọc ví dụ theo dòng chảy
+
+Khi người dùng mở `/products`, router tạo `ProductListPageComponent` trong `RouterOutlet`. Constructor gọi `loadProducts()`. Method này yêu cầu `ProductApiService`; injector cấp service, rồi service dùng `HttpClient` đã được `provideHttpClient()` đăng ký.
+
+Khi API trả dữ liệu, callback `next` cập nhật `products`. Template đã đọc `products()`, do đó Angular render danh sách. Nếu API lỗi, callback `error` cập nhật thông báo; nhánh `@else if` thay danh sách bằng nút thử lại. Người dùng bấm nút thì toàn bộ luồng tải chạy lại.
+
+<Callout type="idea" title="Điểm cần nhớ từ ví dụ">
+  Service sở hữu chi tiết API. Page component sở hữu trạng thái hiển thị và hành động của trang. Template chỉ mô tả UI cho từng trạng thái. Sự phân chia này giúp thay đổi endpoint, giao diện hoặc cách tải dữ liệu mà ít ảnh hưởng lẫn nhau.
+</Callout>
+
+## Đặt ranh giới trách nhiệm
+
+Tên lớp không quan trọng bằng trách nhiệm. Trước khi tạo tệp mới, hãy xác định nó có sở hữu UI, logic dùng chung hay chỉ là hàm thuần túy. Câu trả lời giúp tránh một “service khổng lồ” hoặc một component chứa mọi thứ.
+
+### Khi nào tạo component, service hay utility?
+
+| Nơi đặt mã | Phù hợp khi | Ví dụ | Không nên dùng để |
+| --- | --- | --- | --- |
+| Component | Mã gắn với một vùng UI, template, input/output hoặc tương tác người dùng | Tab đang chọn, form của trang, mở dialog | Che giấu mọi quy tắc nghiệp vụ dùng ở nhiều nơi |
+| Service | Logic, state hoặc dependency được nhiều nơi dùng; giao tiếp API; điều phối theo domain | `ProductApiService`, `AuthService`, cache phiên | Thay thế component chỉ vì class có nhiều dòng |
+| Utility thuần | Hàm không cần DI, DOM hay state Angular | `formatOrderCode`, tính tổng tiền | Gọi HTTP hoặc giữ state dùng chung bí mật |
+| Route guard/resolver | Quyết định hoặc chuẩn bị dữ liệu liên quan điều hướng | Chuyển về login khi chưa có phiên | Thay thế kiểm tra quyền ở server |
+
+Ví dụ, hàm tính giảm giá có thể là utility thuần và dễ test. Nếu hàm cần cấu hình tiền tệ được inject hoặc dữ liệu từ API, nó có thể thuộc service. Nếu chỉ phục vụ cách một form hiển thị lỗi, nó thường nên ở component của form.
+
+### Tổ chức theo feature thay vì theo loại tệp
+
+Với ứng dụng nhỏ, đặt mọi component trong `components/` và mọi service trong `services/` vẫn hoạt động. Khi ứng dụng lớn, người làm feature sản phẩm sẽ phải mở nhiều thư mục xa nhau. Tổ chức theo feature giữ những thứ thay đổi cùng nhau ở gần nhau.
+
+```text
+src/app/
+├── app.component.ts
+├── app.config.ts
+├── app.routes.ts
+├── core/
+│   ├── auth/
+│   └── http/
+├── shared/
+│   ├── ui/
+│   └── utils/
+└── features/
+    └── products/
+        ├── product-list-page.component.ts
+        ├── product-detail-page.component.ts
+        ├── product-api.service.ts
+        ├── product-row.component.ts
+        └── product.models.ts
+```
+
+`core/` thường chứa thứ khởi tạo một lần cho toàn app, như xác thực hoặc interceptor HTTP. `shared/` chứa UI hoặc utility không phụ thuộc riêng feature nào. `features/products/` chứa phần đặc thù sản phẩm. Đây là một quy ước hữu ích, không phải API của Angular; giữ nó đơn giản cho đến khi dự án có nhu cầu thật.
+
+## Các lựa chọn kiến trúc phổ biến
+
+Kiến trúc không có một đáp án duy nhất. Các lựa chọn dưới đây giúp bạn hiểu vì sao mã Angular hiện đại có thể khác mã trong hướng dẫn cũ.
+
+### Standalone và NgModule
+
+Ứng dụng Angular mới nên ưu tiên standalone component và `bootstrapApplication()`. Dependency của template nằm trong `imports` của component, còn provider phạm vi toàn app nằm trong cấu hình bootstrap. Cách này giảm phần mã ghép nối chỉ để khai báo module.
+
+`NgModule` vẫn hợp lệ và cần thiết khi bạn bảo trì ứng dụng hoặc thư viện cũ. Bạn có thể gặp `AppModule`, `declarations`, `imports` và `providers` trong mã đó. Đừng trộn hai phong cách một cách máy móc. Khi bắt đầu feature mới trong ứng dụng hiện đại, dùng standalone thường nhất quán hơn; khi sửa ứng dụng module-based, hãy theo quy ước hiện có trước khi lên kế hoạch di chuyển.
+
+### Signals và Observable
+
+Signals phù hợp cho state đồng bộ mà template đọc trực tiếp, như danh sách đã tải, modal đang mở hoặc giá trị lọc hiện tại. Chúng cho phép bạn nhìn thấy rõ `set`, `update` và nơi UI đọc giá trị qua `signal()`.
+
+Observable phù hợp cho dòng dữ liệu theo thời gian, như phản hồi HTTP, tham số router, debounce ô tìm kiếm hoặc WebSocket. RxJS cung cấp toán tử để biến đổi, gộp và hủy những dòng đó. Signals không thay thế mọi Observable; Observable cũng không bắt buộc phải là nơi giữ mọi state UI.
+
+Cách thực dụng cho người mới là: nhận dữ liệu bất đồng bộ bằng Observable từ service, sau đó đưa kết quả vào signal khi component cần render nó. Khi luồng phức tạp, hãy viết tên cho các bước xử lý và test chúng thay vì ghép một chuỗi toán tử khó đọc.
+
+### Trạng thái cục bộ và trạng thái dùng chung
+
+State cục bộ nằm trong component, ví dụ popup của một trang có đang mở không. Đây là lựa chọn mặc định tốt vì phạm vi nhỏ, dễ hủy khi rời trang và ít rủi ro ảnh hưởng nơi khác.
+
+State dùng chung nằm trong service có provider ở phạm vi phù hợp, ví dụ người dùng hiện tại hoặc giỏ hàng. Nó hữu ích khi nhiều page component cần cùng dữ liệu. Đổi lại, bạn phải làm rõ ai được sửa state, khi nào reset state và state có sống qua điều hướng hay không.
+
+<Callout type="warn" title="Không tạo global state quá sớm">
+  Một service `AppStateService` chứa mọi thứ thường khiến thay đổi khó lần theo. Hãy bắt đầu bằng state cục bộ hoặc service theo domain như `CartStore`, rồi chỉ mở rộng khi có nhiều nơi cần chia sẻ cùng dữ liệu.
+</Callout>
+
+## Lỗi phổ biến khi mới tổ chức ứng dụng
+
+- **Đặt toàn bộ logic vào `AppComponent`.** Component gốc nhanh chóng thành tệp không thể đọc. Hãy chuyển logic của từng route vào page component và tách UI con theo trách nhiệm.
+- **Gọi API ở mọi component con.** Nhiều component cùng gọi một endpoint dễ tạo request trùng và trạng thái không nhất quán. Hãy để page hoặc service điều phối việc tải dữ liệu.
+- **Dùng `new` để tạo Angular service.** Instance tự tạo không nhận được dependency của Angular và bỏ qua lifecycle/provider đã cấu hình. Hãy dùng `inject()` hoặc constructor injection.
+- **Biến dữ liệu nhận qua input thành state có thể sửa trực tiếp.** Con có thể làm cha và con bất đồng dữ liệu. Hãy phát output để cha quyết định cập nhật nguồn dữ liệu.
+- **Dùng route guard như hàng rào bảo mật duy nhất.** Người dùng có thể bỏ qua mã client hoặc gọi API trực tiếp. Server phải xác thực danh tính và quyền cho mọi request nhạy cảm.
+- **Tạo abstraction trước khi có vấn đề lặp lại.** Một `BaseComponent`, `GenericService` hoặc facade rất tổng quát có thể che mất domain. Hãy trích xuất khi đã có ít nhất một trách nhiệm chung rõ ràng.
+- **Quên trạng thái loading, empty và error.** UI chỉ xử lý dữ liệu thành công thường gây trang trống hoặc spinner không tắt. Với mỗi request, hãy mô tả ba trạng thái này ngay từ đầu.
+
+## Checklist trước khi thêm một feature
+
+Trước khi viết mã cho một màn hình mới, trả lời ngắn gọn các câu hỏi sau:
+
+1. URL nào mở feature này, và component trang nào chịu trách nhiệm cho route đó?
+2. State nào chỉ thuộc trang, state nào thật sự phải chia sẻ?
+3. Component nào là cha của dữ liệu, component con cần input và output gì?
+4. Service nào chịu trách nhiệm gọi API hoặc logic dùng chung của domain?
+5. UI phản ứng ra sao khi dữ liệu đang tải, rỗng hoặc lỗi?
+6. Quyền truy cập nào cần phản ánh ở router, và API phía server kiểm tra quyền đó thế nào?
+7. Feature có thể tải lười (lazy load) khi người dùng chưa mở nó không?
+
+Không cần trả lời bằng một tài liệu dài cho mọi feature. Nhưng nếu chưa trả lời được các câu này, việc tạo thêm component thường chỉ làm ranh giới mơ hồ hơn.
+
+## Tóm tắt
+
+Một ứng dụng Angular hiện đại bắt đầu từ `bootstrapApplication()`, tạo application injector và render component gốc. Router đặt page component phù hợp vào cây UI. Component và template biến state thành DOM; service giữ logic dùng chung hoặc giao tiếp với thế giới bên ngoài; DI kết nối chúng qua provider.
+
+Quy tắc thực dụng nhất là giữ dữ liệu gần nơi dùng, để state là nguồn sự thật, truyền dữ liệu xuống bằng input và báo ý định lên bằng output. Khi mỗi khối có một trách nhiệm rõ, bạn có thể lần theo luồng từ URL hoặc click đến API và ngược lại mà không cần đoán.
+
+## Bước tiếp theo
+
+<Cards>
+  <Card title="DOM và template" href="/docs/nen-tang/dom-va-template" description="Tìm hiểu template Angular biến trạng thái thành DOM như thế nào." />
+  <Card title="Signals và Zone.js" href="/docs/nen-tang/signals-va-zonejs" description="Đi sâu vào reactivity và thời điểm Angular cập nhật giao diện." />
+  <Card title="Angular CLI" href="/docs/bat-dau/angular-cli" description="Dùng CLI để tạo, chạy và quản lý ứng dụng Angular." />
+</Cards>

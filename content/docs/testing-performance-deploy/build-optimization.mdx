@@ -1,10 +1,490 @@
 ---
 title: Build và tối ưu bundle
-description: Cấu hình build production, budgets và chia nhỏ mã nguồn.
+description: Kiểm soát artefact production Angular bằng build configuration, budgets, code splitting và quy trình đo lường có thể lặp lại.
 ---
 
-Trang này sẽ trình bày **Build và tối ưu bundle** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu của trang này">
+  Build optimization không phải là làm mọi tệp nhỏ nhất có thể. Mục tiêu là tải đúng mã ở đúng thời điểm, giữ chi phí tải ban đầu trong giới hạn có ý nghĩa và phát hiện regression trước khi phát hành.
 </Callout>
+
+## Mục lục
+
+- [Tổng quan](#tổng-quan)
+  - [Kết quả cần tối ưu](#kết-quả-cần-tối-ưu)
+  - [Từ mã nguồn đến tệp trình duyệt tải](#từ-mã-nguồn-đến-tệp-trình-duyệt-tải)
+- [Production build và budgets](#production-build-và-budgets)
+  - [Budgets là cổng chất lượng](#budgets-là-cổng-chất-lượng)
+  - [Cấu hình một production build](#cấu-hình-một-production-build)
+  - [Chọn ngưỡng theo baseline](#chọn-ngưỡng-theo-baseline)
+- [Phân tích bundle trước khi sửa](#phân-tích-bundle-trước-khi-sửa)
+  - [Đọc đầu ra build](#đọc-đầu-ra-build)
+  - [Tìm module thật sự gây nặng](#tìm-module-thật-sự-gây-nặng)
+  - [So sánh cùng điều kiện](#so-sánh-cùng-điều-kiện)
+- [Code splitting và lazy loading](#code-splitting-và-lazy-loading)
+  - [Tách theo route](#tách-theo-route)
+  - [Hoãn UI trong một route](#hoãn-ui-trong-một-route)
+  - [Lazy loading không tự chữa mọi vấn đề](#lazy-loading-không-tự-chữa-mọi-vấn-đề)
+- [Assets, styles và dependency](#assets-styles-và-dependency)
+  - [Ảnh, font và tệp tĩnh](#ảnh-font-và-tệp-tĩnh)
+  - [CSS toàn cục và style component](#css-toàn-cục-và-style-component)
+  - [Import có chủ đích](#import-có-chủ-đích)
+- [Cấu hình production và cache](#cấu-hình-production-và-cache)
+  - [Tối ưu, source map và tên chunk](#tối-ưu-source-map-và-tên-chunk)
+  - [Hash tệp và cấu hình runtime](#hash-tệp-và-cấu-hình-runtime)
+- [Quy trình đo lường và xử lý regression](#quy-trình-đo-lường-và-xử-lý-regression)
+  - [Vòng lặp năm bước](#vòng-lặp-năm-bước)
+  - [Ví dụ xử lý một bundle vượt budget](#ví-dụ-xử-lý-một-bundle-vượt-budget)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Tổng quan
+
+### Kết quả cần tối ưu
+
+Một ứng dụng Angular có thể có **kích thước build** nhỏ nhưng vẫn tải chậm, hoặc có bundle ban đầu lớn hơn một chút nhưng phản hồi tốt hơn vì cache hiệu quả. Vì vậy cần tách ba câu hỏi:
+
+| Câu hỏi | Chỉ dấu nên xem | Quyết định có thể dẫn đến |
+| --- | --- | --- |
+| Người dùng phải tải bao nhiêu trước khi thấy và dùng được màn hình đầu? | Kích thước `initial`, số request quan trọng, thời gian tải trên mạng thật | Tách route, bỏ dependency ở shell, tối ưu ảnh/font đầu trang |
+| Một tính năng nặng được tải khi nào? | Kích thước lazy chunk, thời điểm request, thao tác kích hoạt | Lazy-load route hoặc hoãn phần UI không cần ngay |
+| Mỗi lần phát hành có vô tình làm ứng dụng nặng hơn không? | Chênh lệch artefact và budget warning/error | Chặn CI, yêu cầu giải thích hoặc xử lý regression |
+
+**Bundle** là nhóm JavaScript, CSS và tài nguyên mà trình duyệt nhận sau khi Angular đóng gói ứng dụng. **Initial bundle** là phần cần cho lượt tải đầu; lazy chunk là phần chỉ được tải khi mã điều hướng hoặc hiển thị nó. Nén HTTP như Brotli làm giảm bytes truyền trên mạng, nhưng không xóa chi phí phân tích và thực thi JavaScript. Vì thế giảm mã không cần thiết vẫn có giá trị.
+
+<Callout type="idea" title="Ưu tiên đúng thứ tự">
+  Tối ưu phần người dùng cần ngay trước. Một dashboard quản trị hiếm khi mở không nên làm trang đăng nhập nặng hơn. Ngược lại, mã cần để render màn hình đầu không nên bị đẩy sang request muộn chỉ để con số initial đẹp hơn.
+</Callout>
+
+### Từ mã nguồn đến tệp trình duyệt tải
+
+Khi chạy production build, Angular CLI đọc entry point, lần theo các `import`, biên dịch template và tối ưu đầu ra. Bundler loại phần mã không được dùng khi có thể (tree shaking), gộp hoặc tách module thành chunks, rút gọn mã và sinh tệp trong thư mục output. Cấu hình builder và phiên bản Angular quyết định chi tiết tên tệp, định dạng stats và thuật toán đóng gói; không nên giả định mọi dự án có cùng một danh sách chunks.
+
+```text
+Mã ứng dụng + thư viện + assets
+              │
+              ▼
+      Angular CLI production build
+              │
+      ┌───────┼───────────────────┐
+      ▼       ▼                   ▼
+  compile   tree shaking     minify / CSS optimize
+      │       │                   │
+      └───────┴─────────┬─────────┘
+                         ▼
+          initial chunks + lazy chunks + assets
+                         │
+                         ▼
+       CDN/browser cache ──► người dùng tải theo nhu cầu
+```
+
+Tree shaking chỉ hoạt động tốt khi dependency công bố module có thể phân tích tĩnh và ứng dụng import đúng phần cần dùng. Một package CommonJS, một import tập hợp quá lớn, hoặc side effect lúc nạp module có thể khiến bundler phải giữ lại nhiều mã hơn dự kiến. Hãy xem output thay vì tin rằng mọi import đều được loại bỏ tự động.
+
+## Production build và budgets
+
+### Budgets là cổng chất lượng
+
+**Budget** là giới hạn kích thước Angular CLI kiểm tra sau build. Nó không làm bundle nhỏ đi; nó biến mức kích thước đã thống nhất thành warning hoặc error. Warning yêu cầu người review chú ý. Error làm build thất bại, phù hợp với ngưỡng không được phép vượt qua trong CI.
+
+Các loại budget thường hữu ích:
+
+| `type` | Phạm vi | Khi nên dùng |
+| --- | --- | --- |
+| `initial` | Tổng các chunk cần ở lượt tải đầu | Budget chính cho trải nghiệm vào ứng dụng |
+| `bundle` | Một bundle/chunk được gọi tên | Bảo vệ một entry hoặc chunk quan trọng đã biết |
+| `anyScript` | Từng tệp JavaScript bất kỳ | Phát hiện một chunk JS đột biến lớn |
+| `allScript` | Tổng JavaScript | Theo dõi tổng chi phí mã JavaScript |
+| `anyComponentStyle` | Từng stylesheet của component | Chặn component mang CSS bất thường |
+| `all` | Toàn bộ output | Dùng thận trọng vì assets lớn có thể làm tín hiệu kém rõ |
+
+CLI còn hỗ trợ các loại khác tùy builder, chẳng hạn `any`. Hãy kiểm tra schema của builder đang dùng trước khi đưa một loại mới vào policy. Với `bundle`, giá trị `name` phải khớp tên bundle mà build thực sự sinh ra; nó không phải tên component tùy ý.
+
+<Callout type="warn" title="Không tăng budget chỉ để pipeline xanh">
+  Một budget vừa vượt có thể là thay đổi hợp lệ, ví dụ thêm tính năng lớn đã được phê duyệt. Nhưng quyết định đúng là ghi nhận baseline mới và lý do, hoặc tách phần mã đó. Tăng ngưỡng mà không biết bytes đến từ đâu sẽ biến budget thành cảnh báo bị bỏ qua.
+</Callout>
+
+### Cấu hình một production build
+
+Trong workspace dùng application builder hiện đại, budgets thường đặt trong cấu hình `production` của target `build` trong `angular.json`. Tên project và các option có thể khác nhau; hãy ghép ví dụ sau vào target đang có, không thay nguyên khối cấu hình của dự án.
+
+```json
+{
+  "projects": {
+    "storefront": {
+      "architect": {
+        "build": {
+          "builder": "@angular-devkit/build-angular:application",
+          "configurations": {
+            "production": {
+              "optimization": true,
+              "sourceMap": false,
+              "namedChunks": false,
+              "outputHashing": "all",
+              "extractLicenses": true,
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "650kB"
+                },
+                {
+                  "type": "anyScript",
+                  "maximumWarning": "250kB",
+                  "maximumError": "350kB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "6kB",
+                  "maximumError": "10kB"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Chạy đúng cấu hình cần kiểm tra bằng:
+
+```bash
+ng build --configuration production
+```
+
+Kết quả terminal thường cho biết các tệp đầu ra và kích thước của chúng. Coi đó là artefact review: lưu log CI hoặc báo cáo chênh lệch khi pull request thay đổi kích thước đáng kể. Đừng dùng `ng serve` làm bằng chứng thay cho production build; development server ưu tiên phản hồi khi lập trình, không đại diện cho mã được phát hành.
+
+### Chọn ngưỡng theo baseline
+
+Các số `500kB` và `650kB` ở trên chỉ là ví dụ, không phải chuẩn chung. Ngưỡng phù hợp phụ thuộc vào loại ứng dụng, người dùng, cache, mạng mục tiêu và mức hiện tại. Thiết lập budget theo trình tự sau:
+
+1. Build production ở commit ổn định, không có thay đổi đang thử nghiệm.
+2. Ghi kích thước `initial`, các JS chunk lớn nhất, CSS lớn nhất và các assets quan trọng. Ghi cả đơn vị mà CLI hiển thị.
+3. Chọn warning đủ gần baseline để phát hiện regression sớm, chẳng hạn phần tăng hợp lý đã được cả nhóm thống nhất.
+4. Chọn error là giới hạn cần hành động. Nếu vượt error, PR phải tách mã, bỏ dependency, hoặc có quyết định ngoại lệ rõ ràng.
+5. Rà lại ngưỡng sau thay đổi sản phẩm có chủ đích. Budget là policy sống, không phải một con số bất biến.
+
+Dùng **baseline** — số đo được chấp nhận tại một commit xác định — tránh hai cực đoan: đặt ngưỡng quá thấp khiến mọi build hỏng, hoặc quá cao đến mức không phát hiện được regression thật.
+
+## Phân tích bundle trước khi sửa
+
+### Đọc đầu ra build
+
+Bắt đầu bằng production build và trả lời ba câu hỏi đơn giản:
+
+```bash
+ng build --configuration production
+```
+
+1. Chunk nào thuộc initial output và chunk nào là lazy?
+2. Tệp hoặc stylesheet nào lớn bất thường so với baseline?
+3. Cảnh báo budget trỏ đến loại nào: `initial`, một script, hay style component?
+
+Một chunk lazy lớn không mặc định là lỗi. Nó có thể là editor, bản đồ hoặc báo cáo chỉ dùng sau một thao tác rõ ràng. Vấn đề xuất hiện khi chunk đó bị tải sớm, bị tải lặp lại do cache cấu hình sai, hoặc làm thao tác mở tính năng chậm hơn mức người dùng chấp nhận.
+
+Khi cần dữ liệu chi tiết hơn, bật thống kê nếu builder của workspace hỗ trợ option đó:
+
+```bash
+ng build --configuration production --stats-json
+```
+
+Tệp `stats.json` và công cụ đọc nó phụ thuộc vào builder Angular đang dùng. Hãy xác minh định dạng stats trong output hoặc tài liệu của đúng phiên bản CLI trước khi đưa vào `webpack-bundle-analyzer`, `source-map-explorer` hay công cụ khác. Không nên nạp một stats file của esbuild vào công cụ chỉ hiểu webpack rồi suy luận từ báo cáo lỗi.
+
+### Tìm module thật sự gây nặng
+
+Một treemap hoặc báo cáo module giúp trả lời “bytes đến từ package nào?”, nhưng không tự đưa ra giải pháp. Với mỗi mục lớn, lần theo chuỗi sau:
+
+| Quan sát | Câu hỏi tiếp theo | Hành động có thể kiểm chứng |
+| --- | --- | --- |
+| Một package chart chiếm phần lớn initial | Chart có xuất hiện ở màn hình đầu không? Có import toàn bộ package không? | Di chuyển import vào route/widget lazy; chỉ import API cần dùng |
+| Một chunk vendor lớn | Package nào cùng xuất hiện? Có dependency trùng chức năng không? | Gỡ package không dùng hoặc hợp nhất lựa chọn thư viện |
+| `anyComponentStyle` vượt ngưỡng | CSS nào nằm trong component đó? Có selector hoặc data URI lặp lại không? | Loại CSS chết, dùng token chung, đưa ảnh ra asset khi phù hợp |
+| Ảnh/font không nằm trong JS nhưng tải đầu quá lớn | Tài nguyên đó có nằm above-the-fold không? | Nén/resize, preload có chọn lọc, lazy-load ảnh ngoài viewport |
+
+Đặc biệt kiểm tra **import path**, không chỉ tên package. Ví dụ sau kéo toàn bộ namespace `icons` dù component chỉ dùng một biểu tượng:
+
+```ts
+// Tránh khi thư viện không tree-shake được theo namespace.
+import * as icons from 'large-icon-library';
+
+export const saveIcon = icons.save;
+```
+
+Ưu tiên API có import theo biểu tượng hoặc module nhỏ, nếu thư viện hỗ trợ:
+
+```ts
+import { saveIcon } from 'large-icon-library/icons/save';
+
+export { saveIcon };
+```
+
+Ví dụ thứ hai chỉ có ích khi package có export path tương ứng và đánh dấu side effect đúng. Đừng tự đổi import hàng loạt chỉ vì một quy tắc chung; build lại và so sánh output để chứng minh lợi ích.
+
+### So sánh cùng điều kiện
+
+So sánh production với production, cùng phiên bản Node/CLI và cùng lockfile. Một chênh lệch do cập nhật dependency hoặc do cache build lạnh có thể bị nhầm với thay đổi mã. Bảng review tối thiểu nên có:
+
+| Chỉ số | Baseline | Sau thay đổi | Chênh lệch | Giải thích |
+| --- | ---: | ---: | ---: | --- |
+| `initial` | 420 kB | 438 kB | +18 kB | Thêm UI xác thực cần ở màn hình đầu |
+| Lazy `reports` | 310 kB | 205 kB | -105 kB | Tải chart khi mở tab thay vì khi vào route |
+| CSS component lớn nhất | 7.2 kB | 4.1 kB | -3.1 kB | Loại data URI và CSS không dùng |
+
+Kích thước transfer sau gzip/Brotli và kích thước parsed/executed là các số khác nhau. Nếu mục tiêu là trải nghiệm thật, hãy bổ sung phép đo Network và Performance trong trình duyệt, theo cùng thiết bị và điều kiện mạng. Xem bài [Profiling hiệu năng](/docs/testing-performance-deploy/profiling-performance) để thiết kế baseline trải nghiệm.
+
+## Code splitting và lazy loading
+
+### Tách theo route
+
+Route là ranh giới code splitting tự nhiên vì người dùng thường chỉ vào một phần ứng dụng trong một phiên. Với standalone component, `loadComponent` trì hoãn việc tải component cho đến lúc router cần route đó:
+
+```ts
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: '',
+    pathMatch: 'full',
+    loadComponent: () =>
+      import('./features/home/home-page.component').then((m) => m.HomePageComponent),
+  },
+  {
+    path: 'reports',
+    loadComponent: () =>
+      import('./features/reports/reports-page.component').then(
+        (m) => m.ReportsPageComponent,
+      ),
+  },
+];
+```
+
+Khi người dùng đang ở trang chủ, route `reports` không cần nằm trong initial chunk chỉ vì nó được khai báo trong router. Tương tự, một feature có nhiều routes con có thể dùng `loadChildren` để lazy-load cả tập routes:
+
+```ts
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: 'admin',
+    loadChildren: () =>
+      import('./features/admin/admin.routes').then((m) => m.ADMIN_ROUTES),
+  },
+];
+```
+
+```ts
+// features/admin/admin.routes.ts
+import { Routes } from '@angular/router';
+
+export const ADMIN_ROUTES: Routes = [
+  {
+    path: '',
+    loadComponent: () =>
+      import('./admin-dashboard.component').then((m) => m.AdminDashboardComponent),
+  },
+];
+```
+
+Đặt dependency nặng gần feature lazy. Nếu `app.component.ts`, một service được cung cấp ở root, hoặc một shared barrel import thư viện chart, editor hay map, mã đó vẫn có thể bị kéo vào initial graph. Lazy route chỉ tách được mã không bị import eager từ nơi khác.
+
+### Hoãn UI trong một route
+
+Không phải mọi phần nặng đều xứng đáng có route riêng. Với UI nằm dưới màn hình đầu hoặc chỉ mở sau tương tác, `@defer` tạo ranh giới hoãn tải trong template. Ví dụ trang sản phẩm hiển thị mô tả ngay nhưng chỉ tải đánh giá khi phần placeholder đi vào viewport:
+
+```ts
+import { Component } from '@angular/core';
+import { ProductSummaryComponent } from './product-summary.component';
+import { ProductReviewsComponent } from './product-reviews.component';
+
+@Component({
+  selector: 'app-product-page',
+  imports: [ProductSummaryComponent, ProductReviewsComponent],
+  template: `
+    <app-product-summary />
+
+    @defer (on viewport) {
+      <app-product-reviews />
+    } @placeholder {
+      <p>Cuộn xuống để tải đánh giá.</p>
+    } @loading (minimum 300ms) {
+      <p>Đang tải đánh giá…</p>
+    } @error {
+      <p>Không thể tải phần đánh giá. Hãy thử lại.</p>
+    }
+  `,
+})
+export class ProductPageComponent {}
+```
+
+Dependency trong khối `@defer` chỉ có thể được lazy-load khi nó là standalone và không được tham chiếu eager ở cùng tệp hoặc ngoài khối. `ProductSummaryComponent` là import eager nên vẫn nằm trong tải đầu. Hãy dùng DevTools Network hoặc output build để xác nhận reviews thực sự thành chunk riêng.
+
+Các trigger như `on interaction`, `on viewport` và `when condition` phục vụ hành vi khác nhau. Chọn trigger dựa vào lúc người dùng thực sự cần UI. Nếu reviews quan trọng cho quyết định mua, hoãn đến viewport có thể hợp lý; nếu thông tin là thiết yếu ở màn hình đầu, nó chỉ tạo độ trễ không cần thiết.
+
+### Lazy loading không tự chữa mọi vấn đề
+
+Lazy loading đổi **thời điểm** tải, không làm dependency tự nhỏ hơn. Nó có các trade-off rõ ràng:
+
+- Route đầu có thể nhanh hơn, nhưng lần mở route lazy đầu tiên có thêm độ trễ mạng và parse JavaScript.
+- Quá nhiều chunks nhỏ có thể tăng request, overhead điều phối và làm luồng debug phức tạp hơn.
+- Preloading có thể cải thiện lần điều hướng sau, nhưng cũng cạnh tranh băng thông với nội dung hiện tại. Chỉ preload route có xác suất truy cập cao.
+- Người dùng có mạng yếu có thể thấy placeholder lâu. Luôn thiết kế loading/error state, thay vì để vùng trống.
+- Lazy route không phải ranh giới bảo mật. Guard và kiểm tra quyền ở server vẫn là nguồn bảo vệ; mã đã tải về trình duyệt không nên chứa bí mật.
+
+Nói ngắn gọn: tách theo hành trình người dùng, đo thời gian mở feature lần đầu, rồi quyết định có preload hay không.
+
+## Assets, styles và dependency
+
+### Ảnh, font và tệp tĩnh
+
+Assets có thể không xuất hiện trong budget JavaScript nhưng vẫn quyết định Largest Contentful Paint (LCP), chi phí dữ liệu và tốc độ render. Xử lý chúng theo vai trò:
+
+| Loại | Cách ưu tiên | Điều cần tránh |
+| --- | --- | --- |
+| Ảnh hero/LCP | Dùng kích thước đúng vùng hiển thị, định dạng hiện đại khi chuỗi hỗ trợ, khai báo kích thước | Gửi ảnh gốc nhiều megapixel rồi chỉ thu nhỏ bằng CSS |
+| Ảnh dưới viewport | Dùng `loading="lazy"`, `width`/`height` và placeholder phù hợp | Lazy-load ảnh đang quyết định LCP |
+| SVG icon | Tối ưu SVG, chỉ đóng gói icon cần dùng | Chèn nguyên bộ icon lớn vào initial bundle |
+| Web font | Giảm số family/weight, subset glyph khi có thể, xem chiến lược `font-display` | Tải nhiều weight chỉ vì stylesheet mặc định cung cấp |
+| Video/tệp lớn | Stream hoặc tải theo thao tác rõ ràng | Nhúng base64 vào CSS/JS khiến cache và bundle kém hiệu quả |
+
+Với `NgOptimizedImage`, `priority` dành cho ảnh LCP thật sự; nó không phải cờ gắn cho mọi ảnh quan trọng theo cảm giác. Một trang chỉ nên có rất ít ảnh priority để chúng không tranh tải với nhau.
+
+```html
+<!-- Ảnh hero đã biết kích thước: ưu tiên tải. -->
+<img
+  ngSrc="/products/hero-960.webp"
+  width="960"
+  height="540"
+  priority
+  alt="Bàn làm việc gỗ sáng"
+/>
+
+<!-- Ảnh ở phần nội dung sau: browser có thể hoãn tải. -->
+<img
+  ngSrc="/products/detail-640.webp"
+  width="640"
+  height="480"
+  loading="lazy"
+  alt="Góc nghiêng của sản phẩm"
+/>
+```
+
+Ví dụ cần import directive `NgOptimizedImage` vào standalone component hoặc module đang khai báo template. Kiểm tra request thực tế: server/CDN phải trả đúng định dạng, kích thước và cache header thì tối ưu trong template mới tạo hiệu quả cuối cùng.
+
+### CSS toàn cục và style component
+
+`styles` toàn cục trong `angular.json` thường đi vào stylesheet toàn cục. Hãy đặt reset, token thiết kế, CSS nền tảng và style dùng thật sự xuyên ứng dụng ở đó. Một framework CSS đầy đủ hoặc bộ theme lớn đưa vào global styles sẽ ảnh hưởng mọi lượt tải, kể cả khi chỉ một trang dùng vài class của nó.
+
+Style component có lợi vì gần component và có thể bị budget `anyComponentStyle` bảo vệ. Tuy nhiên, sao chép cùng animation, data URI, danh sách breakpoint hoặc selector sâu vào nhiều component làm output phình lên và khó bảo trì. Giải pháp không phải luôn là dồn mọi thứ vào global CSS; hãy tách token, utility hoặc stylesheet dùng chung thật sự có phạm vi hợp lý.
+
+<Callout type="warn" title="Đừng tắt encapsulation chỉ để sửa CSS">
+  `ViewEncapsulation.None` có thể làm style lan ra toàn ứng dụng và khiến chi phí/ảnh hưởng khó truy vết. Hãy kiểm tra selector, cấu trúc component và API style trước; thay đổi encapsulation là quyết định kiến trúc, không phải mẹo giảm bundle mặc định.
+</Callout>
+
+### Import có chủ đích
+
+Dependency thường là nguồn tăng bundle lớn nhất. Trước khi cài hoặc giữ một package, trả lời:
+
+- Chức năng có thể dùng API trình duyệt hoặc Angular sẵn có không?
+- Có cần package đó ở initial path không, hay chỉ feature hiếm dùng cần nó?
+- Package có ESM/export theo phần, type declaration và lịch sử bảo trì phù hợp không?
+- Có hai package đang giải quyết cùng một việc, ví dụ hai thư viện ngày tháng hoặc hai icon set, không?
+
+Barrel file nội bộ (`index.ts`) hữu ích cho public API nhưng có thể che import eager. Nó không luôn làm tree shaking thất bại, nhưng nó khiến người đọc khó nhận ra component nào kéo dependency nào. Với feature nặng, import trực tiếp entry chuyên biệt và xác minh output sẽ minh bạch hơn.
+
+## Cấu hình production và cache
+
+### Tối ưu, source map và tên chunk
+
+Các option production phổ biến có mục đích khác nhau:
+
+| Option | Tác động | Cân nhắc |
+| --- | --- | --- |
+| `optimization: true` | Bật tối ưu script/style phù hợp production | Cần dùng production build khi đo; kết quả development không đại diện |
+| `sourceMap: false` | Không phát hành source map theo output mặc định | Khó debug lỗi production hơn; có thể tạo source map riêng và upload an toàn cho dịch vụ quan sát lỗi |
+| `namedChunks: false` | Ưu tiên tên chunk tối ưu thay vì tên dễ đọc | Debug trực tiếp tệp output kém thuận tiện hơn |
+| `extractLicenses: true` | Tách thông tin license của dependency | Kiểm tra yêu cầu tuân thủ license của tổ chức |
+| `outputHashing: "all"` | Gắn content hash vào tên tệp có thể cache | Phải cấu hình server fallback và cache policy đúng |
+
+Các option hợp lệ và default có thể thay đổi theo Angular CLI/builder. Đừng sao chép config cũ dùng webpack vào application builder mới mà không chạy build. Schema của `angular.json`, `ng build --help` và output CI là nguồn kiểm chứng cho workspace cụ thể.
+
+Source map là trade-off giữa khả năng điều tra và nguy cơ lộ source. Nếu phát hành map công khai, người dùng có thể đọc cấu trúc source dễ hơn. Nếu tắt hoàn toàn, stack trace minified khó hành động. Một lựa chọn thường dùng là giữ map ngoài public hosting, upload vào công cụ error tracking có kiểm soát truy cập, và kiểm tra rằng deploy không vô tình public `*.map`.
+
+### Hash tệp và cấu hình runtime
+
+Khi nội dung tệp thay đổi, `outputHashing: "all"` tạo tên như `main.A1B2C3.js`. CDN có thể cache tệp hash lâu vì URL mới được sinh khi nội dung mới xuất hiện. HTML entry point phải được cập nhật nhanh hơn để trỏ đến hash mới.
+
+```text
+HTML entry (cache ngắn / cần revalidate)
+        │ tham chiếu
+        ▼
+main.A1B2C3.js, styles.D4E5F6.css (cache dài, immutable)
+        │
+        ▼
+Lần release sau tạo URL hash mới cho nội dung mới
+```
+
+Không đặt bí mật vào `environment.ts`, JSON cấu hình public hay bất kỳ bundle nào. Mọi giá trị client nhận được đều có thể bị xem. Với URL API hoặc feature flag không bí mật cần đổi sau build, cân nhắc file cấu hình runtime được deploy cùng ứng dụng, được tải trước bootstrap và có cache policy rõ ràng. Trade-off là thêm request và cần xử lý lỗi/timing bootstrap; đổi lại không cần build lại chỉ để đổi endpoint công khai.
+
+## Quy trình đo lường và xử lý regression
+
+### Vòng lặp năm bước
+
+Tối ưu an toàn là một vòng lặp ngắn, không phải danh sách mẹo. Mỗi lần chỉ thay đổi một giả thuyết.
+
+1. **Tạo baseline.** Chạy `ng build --configuration production`, lưu output, budget warnings và phép đo Network/Performance cho route mục tiêu.
+2. **Khoanh vùng.** Chọn một chunk, asset hoặc thao tác chậm. Dùng báo cáo bundle để biết dependency nào đóng góp bytes.
+3. **Nêu giả thuyết.** Ví dụ: “Chart chỉ dùng ở `/reports`, nên đưa import vào route lazy sẽ giảm `initial`.”
+4. **Thay đổi nhỏ và kiểm tra đúng.** Sửa ranh giới import/route, chạy lại test liên quan và production build. Mở route lazy lần đầu để đảm bảo UI, loading và error state vẫn đúng.
+5. **So sánh và quyết định.** Ghi chênh lệch, tác động UX và trade-off. Giữ thay đổi nếu nó giải quyết mục tiêu; nếu không, hoàn tác và thử giả thuyết khác.
+
+<Callout type="idea" title="Đo cả chi phí đã chuyển đi">
+  Initial giảm 150 kB là tín hiệu tốt, nhưng chưa đủ. Hãy mở feature lazy trên mạng mục tiêu và quan sát thời gian người dùng chờ. Một chi phí được chuyển từ tải đầu sang click đầu chỉ là cải thiện khi hành trình tổng thể vẫn chấp nhận được.
+</Callout>
+
+### Ví dụ xử lý một bundle vượt budget
+
+Giả sử CI báo `initial` là 690 kB, vượt `maximumError` 650 kB. Cách xử lý có bằng chứng:
+
+1. Xác nhận CI chạy `--configuration production`, lockfile không đổi ngoài ý muốn và so sánh với artefact commit trước.
+2. Đọc output để biết phần tăng nằm ở initial hay chỉ là lazy chunk. Nếu only lazy tăng, kiểm tra budget đang áp dụng đúng loại hay không.
+3. Mở báo cáo module. Phát hiện thư viện biểu đồ 180 kB được import từ `app.component.ts`, trong khi chỉ route `/reports` sử dụng nó.
+4. Chuyển component biểu đồ và import thư viện vào route/component lazy. Kiểm tra không còn import chart thông qua service root hoặc shared barrel eager.
+5. Chạy lại build, test route reports và mở reports với cache lạnh. Ghi `initial` mới, thời gian mở reports lần đầu, và trạng thái loading.
+
+Nếu reports là phần chính mà hầu hết người dùng mở ngay sau đăng nhập, có thể preload route sau khi màn hình đầu ổn định. Quyết định này hợp lệ nếu số đo cho thấy nó cải thiện trải nghiệm tổng thể. Nó không hợp lệ nếu chỉ nhằm làm build không báo lỗi mà không đánh giá chi phí request mới.
+
+## Lỗi thường gặp và trade-off
+
+| Cách làm | Vì sao không đủ | Thay vào đó |
+| --- | --- | --- |
+| Tăng `maximumError` mỗi lần build đỏ | Mất tín hiệu regression và không biết bytes đến từ đâu | Phân tích diff, tách mã hoặc phê duyệt baseline mới có lý do |
+| Lazy-load mọi component | Tạo chuỗi request và loading state dư thừa | Tách theo route/hành trình; hoãn UI chỉ khi không cần ngay |
+| Chỉ nhìn kích thước raw trên đĩa | Không cho biết transfer, parse, execution hoặc cache | Kết hợp output build, Network và Performance thực tế |
+| Dùng source map production công khai để dễ debug | Có thể công bố source không chủ đích | Upload map vào hệ thống quan sát có kiểm soát hoặc tắt public map |
+| Thêm `preload` cho mọi lazy route | Các request cạnh tranh băng thông với màn hình hiện tại | Chỉ preload feature có xác suất truy cập cao, rồi đo lại |
+| Nhúng ảnh lớn vào CSS/base64 | Phình CSS/JS và mất cache độc lập của asset | Phục vụ asset riêng, đúng kích thước và có cache header phù hợp |
+| Cài package cho một helper đơn giản | Kéo dependency, license và bề mặt cập nhật không cần thiết | Dùng API sẵn có hoặc package nhỏ/chuyên biệt sau khi đo |
+| Xem client-side splitting là bảo mật | Người dùng vẫn có thể tải và đọc mã client | Kiểm tra quyền và bảo vệ dữ liệu ở server/API |
+
+Một tối ưu có thể làm bundle nhỏ hơn nhưng code khó hiểu hoặc trải nghiệm xấu hơn. Ví dụ, dynamic import cho một utility 2 kB có thể tốn nhiều hơn lợi ích vì thêm asynchronous boundary. Chỉ tạo ranh giới lazy khi dữ liệu hành vi và kích thước đủ lớn để bù cho độ phức tạp.
+
+## Checklist và tóm tắt
+
+Trước khi chấp nhận thay đổi ảnh hưởng build, hãy xác minh:
+
+- [ ] Đã chạy `ng build --configuration production`, không thay `ng serve` bằng production build.
+- [ ] Budget `initial`, script và component style có ngưỡng dựa trên baseline, warning/error có ý nghĩa.
+- [ ] Mọi thay đổi kích thước đáng kể có output hoặc báo cáo module giải thích nguyên nhân.
+- [ ] Route hoặc block `@defer` lazy đã được mở với cache lạnh; có loading/error state phù hợp.
+- [ ] Dependency lớn không còn bị import eager từ shell, root service hoặc shared barrel khi feature của nó là lazy.
+- [ ] Ảnh LCP, ảnh dưới viewport, font và CSS đã được xem riêng, không chỉ đo JavaScript.
+- [ ] Cache hash, HTML entry và source map có policy phù hợp môi trường deploy.
+- [ ] Không có secret trong `environment`, assets public hay bundle; test và phép đo liên quan vẫn đạt.
+
+Tóm lại, production build tạo ra artefact để kiểm chứng, budgets giữ regression không đi qua im lặng, và bundle analysis chỉ đường đến nguyên nhân. Code splitting, lazy loading, tối ưu asset/CSS và cache là các công cụ có trade-off. Hãy bắt đầu từ số đo của hành trình người dùng, thay đổi một nguyên nhân tại một thời điểm, rồi lưu bằng chứng trước/sau.
+
+<Cards>
+  <Card title="Đo và tối ưu hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="Thiết lập baseline trải nghiệm trước khi quyết định tối ưu." />
+  <Card title="SSR và hydration" href="/docs/testing-performance-deploy/ssr-hydration" description="Hiểu ảnh hưởng của render đa môi trường đến bản phát hành." />
+  <Card title="Đóng gói và triển khai" href="/docs/testing-performance-deploy/deployment" description="Đưa artefact production đã kiểm tra vào môi trường chạy thật." />
+</Cards>

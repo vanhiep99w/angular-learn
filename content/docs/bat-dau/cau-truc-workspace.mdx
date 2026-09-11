@@ -1,10 +1,256 @@
 ---
 title: Cấu trúc workspace
-description: Vai trò của các thư mục và tệp cấu hình trong workspace Angular.
+description: Hiểu các thư mục, tệp cấu hình và project trong một Angular workspace hiện đại.
 ---
 
-Trang này sẽ trình bày **Cấu trúc workspace** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
+import { File, Folder, Files } from 'fumadocs-ui/components/files';
 
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi">
+  Ví dụ dùng workspace do Angular CLI hiện đại tạo ra, ưu tiên ứng dụng standalone. Tên tệp và builder có thể khác ở dự án Angular cũ hoặc khi đã bật SSR; hãy xem `angular.json` của chính dự án để xác nhận.
 </Callout>
+
+## Mục lục
+
+- [Workspace là gì?](#workspace-là-gì)
+- [Bản đồ workspace mới](#bản-đồ-workspace-mới)
+  - [Ứng dụng một project](#ứng-dụng-một-project)
+  - [Workspace nhiều project](#workspace-nhiều-project)
+- [Những tệp ở gốc](#những-tệp-ở-gốc)
+- [Thư mục `src` và `public`](#thư-mục-src-và-public)
+  - [Điểm khởi động và bootstrap](#điểm-khởi-động-và-bootstrap)
+  - [Mã ứng dụng](#mã-ứng-dụng)
+  - [Tài nguyên tĩnh](#tài-nguyên-tĩnh)
+- [Đọc `angular.json`](#đọc-angularjson)
+  - [Project, target và configuration](#project-target-và-configuration)
+  - [Ví dụ cấu hình build](#ví-dụ-cấu-hình-build)
+- [TypeScript và kiểm thử](#typescript-và-kiểm-thử)
+- [Làm việc an toàn với workspace](#làm-việc-an-toàn-với-workspace)
+- [Tình huống thường gặp](#tình-huống-thường-gặp)
+- [Tiếp theo](#tiếp-theo)
+
+## Workspace là gì?
+
+**Workspace** là thư mục gốc mà Angular CLI quản lý. Nó chứa mã nguồn, cấu hình build và phát triển, các dependency Node.js, cùng một hoặc nhiều project Angular. Khi chạy `ng serve`, `ng build` hoặc `ng test`, CLI bắt đầu từ workspace hiện tại và đọc `angular.json` để biết phải thực hiện target nào.
+
+Đừng đồng nhất workspace với một ứng dụng. Một workspace có thể chỉ có một ứng dụng, nhưng cũng có thể chứa nhiều ứng dụng và thư viện dùng chung. Mỗi mục trong `projects` của `angular.json` mới là một **project** mà CLI có thể build, serve hoặc test.
+
+<Callout type="idea" title="Cách định vị nhanh">
+  Nếu đang lạc trong dự án, hãy tìm `angular.json` và `package.json` trước. Hai tệp này cho biết đây có phải Angular workspace hay không, project nào tồn tại, và các lệnh npm nào được dự án hỗ trợ.
+</Callout>
+
+## Bản đồ workspace mới
+
+Một lệnh như `ng new my-app` thường tạo cấu trúc gần với sau đây. Các tệp tùy chọn như cấu hình SSR, PWA, ESLint hoặc test runner có thể làm cây thư mục khác đi.
+
+<Files>
+  <Folder name="my-app" defaultOpen>
+    <File name="angular.json" />
+    <File name="package.json" />
+    <File name="package-lock.json" />
+    <File name="tsconfig.json" />
+    <File name="tsconfig.app.json" />
+    <File name="tsconfig.spec.json" />
+    <File name="README.md" />
+    <Folder name="public">
+      <File name="favicon.ico" />
+    </Folder>
+    <Folder name="src" defaultOpen>
+      <File name="index.html" />
+      <File name="main.ts" />
+      <File name="styles.css" />
+      <Folder name="app" defaultOpen>
+        <File name="app.ts" />
+        <File name="app.html" />
+        <File name="app.css" />
+        <File name="app.config.ts" />
+        <File name="app.routes.ts" />
+      </Folder>
+    </Folder>
+  </Folder>
+</Files>
+
+### Ứng dụng một project
+
+Trong workspace mới tạo theo mặc định, ứng dụng thường nằm ngay tại gốc: `root` của project là chuỗi rỗng và `sourceRoot` là `src`. Vì vậy, thấy `src/app` ở gốc không có nghĩa là dự án thiếu thư mục project; đó vẫn là một project Angular được khai báo trong `angular.json`.
+
+Tên tệp component ở ví dụ là quy ước hiện đại, chẳng hạn `app.ts`, `app.html` và `app.css`. Nhiều dự án cũ dùng `app.component.ts`, `app.component.html` và `app.component.css`. Cả hai cách đều hợp lệ; hãy theo quy ước đang có thay vì đổi tên hàng loạt.
+
+### Workspace nhiều project
+
+Khi thêm application hoặc library, CLI thường đặt project mới dưới `projects/`. Ví dụ, `ng generate library shared-ui` có thể tạo `projects/shared-ui/`. Vị trí thực tế do `newProjectRoot`, `root` và `sourceRoot` trong `angular.json` quyết định.
+
+```text
+my-workspace/
+├── src/                     # ứng dụng mặc định ở gốc (nếu có)
+├── projects/
+│   ├── admin-portal/        # một application khác
+│   └── shared-ui/           # một Angular library
+├── angular.json
+└── package.json
+```
+
+Một library không tự trở thành mã dùng chung chỉ vì nó nằm trong `projects/`. Hãy công khai API cần dùng qua entry point của library và tránh để application import vào các tệp nội bộ của library.
+
+## Những tệp ở gốc
+
+| Tệp hoặc thư mục | Vai trò | Có nên sửa trực tiếp? |
+| --- | --- | --- |
+| `angular.json` | Cấu hình workspace, project và các target của Angular CLI. | Có, nhưng hiểu rõ target đang đổi. |
+| `package.json` | Khai báo dependency và scripts npm. | Có; dùng package manager để thêm hoặc gỡ gói. |
+| Tệp lock (`package-lock.json`, `pnpm-lock.yaml` hoặc `yarn.lock`) | Khóa phiên bản dependency đã cài để máy khác cài lại nhất quán. | Không sửa tay; commit cùng thay đổi dependency. |
+| `tsconfig.json` | Cấu hình TypeScript nền dùng chung. | Có, khi cần quy ước TypeScript dùng chung. |
+| `tsconfig.app.json` / `tsconfig.spec.json` | Cấu hình biên dịch cho ứng dụng và mã kiểm thử. | Có, khi thay đổi đúng phạm vi đó. |
+| `.angular/` | Cache cục bộ do Angular CLI tạo. | Không; có thể xóa cache khi cần, CLI sẽ tạo lại. |
+| `node_modules/` | Bản cài đặt dependency cục bộ. | Không; tái tạo bằng `npm ci` hoặc lệnh cài tương ứng. |
+| `dist/` | Kết quả build để triển khai. | Không sửa; build sẽ ghi đè. |
+
+`package.json` và lock file luôn đi cùng nhau khi thay đổi dependency. Ngược lại, không commit `node_modules/`, `.angular/cache` hay đầu ra build, trừ khi quy định riêng của repository yêu cầu khác.
+
+<Callout type="warn" title="Không xóa tệp cấu hình để “làm sạch” dự án">
+  Xóa `node_modules` hoặc `.angular/cache` thường an toàn vì chúng sinh lại được. Xóa `angular.json`, lock file hoặc `tsconfig*.json` lại làm thay đổi hành vi build và có thể khiến môi trường của các thành viên lệch nhau.
+</Callout>
+
+## Thư mục `src` và `public`
+
+`src` là nơi chứa mã nguồn và tài nguyên được pipeline build xử lý. `public` chứa tệp tĩnh được copy nguyên trạng vào đầu ra build theo cấu hình `assets`. Phân biệt này giúp biết nên import một tệp vào TypeScript hay chỉ tham chiếu nó bằng URL.
+
+### Điểm khởi động và bootstrap
+
+`src/index.html` là trang HTML chủ cho ứng dụng. Angular chèn ứng dụng vào phần tử tương ứng với selector của root component, ví dụ `<app-root></app-root>`.
+
+`src/main.ts` là điểm vào JavaScript. Với ứng dụng standalone hiện đại, tệp này thường bootstrap root component và cấu hình provider:
+
+```ts
+import { bootstrapApplication } from '@angular/platform-browser';
+import { appConfig } from './app/app.config';
+import { App } from './app/app';
+
+bootstrapApplication(App, appConfig).catch((error) => console.error(error));
+```
+
+`bootstrapApplication` tạo Angular application trong trình duyệt. `appConfig` thường chứa provider toàn cục, chẳng hạn router, `HttpClient`, hydration hoặc cấu hình zone. Tên class có thể là `App` hoặc `AppComponent`; điều quan trọng là import phải khớp với component root của dự án.
+
+### Mã ứng dụng
+
+`src/app/` là điểm bắt đầu hợp lý cho component root, route và provider cấp ứng dụng:
+
+- `app.ts`, `app.html`, `app.css`: component root và template, style của nó.
+- `app.config.ts`: các provider áp dụng cho toàn ứng dụng.
+- `app.routes.ts`: danh sách route; router dùng tệp này khi được đăng ký trong `app.config.ts`.
+- `*.spec.ts`: mã kiểm thử đơn vị, nếu project được tạo kèm test.
+
+`src/styles.css` là stylesheet **toàn cục**. CSS đặt tại đây có thể ảnh hưởng mọi component. CSS cạnh component chỉ áp dụng trong phạm vi component theo cơ chế encapsulation mặc định của Angular. Hãy đặt reset, token CSS và style toàn cục vào `styles.css`; đặt style giao diện cụ thể gần component.
+
+Nếu khi tạo project đã chọn SSR hoặc prerendering, bạn có thể thấy thêm `main.server.ts`, `server.ts`, `app.config.server.ts` hoặc `app.routes.server.ts`. Những tệp đó dành cho render phía server; không xóa chúng chỉ vì ứng dụng vẫn chạy được trong chế độ development.
+
+### Tài nguyên tĩnh
+
+Từ các template Angular CLI hiện đại, `public/` là nơi thường đặt favicon, manifest, ảnh hoặc tệp tải xuống. Một tệp `public/logo.svg` thường được truy cập tại `/logo.svg`, không phải `/public/logo.svg`, vì CLI copy nội dung của `public` vào đầu ra build.
+
+Dự án cũ có thể dùng `src/assets/` thay cho `public/`. Cả hai chỉ hoạt động khi được liệt kê trong `options.assets` của target build. Không dựa vào tên thư mục; kiểm tra cấu hình build trước khi thêm một thư mục tài nguyên mới.
+
+## Đọc `angular.json`
+
+`angular.json` là tệp cấu hình dành cho Angular CLI. Nó không phải nơi để đặt logic nghiệp vụ. Thay vào đó, nó mô tả project nào có trong workspace và CLI phải build, serve, test hoặc chạy schematic cho từng project như thế nào.
+
+### Project, target và configuration
+
+Ba khái niệm cần đọc theo thứ tự:
+
+1. **Project** là một application hoặc library, nằm trong khóa `projects`.
+2. **Target** là một tác vụ của project, thường nằm trong `architect` và có tên như `build`, `serve`, `test` hoặc `extract-i18n`.
+3. **Configuration** là một biến thể của target, ví dụ `production` hoặc `development`.
+
+Một target chỉ định `builder` để thực hiện tác vụ và `options` làm giá trị mặc định. Khi chạy `ng build --configuration production`, Angular CLI lấy `options` của `build`, sau đó áp dụng các giá trị ghi đè trong `configurations.production`. Vì vậy, hãy đặt cấu hình chung trong `options` và chỉ đặt điểm khác biệt theo môi trường trong configuration.
+
+### Ví dụ cấu hình build
+
+Đây là phiên bản rút gọn của một target build dùng application builder hiện đại:
+
+```json
+{
+  "projects": {
+    "my-app": {
+      "projectType": "application",
+      "root": "",
+      "sourceRoot": "src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "outputPath": "dist/my-app",
+            "browser": "src/main.ts",
+            "polyfills": ["zone.js"],
+            "tsConfig": "tsconfig.app.json",
+            "assets": [{ "glob": "**/*", "input": "public" }],
+            "styles": ["src/styles.css"]
+          },
+          "configurations": {
+            "production": {
+              "outputHashing": "all"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+- `root` và `sourceRoot` xác định vị trí project và mã nguồn của nó.
+- `browser` chỉ điểm vào chạy trong trình duyệt; một application có SSR có thể có thêm tùy chọn liên quan đến server.
+- `assets` quyết định thư mục hoặc tệp nào được copy ra đầu build.
+- `styles` thêm stylesheet toàn cục vào bundle.
+- `outputPath` là nơi nhận artifact sau `ng build`.
+
+Angular CLI cũ có thể dùng builder khác, chẳng hạn `@angular-devkit/build-angular:browser`, và dùng tên tùy chọn khác. Đừng sao chép nguyên khối cấu hình từ một phiên bản khác. Hãy sửa cấu hình đang có hoặc dùng schematic của CLI để CLI cập nhật đồng bộ các tệp liên quan.
+
+## TypeScript và kiểm thử
+
+`tsconfig.json` là cấu hình TypeScript nền. Các tệp như `tsconfig.app.json` thường dùng `extends` để kế thừa rồi giới hạn những tệp được biên dịch cho application. `tsconfig.spec.json` làm điều tương tự cho kiểm thử và thường bổ sung kiểu của test runner.
+
+Ví dụ, nếu chỉ muốn thêm alias import, hãy xác định alias đó có cần cho application, test hay cả hai. Đặt phần dùng chung ở `tsconfig.json`; đặt phần chỉ thuộc application hoặc test vào tệp con phù hợp. Sau khi đổi alias, cập nhật cả import và công cụ liên quan nếu repository có ESLint, Jest, Vitest hoặc tooling khác.
+
+<Callout type="info" title="`strict` không phải lỗi Angular">
+  `strict` là nhóm kiểm tra nghiêm ngặt của TypeScript. Lỗi xuất hiện sau khi bật `strict` thường chỉ ra kiểu dữ liệu chưa rõ ràng. Ưu tiên sửa kiểu thay vì tắt kiểm tra cho toàn bộ workspace.
+</Callout>
+
+## Làm việc an toàn với workspace
+
+Khi cần thêm mã, hãy bắt đầu từ project và target đang được sử dụng, thay vì đoán theo cây thư mục.
+
+1. Đọc `projects` trong `angular.json` để biết tên project.
+2. Xác định target cần dùng: `build`, `serve`, `test` hoặc target tùy chỉnh.
+3. Xem `sourceRoot`, `assets`, `styles` và `tsConfig` của target đó.
+4. Tạo component, service hoặc library bằng `ng generate` khi có thể để CLI giữ tên tệp, test và import nhất quán.
+5. Chạy lệnh với project hoặc configuration rõ ràng trong workspace nhiều project, ví dụ `ng build admin-portal --configuration production`.
+
+Khi CLI không thể suy ra project mặc định trong workspace nhiều project, hãy truyền tên project thay vì sửa `defaultProject` theo thói quen. Các phiên bản Angular CLI hiện đại không còn dựa vào `defaultProject` trong `angular.json` như một số hướng dẫn cũ.
+
+## Tình huống thường gặp
+
+### Tôi thêm ảnh nhưng trình duyệt trả về 404
+
+Kiểm tra ảnh có nằm trong một `assets` input của target `build` hay không. Với cấu hình `input: "public"`, `public/images/avatar.png` được phục vụ là `/images/avatar.png`. Sau đó kiểm tra chữ hoa/chữ thường của tên tệp; môi trường triển khai Linux thường phân biệt chúng.
+
+### Tôi không biết `ng serve` đang chạy ứng dụng nào
+
+Đọc target `serve` của từng project trong `angular.json`. Trong workspace nhiều project, chạy rõ tên project, ví dụ `ng serve admin-portal`. Điều này tránh sửa nhầm `src/` của application mặc định trong khi đang xem một application khác.
+
+### Tôi muốn đổi thư mục build
+
+Đổi `outputPath` trong `options` của target `build`, rồi kiểm tra script deploy hoặc cấu hình CI đang trỏ đến thư mục cũ. Không di chuyển thủ công nội dung trong `dist/`; lần build tiếp theo sẽ tạo lại nó.
+
+### Có nên tự tạo `projects/` để chia feature không?
+
+Không. `projects/` dành cho project Angular độc lập trong workspace, chẳng hạn app hoặc library. Với feature của cùng một application, tổ chức dưới `src/app/` theo ranh giới nghiệp vụ thường đơn giản hơn. Chỉ tạo library khi cần API dùng lại hoặc cần ranh giới build, test và phụ thuộc rõ ràng.
+
+## Tiếp theo
+
+Hiểu workspace giúp bạn biết nơi đặt mã và nơi chỉnh cấu hình. Bước tiếp theo là dùng Angular CLI để tạo mã theo cấu trúc đó, sau đó chạy ứng dụng đầu tiên.
+
+<Cards>
+  <Card title="Angular CLI" href="/docs/bat-dau/angular-cli" description="Các lệnh tạo, chạy và quản lý project." />
+  <Card title="Ứng dụng đầu tiên" href="/docs/bat-dau/ung-dung-dau-tien" description="Tạo và chạy một ứng dụng Angular tối giản." />
+</Cards>

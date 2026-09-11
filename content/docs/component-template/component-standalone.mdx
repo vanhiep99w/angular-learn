@@ -1,10 +1,823 @@
 ---
 title: Standalone component
-description: Cấu trúc, metadata và cách tạo component standalone.
+description: Hiểu standalone component, imports, providers, bootstrap và cách chuyển dần ứng dụng Angular cũ sang kiến trúc hiện đại.
 ---
 
-Trang này sẽ trình bày **Standalone component** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Dành cho người mới">
+  Từ Angular hiện đại, component được tạo theo mô hình standalone theo mặc định. Bài này dùng một màn hình danh sách sản phẩm nhỏ để giải thích vì sao điều đó hữu ích và cách ghép các phần của ứng dụng lại với nhau.
 </Callout>
+
+## Mục lục
+
+- [Standalone component là gì](#standalone-component-là-gì)
+  - [Một component vẫn gồm những phần nào](#một-component-vẫn-gồm-những-phần-nào)
+  - [Mô hình tư duy trước và sau](#mô-hình-tư-duy-trước-và-sau)
+- [Vì sao Angular chọn standalone làm mặc định](#vì-sao-angular-chọn-standalone-làm-mặc-định)
+  - [Phụ thuộc hiện ra tại nơi dùng](#phụ-thuộc-hiện-ra-tại-nơi-dùng)
+  - [Ít mã nghi thức hơn, nhưng không ít cấu trúc hơn](#ít-mã-nghi-thức-hơn-nhưng-không-ít-cấu-trúc-hơn)
+  - [Standalone và NgModule cùng tồn tại](#standalone-và-ngmodule-cùng-tồn-tại)
+- [Đọc metadata của standalone component](#đọc-metadata-của-standalone-component)
+  - [Các trường hay gặp](#các-trường-hay-gặp)
+  - [Sơ đồ Angular dựng giao diện](#sơ-đồ-angular-dựng-giao-diện)
+- [`imports`: đưa khả năng vào template](#imports-đưa-khả-năng-vào-template)
+  - [Phân biệt import TypeScript và `imports` của component](#phân-biệt-import-typescript-và-imports-của-component)
+  - [Import directive, pipe và component](#import-directive-pipe-và-component)
+  - [Khi nào dùng `CommonModule`](#khi-nào-dùng-commonmodule)
+- [`providers`: nơi Angular tạo và tìm dependency](#providers-nơi-angular-tạo-và-tìm-dependency)
+  - [Ba phạm vi provider cần nhớ](#ba-phạm-vi-provider-cần-nhớ)
+  - [Chọn đúng phạm vi](#chọn-đúng-phạm-vi)
+- [Bootstrap ứng dụng standalone](#bootstrap-ứng-dụng-standalone)
+  - [`main.ts` khởi động root component](#maints-khởi-động-root-component)
+  - [Cấu hình ứng dụng trong `app.config.ts`](#cấu-hình-ứng-dụng-trong-appconfigts)
+  - [Luồng khởi động](#luồng-khởi-động)
+- [Ví dụ hoàn chỉnh: danh sách sản phẩm](#ví-dụ-hoàn-chỉnh-danh-sách-sản-phẩm)
+  - [Bước 1: component con hiển thị một sản phẩm](#bước-1-component-con-hiển-thị-một-sản-phẩm)
+  - [Bước 2: root component ghép các card](#bước-2-root-component-ghép-các-card)
+  - [Bước 3: bootstrap ứng dụng](#bước-3-bootstrap-ứng-dụng)
+  - [Đi theo một lần render](#đi-theo-một-lần-render)
+- [Tổ chức mã trong ứng dụng lớn hơn](#tổ-chức-mã-trong-ứng-dụng-lớn-hơn)
+  - [Tách theo tính năng thay vì gom mọi thứ vào `shared`](#tách-theo-tính-năng-thay-vì-gom-mọi-thứ-vào-shared)
+  - [Lazy loading với route standalone](#lazy-loading-với-route-standalone)
+- [Chuyển dần từ NgModule sang standalone](#chuyển-dần-từ-ngmodule-sang-standalone)
+  - [Đọc cấu trúc cũ trước khi đổi](#đọc-cấu-trúc-cũ-trước-khi-đổi)
+  - [Lộ trình chuyển đổi an toàn](#lộ-trình-chuyển-đổi-an-toàn)
+  - [Ví dụ chuyển một component](#ví-dụ-chuyển-một-component)
+- [Trade-off và các quyết định thực tế](#trade-off-và-các-quyết-định-thực-tế)
+  - [Điểm mạnh](#điểm-mạnh)
+  - [Điều standalone không tự giải quyết](#điều-standalone-không-tự-giải-quyết)
+  - [Khi nào vẫn gặp NgModule](#khi-nào-vẫn-gặp-ngmodule)
+- [Lỗi phổ biến và cách gỡ](#lỗi-phổ-biến-và-cách-gỡ)
+  - [Không nhận ra component, directive hoặc pipe](#không-nhận-ra-component-directive-hoặc-pipe)
+  - [Đặt provider sai phạm vi](#đặt-provider-sai-phạm-vi)
+  - [Bootstrap nhầm component hoặc quên provider](#bootstrap-nhầm-component-hoặc-quên-provider)
+  - [Nhầm `imports` với `providers`](#nhầm-imports-với-providers)
+  - [Dùng lại thói quen NgModule không phù hợp](#dùng-lại-thói-quen-ngmodule-không-phù-hợp)
+- [Danh sách kiểm tra trước khi hoàn thành](#danh-sách-kiểm-tra-trước-khi-hoàn-thành)
+- [Tóm tắt](#tóm-tắt)
+
+## Standalone component là gì
+
+**Standalone component** là component có thể tham gia trực tiếp vào cây giao diện mà không cần được khai báo trong một `NgModule`. Thay vì để một module nói rằng component nào, directive nào và pipe nào có thể đi cùng nhau, chính component khai báo những thứ template của nó cần trong mảng `imports`.
+
+Điều này không biến Angular thành thư viện ghép HTML thủ công. Angular vẫn biên dịch template, vẫn quản lý dependency injection (DI — cơ chế cung cấp đối tượng phụ thuộc), vẫn có router, forms và lazy loading. Thay đổi nằm ở **ranh giới khai báo**: dependency của giao diện được đặt gần giao diện sử dụng nó.
+
+Ví dụ tối giản sau là một standalone component. Trong Angular hiện đại, `standalone: true` thường không cần ghi vì đây là giá trị mặc định. Ghi rõ nó vẫn hữu ích khi bạn đang học hoặc đọc mã trộn lẫn phiên bản cũ và mới.
+
+```ts
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-welcome',
+  standalone: true,
+  template: `<p>Chào {{ name }}!</p>`,
+})
+export class WelcomeComponent {
+  name = 'Angular';
+}
+```
+
+`WelcomeComponent` có thể được dùng trong template của một standalone component khác sau khi component cha thêm nó vào `imports`. Nó cũng có thể là component được router tải hoặc, nếu là component gốc, được bootstrap khi ứng dụng bắt đầu chạy.
+
+### Một component vẫn gồm những phần nào
+
+Từ khóa *standalone* chỉ nói cách component được khai báo và ghép vào ứng dụng. Nó không thay đổi trách nhiệm cơ bản của component:
+
+| Phần | Vai trò | Ví dụ |
+| --- | --- | --- |
+| Class TypeScript | Giữ state và hành vi của UI. | `products`, `addToCart()` |
+| `@Component(...)` | Metadata để Angular biết cách tạo component. | `selector`, `templateUrl`, `imports` |
+| Template | Mô tả DOM cần hiển thị từ state. | `<button (click)="addToCart()">` |
+| Styles | Tạo kiểu cho phần giao diện đó. | `styleUrl: './card.css'` |
+| `imports` | Cho phép template dùng component, directive và pipe khác. | `CurrencyPipe`, `RouterLink` |
+| `providers` khi cần | Định nghĩa dependency chỉ sống ở một nhánh UI. | service bộ lọc riêng của màn hình |
+
+Nói ngắn gọn: standalone không bỏ component, template hay DI. Nó chỉ không bắt bạn tạo một `NgModule` trung gian cho mọi component mới.
+
+### Mô hình tư duy trước và sau
+
+Trong kiến trúc dựa trên NgModule, một component không tự nói được template của nó có thể dùng gì. Angular nhìn vào `declarations` và `imports` của module chứa component đó. Trong standalone, component giữ danh sách khả năng template của chính mình.
+
+```text
+NgModule truyền thống                         Standalone
+
+ProductCardComponent                         ProductCardComponent
+        │                                            │
+        ▼                                            ▼
+ProductsModule                              imports: [CurrencyPipe]
+declarations: [ProductCardComponent]                │
+imports: [CommonModule]                             ▼
+        │                                  Template dùng currency
+        ▼
+Template dùng currency
+```
+
+Sơ đồ không có nghĩa mọi dependency phải được lặp lại vô ích. Angular có thể biên dịch và tối ưu dependency theo cách riêng. Ý nghĩa thực tế cho người đọc mã là: mở file component, bạn thấy ngay template đó dựa vào API UI nào.
+
+## Vì sao Angular chọn standalone làm mặc định
+
+Angular chuyển standalone thành mặc định cho component mới để luồng học và phát triển phù hợp hơn với cách ứng dụng được xây dựng ngày nay. Một màn hình thường bắt đầu bằng một component; bắt buộc tạo thêm module chỉ để khai báo component đó tạo ra một bước gián tiếp mà người mới chưa cần.
+
+### Phụ thuộc hiện ra tại nơi dùng
+
+Hãy xem một template dùng `RouterLink` và `DatePipe`. Với standalone, dependency nằm cạnh template:
+
+```ts
+import { Component } from '@angular/core';
+import { DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
+
+@Component({
+  selector: 'app-order-summary',
+  imports: [DatePipe, RouterLink],
+  templateUrl: './order-summary.component.html',
+})
+export class OrderSummaryComponent {
+  createdAt = new Date();
+}
+```
+
+Người bảo trì không cần tìm `OrdersModule`, rồi suy luận directive nào module đó nhận từ module khác. Họ có thể kiểm tra `imports` ngay trong file đang sửa. Lợi ích lớn nhất là **tính cục bộ khi đọc mã**, không phải là việc phải gõ ít một dòng cấu hình.
+
+### Ít mã nghi thức hơn, nhưng không ít cấu trúc hơn
+
+Không có `NgModule` không có nghĩa đặt toàn bộ component vào một thư mục hay import bừa bãi để lỗi biến mất. Ứng dụng vẫn cần ranh giới theo tính năng, route, lớp dữ liệu và component dùng chung.
+
+Standalone giảm phần mã nghi thức như sau:
+
+```text
+Tạo một màn hình mới
+
+Trước đây: tạo component → khai báo trong feature module →
+          import các module UI vào feature module → kiểm tra exports
+
+Hiện nay: tạo component → thêm đúng dependency template vào imports →
+          gắn component vào route hoặc component cha
+```
+
+Điểm cần giữ lại là kỷ luật thiết kế: component cha sở hữu state của màn hình, component con nhận input và phát sự kiện, service chứa logic không thuộc một template cụ thể.
+
+### Standalone và NgModule cùng tồn tại
+
+Standalone là hướng mặc định, không phải một ranh giới tương thích. Ứng dụng cũ có `NgModule` vẫn chạy được. Một standalone component có thể import một `NgModule`; nhờ đó template của nó dùng được các declarable mà module ấy export. Ngược lại, một NgModule có thể import standalone component, directive hoặc pipe.
+
+Điều không được phép là **khai báo standalone component trong `declarations`** của NgModule. Standalone component đã tự khai báo phạm vi của nó; nếu module cần dùng nó, hãy đưa nó vào `imports`.
+
+<Callout type="warn" title="Đừng trộn hai cơ chế trong cùng một vai trò">
+  Một component hoặc là standalone, hoặc được quản lý bởi `declarations` của NgModule. Nếu Angular báo component là standalone nên không thể được declared trong module, hãy chuyển nó từ `declarations` sang `imports`, không thêm cấu hình chồng chéo.
+</Callout>
+
+## Đọc metadata của standalone component
+
+Decorator `@Component()` là metadata — dữ liệu mô tả class cho Angular. Angular đọc metadata này để biết selector nào tạo component, template ở đâu và template được phép dùng những API nào.
+
+```ts
+import { Component, input } from '@angular/core';
+import { CurrencyPipe } from '@angular/common';
+
+@Component({
+  selector: 'app-price-tag',
+  imports: [CurrencyPipe],
+  templateUrl: './price-tag.component.html',
+  styleUrl: './price-tag.component.css',
+})
+export class PriceTagComponent {
+  amount = input.required<number>();
+}
+```
+
+### Các trường hay gặp
+
+| Trường metadata | Ý nghĩa | Cần nhớ |
+| --- | --- | --- |
+| `selector` | Tên thẻ HTML đại diện cho component. | Dùng `<app-price-tag>` trong template cha. |
+| `template` | Template viết trực tiếp trong file TypeScript. | Hợp với ví dụ hoặc UI rất nhỏ. |
+| `templateUrl` | Đường dẫn tới file HTML template. | Dễ đọc hơn khi template dài. |
+| `styles` | CSS viết trực tiếp trong metadata. | Hợp với style ngắn. |
+| `styleUrl` | Đường dẫn tới một file CSS. | Dùng cho component có style riêng. |
+| `imports` | Declarable mà **template** được phép dùng. | Thêm component, directive, pipe hoặc NgModule tương thích. |
+| `providers` | Dependency Angular tạo ở injector của component. | Chỉ dùng khi cần scope cục bộ. |
+| `changeDetection` | Chiến lược Angular kiểm tra thay đổi. | Là tối ưu nâng cao, không phải điều kiện của standalone. |
+
+Một component chỉ cần một trong `template` hoặc `templateUrl`. Tương tự, phiên bản Angular hiện đại cho phép `styleUrl`; dự án cũ có thể dùng `styleUrls` với một mảng. Hãy khớp cú pháp với phiên bản Angular của dự án bạn.
+
+### Sơ đồ Angular dựng giao diện
+
+Khi Angular gặp selector của component trong template cha, nó cần ba nhóm thông tin: class nào tạo state, template nào tạo DOM và dependency template nào được phép xuất hiện.
+
+```text
+Template của AppComponent
+        │
+        │ gặp <app-price-tag>
+        ▼
+PriceTagComponent metadata
+├── selector: app-price-tag
+├── templateUrl: price-tag.component.html
+├── imports: [CurrencyPipe]
+└── providers: [...] (nếu có)
+        │
+        ▼
+Angular tạo instance component
+        │
+        ├── inject dependency từ injector gần nhất
+        └── render template với amount()
+```
+
+`imports` không phải danh sách file TypeScript mà class cần chạy. Nó là danh sách các khối xây dựng **có thể xuất hiện trong HTML template**. Phân biệt này sẽ tránh rất nhiều lỗi lúc mới học.
+
+## `imports`: đưa khả năng vào template
+
+Mỗi standalone component có một phạm vi template riêng. Nếu template viết `<app-product-card>`, `routerLink`, `date` hoặc `ngClass`, Angular phải biết symbol tương ứng. Hãy import symbol đó ở đầu file TypeScript và thêm nó vào metadata `imports`.
+
+### Phân biệt import TypeScript và `imports` của component
+
+Hai dòng dưới đây trông giống nhau nhưng phục vụ hai thời điểm khác nhau:
+
+```ts
+import { CurrencyPipe } from '@angular/common'; // TypeScript thấy tên CurrencyPipe
+
+@Component({
+  imports: [CurrencyPipe], // template được phép dùng pipe currency
+  // ...
+})
+export class PriceTagComponent {}
+```
+
+- Câu `import ... from ...` là import của **TypeScript/JavaScript**. Nó cho phép file tham chiếu tới `CurrencyPipe`.
+- Thuộc tính `imports: [...]` là metadata của **Angular template compiler**. Nó đưa `CurrencyPipe` vào phạm vi template.
+
+Một import TypeScript đơn thuần không làm pipe hoạt động trong HTML. Ngược lại, bạn không thể ghi tên một symbol vào metadata nếu TypeScript chưa import tên đó vào file.
+
+### Import directive, pipe và component
+
+Ví dụ bên dưới dùng ba loại dependency phổ biến: một component con, một directive điều hướng và một pipe định dạng tiền.
+
+```ts
+import { Component } from '@angular/core';
+import { CurrencyPipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
+import { ProductCardComponent } from './product-card.component';
+
+@Component({
+  selector: 'app-catalog',
+  imports: [ProductCardComponent, RouterLink, CurrencyPipe],
+  template: `
+    <a routerLink="/cart">Xem giỏ hàng</a>
+    <app-product-card />
+    <p>Từ {{ lowestPrice | currency: 'VND' }}</p>
+  `,
+})
+export class CatalogComponent {
+  lowestPrice = 120_000;
+}
+```
+
+Quy tắc thực hành tốt là import **đúng symbol đang dùng**. Ví dụ, dùng `RouterLink` khi template chỉ có liên kết; dùng `RouterOutlet` khi template có `<router-outlet />`; dùng `CurrencyPipe` khi cần định dạng tiền. Danh sách ngắn giúp dependency của template dễ nhìn hơn.
+
+### Khi nào dùng `CommonModule`
+
+`CommonModule` là một NgModule cũ nhưng vẫn tương thích và hữu ích. Nó export nhiều directive và pipe phổ biến như `NgIf`, `NgFor`, `NgClass`, `AsyncPipe` và `DatePipe`. Bạn có thể import cả module vào standalone component:
+
+```ts
+import { CommonModule } from '@angular/common';
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-status',
+  imports: [CommonModule],
+  template: `
+    <p *ngIf="isOnline" [ngClass]="'status-online'">Đang kết nối</p>
+  `,
+})
+export class StatusComponent {
+  isOnline = true;
+}
+```
+
+Trong Angular mới, control flow dựng sẵn `@if`, `@for` và `@switch` không cần `CommonModule`:
+
+```ts
+@Component({
+  selector: 'app-status',
+  template: `
+    @if (isOnline) {
+      <p>Đang kết nối</p>
+    } @else {
+      <p>Mất kết nối</p>
+    }
+  `,
+})
+export class StatusComponent {
+  isOnline = true;
+}
+```
+
+Nếu chỉ cần một pipe hoặc directive standalone, import trực tiếp symbol đó thường làm ý định rõ hơn. Nếu template dùng nhiều API cũ của `CommonModule`, import `CommonModule` là lựa chọn thực dụng. Không cần chuyển mọi dòng sang import riêng chỉ để tuân theo một quy tắc hình thức.
+
+<Callout type="idea" title="Bắt đầu từ lỗi template">
+  Khi Angular báo không biết một thẻ, directive hay pipe, hãy nhìn đúng token trong template rồi thêm dependency tương ứng vào `imports` của component chứa template đó. Đừng thêm ngẫu nhiên vào root component; phạm vi cần sửa thường là component đang lỗi.
+</Callout>
+
+## `providers`: nơi Angular tạo và tìm dependency
+
+`providers` liên quan tới DI, không liên quan tới việc Angular nhận diện thẻ HTML. Provider là quy tắc cho injector biết phải tạo hoặc trả về giá trị nào khi một class yêu cầu dependency.
+
+Ví dụ, `ProductApi` là service lấy dữ liệu. Khai báo `providedIn: 'root'` làm service có một instance chia sẻ toàn ứng dụng trong injector gốc:
+
+```ts
+import { Injectable } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class ProductApi {
+  list() {
+    return ['Bàn phím', 'Chuột'];
+  }
+}
+```
+
+Component có thể yêu cầu service bằng `inject()`:
+
+```ts
+import { Component, inject } from '@angular/core';
+import { ProductApi } from './product-api.service';
+
+@Component({
+  selector: 'app-catalog',
+  template: `<p>Có {{ products.length }} sản phẩm</p>`,
+})
+export class CatalogComponent {
+  private readonly productApi = inject(ProductApi);
+  products = this.productApi.list();
+}
+```
+
+Ở đây không cần thêm `ProductApi` vào `imports` hay `providers`, vì `providedIn: 'root'` đã đăng ký nó ở injector gốc. `inject()` nói component cần gì; provider quyết định Angular lấy dependency ấy ở đâu.
+
+### Ba phạm vi provider cần nhớ
+
+| Nơi đăng ký | Instance sống ở đâu | Hợp với |
+| --- | --- | --- |
+| `providedIn: 'root'` trên service | Toàn bộ ứng dụng, một instance dùng chung. | API client, auth state, logger, cấu hình chung. |
+| `providers` của `bootstrapApplication` / `app.config.ts` | Injector môi trường của ứng dụng. | Router, HTTP client, animation, provider cấu hình ứng dụng. |
+| `providers` trong `@Component` | Mỗi instance component và cây con của nó có instance riêng. | State hoặc adapter chỉ thuộc một vùng UI độc lập. |
+
+Route cũng có thể khai báo `providers`; khi đó dependency chỉ sống trong route và các route con. Đây là phạm vi hữu ích cho một feature được lazy load, nhưng bạn chưa cần dùng nó cho màn hình nhỏ đầu tiên.
+
+### Chọn đúng phạm vi
+
+Hãy quyết định bằng câu hỏi: **ai cần chia sẻ instance này?**
+
+- Nếu nhiều phần xa nhau trong ứng dụng cần cùng service, dùng `providedIn: 'root'` hoặc provider cấp ứng dụng.
+- Nếu chỉ một feature cần cấu hình hoặc state riêng, cân nhắc route provider.
+- Nếu mỗi `ProductEditorComponent` phải có bộ đệm thay đổi độc lập, đặt provider ở component. Mỗi editor trên trang sẽ nhận một instance riêng.
+
+```ts
+import { Component } from '@angular/core';
+import { DraftService } from './draft.service';
+
+@Component({
+  selector: 'app-product-editor',
+  providers: [DraftService],
+  template: `<!-- biểu mẫu chỉnh sửa -->`,
+})
+export class ProductEditorComponent {}
+```
+
+<Callout type="warn" title="Provider ở component không phải mặc định an toàn">
+  Nếu đặt một service state chung vào `providers` của component, mỗi instance component sẽ có state riêng. Điều này đúng cho một form độc lập, nhưng sai nếu bạn mong hai nơi trên trang cùng thấy một giỏ hàng hoặc cùng phiên đăng nhập.
+</Callout>
+
+## Bootstrap ứng dụng standalone
+
+**Bootstrap** là bước khởi động Angular trong trang HTML. Ứng dụng standalone thường gọi `bootstrapApplication()` và truyền vào root component thay vì bootstrap một `AppModule`.
+
+### `main.ts` khởi động root component
+
+Một dự án Angular mới thường có `src/main.ts` gần như sau:
+
+```ts
+import { bootstrapApplication } from '@angular/platform-browser';
+import { appConfig } from './app/app.config';
+import { AppComponent } from './app/app.component';
+
+bootstrapApplication(AppComponent, appConfig).catch((error) =>
+  console.error(error),
+);
+```
+
+`AppComponent` là điểm bắt đầu của cây UI. Nó phải là standalone để Angular bootstrap trực tiếp:
+
+```ts
+import { Component } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
+
+@Component({
+  selector: 'app-root',
+  imports: [RouterOutlet],
+  template: `<router-outlet />`,
+})
+export class AppComponent {}
+```
+
+### Cấu hình ứng dụng trong `app.config.ts`
+
+Các provider cấp ứng dụng được gom trong `ApplicationConfig`. Ví dụ phổ biến là đăng ký router và HTTP client:
+
+```ts
+import { ApplicationConfig } from '@angular/core';
+import { provideHttpClient } from '@angular/common/http';
+import { provideRouter } from '@angular/router';
+import { routes } from './app.routes';
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(),
+    provideRouter(routes),
+  ],
+};
+```
+
+`provideHttpClient()` làm `HttpClient` có thể được inject trong ứng dụng. `provideRouter(routes)` đăng ký router. Chúng không được đưa vào `imports` của component vì chúng không tạo thẻ, directive hay pipe trong template.
+
+Một số thư viện cũ chỉ cung cấp `NgModule.forRoot(...)`. Trong thời gian chuyển đổi, `importProvidersFrom()` có thể đưa providers của module ấy vào cấu hình ứng dụng. Đây là cầu nối tương thích, không phải lý do để tạo `AppModule` mới.
+
+```ts
+import { ApplicationConfig, importProvidersFrom } from '@angular/core';
+import { LegacyLibraryModule } from 'legacy-library';
+
+export const appConfig: ApplicationConfig = {
+  providers: [importProvidersFrom(LegacyLibraryModule.forRoot())],
+};
+```
+
+### Luồng khởi động
+
+```text
+index.html
+    │
+    ▼
+main.ts
+bootstrapApplication(AppComponent, appConfig)
+    │
+    ├── tạo injector cấp ứng dụng từ appConfig.providers
+    │
+    ├── tạo AppComponent
+    │
+    ▼
+AppComponent template
+    ├── <router-outlet />: router chọn component của URL hiện tại
+    └── component con: Angular render theo imports của từng component
+```
+
+Khi ứng dụng không dùng router, root component có thể render component con trực tiếp. Router không phải điều kiện để dùng standalone; nó chỉ là một cách phổ biến để ghép các màn hình.
+
+## Ví dụ hoàn chỉnh: danh sách sản phẩm
+
+Ví dụ này xây dựng từ trong ra ngoài: component con hiển thị một sản phẩm, root component giữ mảng sản phẩm, cuối cùng `main.ts` khởi động ứng dụng. Ví dụ dùng `input()` để component con nhận dữ liệu; đây là API input hiện đại của Angular.
+
+### Bước 1: component con hiển thị một sản phẩm
+
+Tạo `product-card.component.ts`. Component này chỉ biết cách hiển thị một `Product`; nó không sở hữu danh sách sản phẩm của cả trang.
+
+```ts
+import { Component, input } from '@angular/core';
+import { CurrencyPipe } from '@angular/common';
+
+export interface Product {
+  id: number;
+  name: string;
+  price: number;
+  inStock: boolean;
+}
+
+@Component({
+  selector: 'app-product-card',
+  imports: [CurrencyPipe],
+  template: `
+    <article class="card">
+      <h2>{{ product().name }}</h2>
+      <p>{{ product().price | currency: 'VND' }}</p>
+      @if (product().inStock) {
+        <span>Còn hàng</span>
+      } @else {
+        <span>Hết hàng</span>
+      }
+    </article>
+  `,
+  styles: `
+    .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 16px; }
+  `,
+})
+export class ProductCardComponent {
+  product = input.required<Product>();
+}
+```
+
+`product` là input bắt buộc. Dấu `()` trong `product()` là cách đọc giá trị của input signal. `CurrencyPipe` phải có trong `imports` vì template dùng `| currency`. Ngược lại, `@if` là control flow dựng sẵn nên không cần import thêm.
+
+### Bước 2: root component ghép các card
+
+`AppComponent` import `ProductCardComponent` vì template của nó đặt thẻ `<app-product-card>`. Root component sở hữu mảng `products` vì đây là state của toàn màn hình.
+
+```ts
+import { Component } from '@angular/core';
+import { Product, ProductCardComponent } from './product-card.component';
+
+@Component({
+  selector: 'app-root',
+  imports: [ProductCardComponent],
+  template: `
+    <main>
+      <h1>Sản phẩm nổi bật</h1>
+
+      <section class="grid">
+        @for (item of products; track item.id) {
+          <app-product-card [product]="item" />
+        }
+      </section>
+    </main>
+  `,
+  styles: `
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, 1fr); }
+  `,
+})
+export class AppComponent {
+  products: Product[] = [
+    { id: 1, name: 'Bàn phím cơ', price: 1_290_000, inStock: true },
+    { id: 2, name: 'Chuột không dây', price: 690_000, inStock: false },
+  ];
+}
+```
+
+`@for` lặp qua mảng. Biểu thức `track item.id` cho Angular một định danh ổn định để liên hệ dữ liệu với DOM khi danh sách thay đổi. `ProductCardComponent` không cần biết mảng đến từ API, signal hay giá trị tĩnh; nó chỉ nhận từng `Product` qua binding `[product]="item"`.
+
+### Bước 3: bootstrap ứng dụng
+
+Với ví dụ chưa có router hay HTTP, `main.ts` có thể tối giản:
+
+```ts
+import { bootstrapApplication } from '@angular/platform-browser';
+import { AppComponent } from './app/app.component';
+
+bootstrapApplication(AppComponent).catch((error) => console.error(error));
+```
+
+Không có `AppModule`, `BrowserModule` hay `declarations` nào trong luồng này. Angular nhận root component trực tiếp, sau đó lần theo `imports` ở mỗi template để dựng phần giao diện còn lại.
+
+### Đi theo một lần render
+
+Khi trình duyệt mở ứng dụng, chuỗi sự kiện dễ hình dung như sau:
+
+1. `bootstrapApplication()` tạo `AppComponent`.
+2. Template của `AppComponent` chạy `@for` trên hai phần tử của `products`.
+3. Mỗi vòng lặp tạo một `<app-product-card>` và truyền `item` vào input `product`.
+4. Angular tạo một `ProductCardComponent` cho từng item.
+5. Template card đọc `product()`, rồi `CurrencyPipe` định dạng giá.
+6. `@if` trong card hiển thị nhãn còn hàng hoặc hết hàng.
+
+Nếu sau này thêm nút “Thêm vào giỏ”, card nên phát một sự kiện lên cha. Component cha cập nhật state giỏ hàng. Ranh giới này sẽ được mở rộng trong bài [Giao tiếp giữa component](/docs/component-template/giao-tiep-component).
+
+## Tổ chức mã trong ứng dụng lớn hơn
+
+Standalone làm file component tự chủ hơn, nhưng một ứng dụng lớn vẫn phải có cấu trúc. Hãy đặt file theo **tính năng** và vai trò, không theo danh sách module.
+
+### Tách theo tính năng thay vì gom mọi thứ vào `shared`
+
+Một cách tổ chức đơn giản cho feature catalog:
+
+```text
+src/app/
+├── app.component.ts
+├── app.config.ts
+├── app.routes.ts
+└── features/
+    └── catalog/
+        ├── catalog-page.component.ts
+        ├── product-card.component.ts
+        ├── product-api.service.ts
+        └── catalog.routes.ts
+```
+
+`catalog-page.component.ts` import `ProductCardComponent` vì dùng nó. `ProductApi` có thể `providedIn: 'root'` nếu API client được dùng lại, hoặc được đặt ở route provider nếu state/dịch vụ chỉ thuộc catalog. Không cần tạo `CatalogModule` chỉ để nối các file này.
+
+Hãy thận trọng với thư mục `shared`. Một button, pipe định dạng hoặc layout thật sự dùng ở nhiều feature có thể là shared. Component chỉ tình cờ được dùng lại hai lần trong catalog vẫn nên ở catalog. Đặt đúng chủ sở hữu giúp tránh thư mục chung thành nơi không ai dám sửa.
+
+### Lazy loading với route standalone
+
+Router có thể lazy load trực tiếp một standalone component. Khi người dùng chỉ mở trang `/catalog`, Angular mới tải code của trang catalog:
+
+```ts
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: 'catalog',
+    loadComponent: () =>
+      import('./features/catalog/catalog-page.component').then(
+        (file) => file.CatalogPageComponent,
+      ),
+  },
+];
+```
+
+Điểm quan trọng là `CatalogPageComponent` tự mang `imports` cần cho template của nó. Nếu feature có nhiều route con, bạn có thể lazy load một mảng route bằng `loadChildren`; standalone không loại bỏ lựa chọn đó.
+
+## Chuyển dần từ NgModule sang standalone
+
+Không cần dừng mọi tính năng để viết lại toàn bộ ứng dụng cũ. Angular cho phép hai mô hình tương tác, vì vậy cách ít rủi ro là chuyển theo lát cắt nhỏ và kiểm tra sau mỗi lát cắt.
+
+### Đọc cấu trúc cũ trước khi đổi
+
+Trước khi chuyển một component, hãy trả lời các câu hỏi sau:
+
+- Component đang ở `declarations` của module nào?
+- Template của nó dùng component, directive và pipe nào mà module hiện đang import?
+- Module có export component đó cho feature khác không?
+- Module có provider nào tạo singleton hoặc cấu hình qua `forRoot()` không?
+- Component có phải entry point của router hay bootstrap hiện tại không?
+
+Các câu hỏi này biến việc migration từ “thử xóa module xem có chạy không” thành một danh sách dependency cụ thể. Đặc biệt, đừng vô tình chuyển provider từ phạm vi module sang component nếu bạn chưa muốn thay đổi số lượng instance service.
+
+### Lộ trình chuyển đổi an toàn
+
+1. **Bắt đầu từ leaf component.** Chọn component ít phụ thuộc và không phải root. Nó dễ chuyển, dễ kiểm tra và ít ảnh hưởng route.
+2. **Đổi component thành standalone.** Thêm `standalone: true` nếu phiên bản dự án yêu cầu, rồi chuyển dependency template từ module sang `imports` của component.
+3. **Sửa nơi đang dùng component.** Xóa component khỏi `declarations`. Thêm nó vào `imports` của NgModule hoặc standalone component đang sử dụng nó.
+4. **Chạy test hoặc mở màn hình liên quan.** Lỗi thiếu directive/pipe sẽ xuất hiện đúng khi template được biên dịch hoặc render.
+5. **Lặp lại theo feature.** Chỉ chuyển bootstrap từ `AppModule` sang `bootstrapApplication()` khi root và provider đã được hiểu rõ.
+
+Angular CLI có schematics migration hỗ trợ nhiều phần công việc, nhưng công cụ không thể quyết định ranh giới state hay phạm vi provider thay bạn. Hãy đọc diff do công cụ tạo và kiểm tra từng bước.
+
+### Ví dụ chuyển một component
+
+Trước đây, `OrdersModule` khai báo component và import `CommonModule` cho toàn bộ template trong module:
+
+```ts
+@NgModule({
+  declarations: [OrderBadgeComponent],
+  imports: [CommonModule],
+  exports: [OrderBadgeComponent],
+})
+export class OrdersModule {}
+```
+
+Sau khi chuyển, component tự import pipe/directive template cần. Ví dụ này chỉ dùng `NgClass`, vì vậy import trực tiếp nó thay cho cả module:
+
+```ts
+import { Component } from '@angular/core';
+import { NgClass } from '@angular/common';
+
+@Component({
+  selector: 'app-order-badge',
+  standalone: true,
+  imports: [NgClass],
+  template: `<span [ngClass]="status">{{ status }}</span>`,
+})
+export class OrderBadgeComponent {
+  status = 'pending';
+}
+```
+
+Nếu một `OrdersModule` cũ vẫn dùng badge, module mới import component này:
+
+```ts
+@NgModule({
+  imports: [OrderBadgeComponent],
+  exports: [OrderBadgeComponent],
+})
+export class OrdersModule {}
+```
+
+Sau khi mọi consumer đã là standalone, bạn có thể bỏ phần module chỉ làm nhiệm vụ bọc lại. Tuy nhiên, chỉ xóa module khi không còn route, provider hoặc consumer nào cần nó.
+
+## Trade-off và các quyết định thực tế
+
+Standalone là mặc định tốt cho ứng dụng mới, nhưng không phải một phép tối ưu tự động cho mọi vấn đề kiến trúc. Hiểu mặt đổi chác giúp bạn dùng nó đúng mục đích.
+
+### Điểm mạnh
+
+- **Đường học ngắn hơn:** tạo một component rồi dùng nó ngay, không cần học `declarations`, `exports` và `bootstrap` của module trước.
+- **Dependency template rõ:** file component cho thấy gần như toàn bộ UI API nó dùng.
+- **Lazy loading trực tiếp:** router có thể tải một component hoặc route độc lập.
+- **Migration tăng dần:** standalone và NgModule tương thích trong thời gian chuyển đổi.
+- **Ranh giới feature tự nhiên:** dependency UI đi theo component/route thay vì bị gom vào một module rất lớn.
+
+### Điều standalone không tự giải quyết
+
+Standalone không tự làm component nhỏ hơn, state tốt hơn hay bundle nhỏ hơn nếu bạn vẫn import dependency không cần thiết. Nó cũng không thay service, router, forms hay quy tắc giao tiếp giữa cha và con.
+
+Ví dụ, một `DashboardComponent` standalone với 2.000 dòng template và 30 dependency vẫn khó bảo trì. Cách xử lý là tách component theo trách nhiệm UI và giữ state hợp lý, không phải thêm một `DashboardModule` trở lại.
+
+Tương tự, `providers` ở component không thay thế kiến trúc state. Trước khi tạo provider mới, hãy xác định state được chia sẻ bởi ai và khi nào cần bị hủy. Câu trả lời quyết định scope, không phải việc component có standalone hay không.
+
+### Khi nào vẫn gặp NgModule
+
+Bạn vẫn có thể gặp NgModule trong các trường hợp sau:
+
+- Ứng dụng được tạo bằng Angular cũ và chưa migration.
+- Thư viện bên thứ ba chưa có API standalone hoặc `provide...()` tương đương.
+- Một feature đang được chuyển đổi dần nên phải tương thích với phần còn lại.
+- Tài liệu hoặc ví dụ cũ dùng `declarations`, `exports`, `forRoot()` và `AppModule`.
+
+Không cần né NgModule bằng mọi giá. Với mã mới do bạn kiểm soát, ưu tiên standalone. Với mã cũ hoặc thư viện cũ, dùng lớp tương thích nhỏ, hiểu rõ và có kế hoạch thay thế nếu nó gây cản trở.
+
+## Lỗi phổ biến và cách gỡ
+
+Khi mới dùng standalone, đa số lỗi xuất phát từ nhầm phạm vi template với phạm vi DI. Bắt đầu từ thông báo lỗi và phần template/component được nêu trong stack trace, thay vì sửa ở root component theo thói quen.
+
+### Không nhận ra component, directive hoặc pipe
+
+**Dấu hiệu:** Angular báo thẻ không phải phần tử đã biết, không biết property như `routerLink`/`ngClass`, hoặc không tìm thấy pipe như `currency`.
+
+**Nguyên nhân:** dependency có import TypeScript nhưng thiếu trong metadata `imports`, hoặc được thêm vào nhầm component khác.
+
+**Cách sửa:** thêm symbol đúng vào component chứa template lỗi.
+
+```ts
+import { CurrencyPipe, NgClass } from '@angular/common';
+import { RouterLink } from '@angular/router';
+
+@Component({
+  imports: [CurrencyPipe, NgClass, RouterLink],
+  // template dùng | currency, [ngClass] và routerLink
+})
+export class CheckoutComponent {}
+```
+
+Nếu template dùng component con, import class component con. Nếu component con chưa standalone mà thuộc NgModule, import NgModule export nó. Với dự án Angular mới, kiểm tra trước xem bạn có thể chuyển component con sang standalone hay không.
+
+### Đặt provider sai phạm vi
+
+**Dấu hiệu:** hai component đáng lẽ chia sẻ giỏ hàng nhưng lại có dữ liệu khác nhau; hoặc state form đáng lẽ tách riêng lại ảnh hưởng lẫn nhau.
+
+**Nguyên nhân:** service được thêm vào `providers` của component dù bạn muốn singleton toàn ứng dụng, hoặc ngược lại.
+
+**Cách sửa:** di chuyển provider theo chủ sở hữu state. Giỏ hàng chung thường dùng `providedIn: 'root'`. Draft của mỗi form thường đặt ở component hoặc route scope. Viết một kiểm tra đơn giản: render hai instance component, thay đổi state một bên và quan sát bên còn lại. Kết quả phải khớp với ý định chia sẻ của bạn.
+
+### Bootstrap nhầm component hoặc quên provider
+
+**Dấu hiệu:** ứng dụng không khởi động, route không hoạt động, hoặc inject `HttpClient` báo không có provider.
+
+**Nguyên nhân:** `bootstrapApplication()` nhận nhầm component, root component không standalone, hoặc `appConfig.providers` thiếu `provideRouter()`/`provideHttpClient()`.
+
+**Cách sửa:** kiểm tra theo thứ tự sau:
+
+1. `main.ts` import đúng `AppComponent` và gọi `bootstrapApplication(AppComponent, appConfig)`.
+2. `AppComponent` có metadata component hợp lệ và là standalone theo phiên bản Angular hiện dùng.
+3. `app.config.ts` đăng ký các provider hạ tầng mà ứng dụng inject.
+4. `AppComponent` import `RouterOutlet` nếu template dùng `<router-outlet />`.
+
+### Nhầm `imports` với `providers`
+
+**Dấu hiệu:** thêm `HttpClient` vào `imports` nhưng vẫn không inject được; hoặc thêm `RouterLink` vào `providers` nhưng template vẫn báo lỗi.
+
+**Nguyên nhân:** `imports` dành cho component/directive/pipe trong template. `providers` dành cho DI token, service hoặc hàm `provide...()`.
+
+**Cách nhớ nhanh:** nếu bạn đang đặt một thẻ, directive hoặc pipe trong HTML, nghĩ đến `imports`. Nếu class gọi `inject(...)` hoặc constructor yêu cầu một dependency, nghĩ đến provider.
+
+| Bạn cần làm gì? | Nơi thường đặt |
+| --- | --- |
+| Dùng `<app-product-card>` | `imports: [ProductCardComponent]` của component cha |
+| Dùng `routerLink` | `imports: [RouterLink]` của component chứa thẻ link |
+| Dùng `HttpClient` trong service | `provideHttpClient()` ở app config |
+| Có giỏ hàng dùng chung | `@Injectable({ providedIn: 'root' })` |
+| Có draft riêng cho mỗi editor | `providers: [DraftService]` của editor |
+
+### Dùng lại thói quen NgModule không phù hợp
+
+**Dấu hiệu:** tạo một `SharedModule` khổng lồ chỉ để export mọi directive/pipe; thêm `BrowserModule` vào `imports` của mỗi standalone component; hoặc đưa standalone component vào `declarations`.
+
+**Cách sửa:**
+
+- Import component, directive và pipe ngay tại component dùng chúng.
+- Chỉ import `CommonModule` khi nó thực sự tiện hơn nhiều import riêng.
+- Với bootstrap standalone, dùng `bootstrapApplication()`; không import `BrowserModule` vào component.
+- Khi NgModule cần dùng standalone component, thêm nó vào `imports`, không phải `declarations`.
+
+<Callout type="idea" title="Quy trình gỡ lỗi ngắn">
+  Xác định lỗi xảy ra ở template hay khi inject dependency. Template lỗi: kiểm tra `imports` của đúng component. Inject lỗi: kiểm tra provider và scope. Hai nhánh này giải quyết phần lớn lỗi standalone cơ bản.
+</Callout>
+
+## Danh sách kiểm tra trước khi hoàn thành
+
+Trước khi xem một standalone component là xong, hãy tự rà soát:
+
+- [ ] Component có `selector`, `template` hoặc `templateUrl` rõ ràng.
+- [ ] Mọi component, directive và pipe được template dùng đều có trong `imports` của đúng component.
+- [ ] Không có standalone component nào nằm trong `declarations` của NgModule.
+- [ ] Provider được đặt theo phạm vi chia sẻ state mong muốn.
+- [ ] Root component được bootstrap bằng `bootstrapApplication()` nếu ứng dụng theo mô hình standalone.
+- [ ] Router, HTTP và provider hạ tầng được đăng ký trong `app.config.ts` khi cần.
+- [ ] Component con không tự sở hữu state vốn thuộc cả trang; nó nhận input và báo sự kiện lên cha.
+- [ ] Bạn đã mở màn hình hoặc chạy test liên quan sau khi đổi `imports`/`providers`.
+
+## Tóm tắt
+
+Standalone component là cách Angular hiện đại tổ chức giao diện mà không cần `NgModule` làm nơi khai báo bắt buộc. Mỗi component mang `imports` cho những thứ template sử dụng; `providers` vẫn thuộc hệ thống DI và phải được chọn theo phạm vi chia sẻ dependency.
+
+Luồng cốt lõi cần nhớ là: `main.ts` gọi `bootstrapApplication()` → Angular tạo root component và injector cấp ứng dụng → template của mỗi component dùng đúng dependency trong `imports` → component con nhận dữ liệu từ cha. Bắt đầu với component nhỏ, import đúng symbol, rồi chỉ mở rộng provider khi bạn hiểu state cần được chia sẻ ở đâu.
+
+<Cards>
+  <Card title="Data binding" href="/docs/component-template/data-binding" description="Đưa state ra template và nhận thao tác từ người dùng." />
+  <Card title="Control flow" href="/docs/component-template/control-flow" description="Dùng @if, @for và @switch để biểu diễn các trạng thái UI." />
+  <Card title="Giao tiếp giữa component" href="/docs/component-template/giao-tiep-component" description="Truyền input, phát output và giữ ranh giới cha-con rõ ràng." />
+</Cards>

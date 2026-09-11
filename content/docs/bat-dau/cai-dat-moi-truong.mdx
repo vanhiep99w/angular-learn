@@ -1,10 +1,174 @@
 ---
 title: Cài đặt môi trường
-description: Chuẩn bị Node.js, package manager, trình soạn thảo và trình duyệt.
+description: Chuẩn bị Node.js, package manager, trình soạn thảo và trình duyệt để bắt đầu phát triển Angular.
 ---
 
-Trang này sẽ trình bày **Cài đặt môi trường** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu">
+  Sau trang này, bạn có thể kiểm tra Node.js và npm, chọn cách dùng Angular CLI phù hợp, rồi sẵn sàng tạo ứng dụng Angular đầu tiên.
 </Callout>
+
+## Mục lục
+
+- [Yêu cầu tối thiểu](#yêu-cầu-tối-thiểu)
+  - [Hệ điều hành và trình duyệt](#hệ-điều-hành-và-trình-duyệt)
+  - [Node.js và package manager](#nodejs-và-package-manager)
+- [Cài Node.js](#cài-nodejs)
+  - [Chọn phiên bản Node.js](#chọn-phiên-bản-nodejs)
+  - [Kiểm tra sau khi cài](#kiểm-tra-sau-khi-cài)
+- [Chọn package manager](#chọn-package-manager)
+- [Dùng Angular CLI](#dùng-angular-cli)
+  - [Cách khuyến nghị: chạy CLI qua npx](#cách-khuyến-nghị-chạy-cli-qua-npx)
+  - [Cài CLI toàn cục khi cần](#cài-cli-toàn-cục-khi-cần)
+- [Chuẩn bị trình soạn thảo và công cụ trình duyệt](#chuẩn-bị-trình-soạn-thảo-và-công-cụ-trình-duyệt)
+- [Kiểm tra môi trường trước khi tạo dự án](#kiểm-tra-môi-trường-trước-khi-tạo-dự-án)
+- [Lỗi thiết lập thường gặp](#lỗi-thiết-lập-thường-gặp)
+- [Bước tiếp theo](#bước-tiếp-theo)
+
+## Yêu cầu tối thiểu
+
+Một dự án Angular hiện đại cần **Node.js** để chạy công cụ phát triển và **package manager** để tải các thư viện. Mã Angular sau khi build sẽ chạy trong trình duyệt; Node.js không phải là runtime của ứng dụng phía người dùng.
+
+### Hệ điều hành và trình duyệt
+
+Bạn có thể phát triển Angular trên Windows, macOS hoặc Linux. Hãy dùng một phiên bản trình duyệt còn được cập nhật, chẳng hạn Chrome, Edge, Firefox hoặc Safari, để chạy và kiểm tra ứng dụng.
+
+Trình duyệt dùng để phát triển không quyết định hoàn toàn trình duyệt mà sản phẩm hỗ trợ. Danh sách trình duyệt đích của mỗi workspace được cấu hình riêng. Khi bắt đầu học, một trình duyệt hiện đại là đủ.
+
+### Node.js và package manager
+
+Bản cài Node.js chính thức đi kèm **npm**. npm vừa là package manager vừa là công cụ chạy script, ví dụ `npm install` và `npm start`. Vì vậy, cài Node.js LTS là cách ngắn nhất để có môi trường hoạt động.
+
+<Callout type="idea" title="Chọn một package manager cho mỗi dự án">
+  npm, pnpm và Yarn đều có thể làm việc với Angular. Tuy nhiên, một workspace nên giữ một lockfile duy nhất, chẳng hạn `package-lock.json` của npm hoặc `pnpm-lock.yaml` của pnpm, để mọi máy cài cùng một tập phiên bản phụ thuộc.
+</Callout>
+
+## Cài Node.js
+
+### Chọn phiên bản Node.js
+
+Tải bản **LTS** từ [nodejs.org](https://nodejs.org/). LTS là nhánh được hỗ trợ dài hạn, phù hợp cho việc học và hầu hết dự án. Không nên chọn phiên bản Current chỉ vì số phiên bản lớn hơn.
+
+Mỗi major version Angular chỉ hỗ trợ một số khoảng phiên bản Node.js nhất định. Trước khi nâng cấp Angular hoặc Node.js cho một dự án có sẵn, đối chiếu với [bảng tương thích phiên bản Angular](https://angular.dev/reference/versions). Điều này quan trọng hơn việc dùng bản Node.js mới nhất.
+
+Nếu bạn thường xuyên làm nhiều dự án cần các phiên bản Node.js khác nhau, có thể dùng một trình quản lý phiên bản như `nvm`, `fnm` hoặc công cụ tương đương của hệ điều hành. Với người mới, trình cài đặt LTS chính thức là lựa chọn đơn giản nhất.
+
+### Kiểm tra sau khi cài
+
+Đóng rồi mở lại terminal để biến môi trường `PATH` được nạp lại, sau đó chạy:
+
+```bash
+node --version
+npm --version
+```
+
+Cả hai lệnh phải in ra một số phiên bản. Ví dụ, `node --version` có thể trả về `v22.x.x`; con số thực tế tùy bản LTS đang cài. Nếu terminal báo không tìm thấy lệnh, xem phần [Lỗi thiết lập thường gặp](#lỗi-thiết-lập-thường-gặp).
+
+## Chọn package manager
+
+Bắt đầu với npm là đủ vì nó đã có sẵn cùng Node.js. Trong thư mục dự án, các lệnh thường dùng là:
+
+```bash
+npm install
+npm run start
+npm run build
+```
+
+Bạn có thể chọn pnpm hoặc Yarn nếu nhóm đang dùng chúng. Hãy làm theo lockfile và hướng dẫn của repository thay vì cài cùng một dependency bằng nhiều công cụ khác nhau.
+
+| Công cụ | Khi nên dùng | Lockfile phổ biến |
+| --- | --- | --- |
+| npm | Học Angular, dự án mới, hoặc repository có `package-lock.json` | `package-lock.json` |
+| pnpm | Nhóm đã chuẩn hóa pnpm hoặc muốn dùng kho package dùng chung | `pnpm-lock.yaml` |
+| Yarn | Repository đã chọn Yarn | `yarn.lock` |
+
+<Callout type="warn" title="Không trộn lockfile">
+  Không chạy `npm install` trong dự án chỉ có `pnpm-lock.yaml` hoặc `yarn.lock` nếu chưa có quyết định của nhóm. Thao tác đó có thể tạo lockfile thứ hai và làm thay đổi phiên bản dependency ngoài ý muốn.
+</Callout>
+
+## Dùng Angular CLI
+
+Angular CLI là bộ công cụ dòng lệnh để tạo workspace, chạy development server, sinh mã và build ứng dụng. Bạn không bắt buộc phải cài CLI toàn cục.
+
+### Cách khuyến nghị: chạy CLI qua npx
+
+Khi tạo một ứng dụng mới, chạy đúng package CLI bằng `npx`:
+
+```bash
+npx @angular/cli@latest new ten-ung-dung
+```
+
+Lệnh này tải và chạy Angular CLI cho lần tạo dự án. Sau khi workspace được tạo, `@angular/cli` trở thành dependency phát triển của chính workspace. Từ trong thư mục đó, ưu tiên các script trong `package.json`, chẳng hạn:
+
+```bash
+npm start
+```
+
+Hoặc gọi CLI cục bộ của workspace:
+
+```bash
+npx ng version
+```
+
+Cách này giúp phiên bản CLI bám theo phiên bản Angular của dự án, thay vì phụ thuộc vào một CLI toàn cục có thể đã cũ.
+
+### Cài CLI toàn cục khi cần
+
+Nếu bạn muốn gọi `ng` trực tiếp từ mọi thư mục, cài CLI toàn cục:
+
+```bash
+npm install -g @angular/cli
+ng version
+```
+
+CLI toàn cục tiện cho việc khám phá lệnh. Tuy vậy, khi làm trong một workspace, CLI cục bộ vẫn là lựa chọn an toàn hơn. Nếu `ng version` hiển thị khác biệt giữa global và local, hãy ưu tiên local khi chạy lệnh cho dự án đó.
+
+## Chuẩn bị trình soạn thảo và công cụ trình duyệt
+
+**Visual Studio Code** là lựa chọn phổ biến vì có TypeScript tích hợp tốt. Cài extension **Angular Language Service** để nhận gợi ý, kiểm tra kiểu và điều hướng trong template Angular.
+
+Mở DevTools của Chrome hoặc Edge để xem lỗi console, Network và hiệu năng trang. Sau này, [Angular DevTools](https://angular.dev/tools/devtools) giúp quan sát component tree và profiler của ứng dụng Angular trong trình duyệt tương thích.
+
+<Callout type="info" title="Git là công cụ nên có">
+  Git không bắt buộc để chạy Angular, nhưng nên cài trước khi tạo dự án thật. Nó giúp lưu lịch sử thay đổi và làm việc với repository của nhóm. Kiểm tra bằng lệnh `git --version`.
+</Callout>
+
+## Kiểm tra môi trường trước khi tạo dự án
+
+Chạy các lệnh sau trong terminal. Lệnh CLI cuối cùng không bắt buộc nếu bạn dự định dùng `npx` để tạo ứng dụng ở bước tiếp theo.
+
+```bash
+node --version
+npm --version
+git --version
+ng version
+```
+
+Bạn đã sẵn sàng khi:
+
+- `node` và `npm` in ra phiên bản hợp lệ.
+- Terminal có thể tìm thấy `git` nếu bạn dùng Git.
+- `ng version` chạy được nếu đã cài Angular CLI toàn cục; nếu chưa cài, đây không phải lỗi chặn.
+- Trình soạn thảo mở được terminal tích hợp và trình duyệt mở được DevTools.
+
+## Lỗi thiết lập thường gặp
+
+### `node`, `npm` hoặc `ng` không được nhận diện
+
+Đóng mọi cửa sổ terminal rồi mở lại. Trên Windows, nếu vẫn lỗi, kiểm tra biến môi trường `PATH` có thư mục cài Node.js hay không. Với `ng`, hãy cài lại CLI toàn cục hoặc bỏ qua lệnh `ng` và dùng `npx @angular/cli@latest` khi tạo dự án.
+
+### Lỗi quyền khi cài package toàn cục
+
+Không nên mặc định chạy terminal với quyền quản trị chỉ để cài package. Hãy kiểm tra cấu hình thư mục global của npm hoặc dùng `npx` để tránh nhu cầu cài Angular CLI toàn cục. Nếu công ty quản lý máy, chính sách bảo mật có thể giới hạn thao tác này; hãy dùng cấu hình được đội ngũ hỗ trợ.
+
+### Phiên bản Node.js không tương thích
+
+Đừng đoán nguyên nhân dựa trên một thông báo lỗi duy nhất. Kiểm tra phiên bản hiện tại bằng `node --version`, xác định major version Angular của workspace, rồi so sánh với [bảng tương thích chính thức](https://angular.dev/reference/versions). Sau đó chuyển sang phiên bản Node.js được hỗ trợ và chạy lại lệnh cài dependency.
+
+## Bước tiếp theo
+
+Môi trường đã sẵn sàng; tiếp theo hãy tìm hiểu các lệnh quan trọng của CLI trước khi tạo ứng dụng đầu tiên.
+
+<Cards>
+  <Card title="Angular CLI" href="/docs/bat-dau/angular-cli" description="Tạo, chạy và quản lý workspace bằng các lệnh CLI." />
+  <Card title="Ứng dụng đầu tiên" href="/docs/bat-dau/ung-dung-dau-tien" description="Tạo và chạy ứng dụng Angular tối giản." />
+</Cards>

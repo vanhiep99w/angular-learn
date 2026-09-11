@@ -1,10 +1,496 @@
 ---
 title: DOM và template
-description: Mối quan hệ giữa DOM trình duyệt, template và quá trình render.
+description: Hiểu cách Angular dùng template để biến trạng thái thành DOM, xử lý sự kiện và cập nhật giao diện một cách có kiểm soát.
 ---
 
-Trang này sẽ trình bày **DOM và template** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
+DOM là nơi giao diện thật sự tồn tại trong trình duyệt; template là bản mô tả để Angular tạo và cập nhật giao diện đó. Phân biệt hai khái niệm này giúp bạn biết nên thay đổi **trạng thái nào** thay vì tìm và sửa từng thẻ HTML.
 
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu">
+  Sau bài này, bạn có thể lần theo luồng <code>state → template → DOM</code>, chọn đúng loại binding và nhận ra khi nào thao tác DOM trực tiếp là một dấu hiệu cần xem lại thiết kế.
 </Callout>
+
+## Mục lục
+
+- [DOM là gì?](#dom-là-gì)
+  - [Cây đối tượng mà trình duyệt đang quản lý](#cây-đối-tượng-mà-trình-duyệt-đang-quản-lý)
+  - [HTML nguồn và DOM đang chạy không luôn giống nhau](#html-nguồn-và-dom-đang-chạy-không-luôn-giống-nhau)
+- [Template Angular là gì?](#template-angular-là-gì)
+  - [Component sở hữu trạng thái, template mô tả giao diện](#component-sở-hữu-trạng-thái-template-mô-tả-giao-diện)
+  - [Template không phải chuỗi HTML tĩnh](#template-không-phải-chuỗi-html-tĩnh)
+- [Vì sao không nên thao tác DOM trực tiếp?](#vì-sao-không-nên-thao-tác-dom-trực-tiếp)
+  - [Hai nguồn sự thật tạo ra lỗi khó đoán](#hai-nguồn-sự-thật-tạo-ra-lỗi-khó-đoán)
+  - [Tính di động, kiểm thử và vòng đời](#tính-di-động-kiểm-thử-và-vòng-đời)
+- [Angular render và binding như thế nào?](#angular-render-và-binding-như-thế-nào)
+  - [Lần render đầu tiên](#lần-render-đầu-tiên)
+  - [Khi trạng thái thay đổi](#khi-trạng-thái-thay-đổi)
+  - [Các loại binding cần phân biệt](#các-loại-binding-cần-phân-biệt)
+- [Ví dụ hoàn chỉnh: thẻ hồ sơ tương tác](#ví-dụ-hoàn-chỉnh-thẻ-hồ-sơ-tương-tác)
+  - [Component: giữ trạng thái và xử lý ý định](#component-giữ-trạng-thái-và-xử-lý-ý-định)
+  - [Template: khai báo DOM mong muốn](#template-khai-báo-dom-mong-muốn)
+  - [Lần theo một cú nhấp](#lần-theo-một-cú-nhấp)
+- [Điều kiện và danh sách: để template quyết định cấu trúc](#điều-kiện-và-danh-sách-để-template-quyết-định-cấu-trúc)
+- [Lỗi phổ biến và điểm đánh đổi](#lỗi-phổ-biến-và-điểm-đánh-đổi)
+  - [Sửa DOM rồi chờ Angular giữ nguyên](#sửa-dom-rồi-chờ-angular-giữ-nguyên)
+  - [Nhầm interpolation, property và attribute](#nhầm-interpolation-property-và-attribute)
+  - [Dùng hai chiều khi một chiều đã đủ](#dùng-hai-chiều-khi-một-chiều-đã-đủ)
+  - [Chèn HTML không tin cậy](#chèn-html-không-tin-cậy)
+  - [Tối ưu quá sớm hoặc render quá nhiều](#tối-ưu-quá-sớm-hoặc-render-quá-nhiều)
+- [Khi nào được phép chạm vào DOM?](#khi-nào-được-phép-chạm-vào-dom)
+- [Tóm tắt và tự kiểm tra](#tóm-tắt-và-tự-kiểm-tra)
+- [Bước tiếp theo](#bước-tiếp-theo)
+
+## DOM là gì?
+
+**DOM** (*Document Object Model*) là mô hình đối tượng mà trình duyệt tạo ra để biểu diễn tài liệu đang hiển thị. Mỗi phần tử HTML, thuộc tính và đoạn văn bản trở thành một node trong một cây. JavaScript có thể đọc hoặc thay đổi cây này qua các API như `document.querySelector()`, `element.textContent` và `element.classList`.
+
+### Cây đối tượng mà trình duyệt đang quản lý
+
+Từ HTML sau:
+
+```html
+<main>
+  <h1>Chào An</h1>
+  <button disabled>Theo dõi</button>
+</main>
+```
+
+trình duyệt có thể biểu diễn giao diện bằng mô hình đơn giản sau:
+
+```text
+Document
+└── main
+    ├── h1
+    │   └── #text: "Chào An"
+    └── button
+        ├── disabled: true
+        └── #text: "Theo dõi"
+```
+
+Node `button` không chỉ là một dòng chữ trong tệp HTML. Nó là một object đang sống trong bộ nhớ của trang, có property `disabled`, danh sách class, event listener và trạng thái do trình duyệt quản lý. Khi DOM đổi, trình duyệt có thể phải tính lại bố cục (*layout*) và vẽ lại một phần giao diện (*paint*).
+
+### HTML nguồn và DOM đang chạy không luôn giống nhau
+
+HTML trong tệp ban đầu là **đầu vào**. DOM trong tab trình duyệt là **trạng thái hiện tại** sau khi trình duyệt phân tích HTML và sau khi mã JavaScript đã chạy. Ví dụ, người dùng nhập vào một ô `input`: giá trị hiện tại của phần tử là property `input.value`; nội dung attribute `value` ban đầu trong HTML có thể không đổi.
+
+Điểm này quan trọng vì Angular làm việc để giữ DOM khớp với trạng thái ứng dụng. Đừng xem DOM như một bản HTML bất biến, cũng đừng xem HTML nguồn là nơi duy nhất quyết định những gì người dùng đang thấy.
+
+## Template Angular là gì?
+
+Template là phần khai báo giao diện của một component. Nó trông gần HTML, nhưng Angular đọc thêm các cú pháp như `{{ name }}`, `[disabled]`, `(click)` và `@if`. Khi biên dịch ứng dụng, Angular hiểu các cú pháp này như các chỉ dẫn để tạo node, gắn dữ liệu và lắng nghe sự kiện.
+
+### Component sở hữu trạng thái, template mô tả giao diện
+
+Một component thường chia trách nhiệm thành hai nửa:
+
+| Phần | Trách nhiệm chính | Ví dụ |
+| --- | --- | --- |
+| Lớp component | Giữ trạng thái, nhận dữ liệu, thực hiện hành động | `isFollowing`, `toggleFollow()` |
+| Template | Mô tả giao diện phải trông ra sao với trạng thái hiện tại | Nút hiện `Theo dõi` hay `Đang theo dõi` |
+
+Mô hình tinh thần hữu ích là:
+
+```text
+Người dùng / API
+       │ tạo hoặc thay đổi
+       ▼
+Trạng thái của component
+       │ được template đọc
+       ▼
+Angular render và cập nhật
+       ▼
+DOM thật trong trình duyệt
+       │
+       ▼
+Giao diện người dùng nhìn thấy
+```
+
+Template không thay thế DOM. Nó là mô tả có quy tắc để Angular tạo và đồng bộ DOM. DOM vẫn là thứ trình duyệt dùng để hiển thị và nhận sự kiện.
+
+### Template không phải chuỗi HTML tĩnh
+
+Trong HTML thuần, muốn đổi nhãn nút, bạn thường tìm phần tử rồi sửa nó:
+
+```ts
+const button = document.querySelector('#follow-button');
+button?.textContent = 'Đang theo dõi';
+```
+
+Trong Angular, template mô tả **kết quả** cần có, còn component thay đổi trạng thái:
+
+```html
+<button>{{ isFollowing() ? 'Đang theo dõi' : 'Theo dõi' }}</button>
+```
+
+```ts
+isFollowing.set(true);
+```
+
+Angular đọc lại phần template phụ thuộc vào `isFollowing()` và làm DOM hiển thị `Đang theo dõi`. Bạn không cần tự tìm nút hay tự nhớ phải thay text, class và attribute nào. Cách khai báo này không có nghĩa Angular thay toàn bộ trang bằng một chuỗi HTML sau mỗi lần thay đổi; framework tạo và cập nhật các node DOM cần thiết theo template.
+
+## Vì sao không nên thao tác DOM trực tiếp?
+
+Thao tác DOM trực tiếp không luôn bị cấm. Nó cần thiết cho một vài API của trình duyệt hoặc thư viện bên thứ ba. Tuy nhiên, đối với giao diện thông thường, thay đổi state rồi để template phản ánh state là đường đi mặc định an toàn hơn.
+
+### Hai nguồn sự thật tạo ra lỗi khó đoán
+
+Hãy xét component có template sau:
+
+```html
+<button [class.following]="isFollowing()">
+  {{ isFollowing() ? 'Đang theo dõi' : 'Theo dõi' }}
+</button>
+```
+
+Nếu một hàm khác làm việc này:
+
+```ts
+this.button.nativeElement.classList.add('following');
+```
+
+thì state vẫn có thể là `false`, trong khi DOM đã có class `following`. Bây giờ ứng dụng có hai câu trả lời mâu thuẫn cho câu hỏi “người dùng đã theo dõi chưa?”:
+
+- `isFollowing()` nói **chưa**.
+- DOM lại trông như **rồi**.
+
+Trong lần cập nhật kế tiếp, Angular được quyền áp dụng lại kết quả của template từ `isFollowing()`. Class bạn tự thêm có thể biến mất. Lỗi thường xuất hiện không phải ngay lúc thêm class, mà sau một sự kiện khác, dữ liệu API trả về hoặc component được render lại.
+
+<Callout type="warn" title="Quy tắc một nguồn sự thật">
+  Không lưu trạng thái giao diện chỉ trong DOM. Nếu một nút đang mở, đang tải, bị vô hiệu hoá hoặc được chọn, hãy biểu diễn điều đó bằng state của component và bind state vào template.
+</Callout>
+
+### Tính di động, kiểm thử và vòng đời
+
+Khi code gọi `document` hoặc giả định luôn có một phần tử trong trang, nó bị buộc chặt vào môi trường trình duyệt và thời điểm DOM đã tồn tại. Điều này gây khó khăn trong các tình huống sau:
+
+- **Server-side rendering (SSR):** lúc render trên server, API DOM của trình duyệt không có sẵn.
+- **Hydration:** Angular có thể nối ứng dụng phía client vào HTML đã render từ server. DOM bị sửa sớm hoặc sai thời điểm làm quá trình khớp cấu trúc kém tin cậy.
+- **Kiểm thử:** logic phụ thuộc selector toàn cục như `document.querySelector('.save')` khó cô lập hơn logic chỉ thay đổi state.
+- **Vòng đời component:** selector toàn cục có thể lấy nhầm phần tử của component khác; phần tử cũng có thể chưa được tạo, đã bị `@if` gỡ đi hoặc đã bị huỷ.
+
+Nói ngắn gọn: hãy để template sở hữu **cấu trúc và trạng thái hiển thị**. Chỉ dùng API DOM ở rìa giao tiếp với trình duyệt, sau khi đã cân nhắc vòng đời và SSR.
+
+## Angular render và binding như thế nào?
+
+**Render** là quá trình Angular tạo DOM từ template, rồi giữ DOM phù hợp với dữ liệu mà template đọc. **Binding** là cầu nối có hướng giữa biểu thức template và DOM, hoặc giữa DOM event và code component.
+
+### Lần render đầu tiên
+
+Khi Angular tạo một component, framework khởi tạo instance của lớp component, đánh giá template với state hiện tại và tạo các node DOM tương ứng. Nếu template có `{{ user().name }}`, Angular lấy giá trị hiện tại của signal `user` để đặt text node.
+
+```text
+1. Tạo component và state ban đầu
+2. Đọc template, tạo các phần tử/text node cần có
+3. Đánh giá các binding: text, property, attribute, class, style
+4. Gắn listener cho các event như click hoặc input
+5. Chèn DOM kết quả vào vị trí component trong trang
+```
+
+Các bước là mô hình khái niệm. Chi tiết nội bộ có thể khác theo phiên bản Angular và chế độ render, nhưng trách nhiệm không đổi: template mô tả, Angular đồng bộ, trình duyệt hiển thị.
+
+### Khi trạng thái thay đổi
+
+Sau lần render đầu, Angular cần biết phần nào phải được kiểm tra lại. Với signal, Angular theo dõi nơi template đã đọc signal đó. Khi signal thay đổi, Angular lên lịch cập nhật phần giao diện phụ thuộc vào nó. Với các luồng thay đổi khác, Angular cũng có cơ chế phát hiện thay đổi để kiểm tra template theo cấu hình ứng dụng.
+
+Luồng của một event đơn giản thường là:
+
+```text
+click trên DOM
+     │
+     ▼
+(click) gọi phương thức component
+     │
+     ▼
+phương thức đổi state, ví dụ signal.set(...)
+     │
+     ▼
+Angular cập nhật binding phụ thuộc vào state đó
+     │
+     ▼
+DOM đổi text / property / class / cấu trúc cần thiết
+```
+
+Điều quan trọng là **event không tự sửa giao diện**. Event gọi code của bạn; code thay đổi state; template là nơi nói giao diện cần trở thành gì.
+
+### Các loại binding cần phân biệt
+
+| Loại | Cú pháp | Hướng dữ liệu | Dùng khi |
+| --- | --- | --- | --- |
+| Interpolation | `{{ expression }}` | Component → text | Hiển thị văn bản hoặc giá trị được chuyển thành chuỗi |
+| Property binding | `[disabled]="expression"` | Component → property DOM/directive | Điều khiển property như `disabled`, `value`, `checked` |
+| Attribute binding | `[attr.aria-label]="expression"` | Component → HTML attribute | Đặt attribute không có property phù hợp, nhất là `aria-*`, `data-*` |
+| Class/style binding | `[class.active]="expression"`, `[style.width.px]="size"` | Component → presentation | Thêm/bỏ class hoặc style theo state |
+| Event binding | `(click)="save()"` | DOM → component | Phản hồi hành động của người dùng |
+| Two-way binding | `[(ngModel)]="name"` | Hai chiều | Form đơn giản khi sự đồng bộ hai chiều thực sự rõ ràng |
+
+**Interpolation** phù hợp để hiển thị text. Angular chuyển kết quả biểu thức thành chuỗi:
+
+```html
+<p>Xin chào, {{ user().name }}.</p>
+```
+
+**Property binding** nên là lựa chọn đầu tiên khi phần tử có property tương ứng. Giá trị boolean được giữ đúng kiểu boolean, thay vì thành chuỗi:
+
+```html
+<button [disabled]="isSaving()">Lưu</button>
+```
+
+**Attribute binding** đặc biệt hữu ích cho khả năng truy cập. `aria-expanded` là attribute, nên dùng tiền tố `attr.`:
+
+```html
+<button [attr.aria-expanded]="isOpen()">Chi tiết</button>
+```
+
+**Event binding** nhận event của trình duyệt. Nếu cần dữ liệu từ event, truyền `$event` vào hàm:
+
+```html
+<input (input)="updateQuery($event)" />
+```
+
+<Callout type="idea" title="Cách chọn nhanh">
+  Muốn hiển thị chữ, dùng <code>{'{{ expression }}'}</code>. Muốn điều khiển một property có thật của phần tử, dùng <code>[property]</code>. Muốn nhận thao tác người dùng, dùng <code>(event)</code>. Đừng chọn cú pháp chỉ vì nó cho kết quả giống nhau ở một ví dụ nhỏ.
+</Callout>
+
+## Ví dụ hoàn chỉnh: thẻ hồ sơ tương tác
+
+Ví dụ dưới đây dùng standalone component và signal. Thẻ hồ sơ cần hiển thị số người theo dõi, đổi nhãn nút, đổi class và cập nhật thông tin hỗ trợ trình đọc màn hình khi người dùng nhấp nút.
+
+### Component: giữ trạng thái và xử lý ý định
+
+```ts
+import { Component, computed, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-profile-card',
+  templateUrl: './profile-card.component.html',
+  styleUrl: './profile-card.component.css',
+})
+export class ProfileCardComponent {
+  readonly profile = signal({
+    name: 'An Nguyễn',
+    role: 'Angular Developer',
+    followers: 128,
+  });
+
+  readonly isFollowing = signal(false);
+
+  readonly followLabel = computed(() =>
+    this.isFollowing() ? 'Đang theo dõi' : 'Theo dõi',
+  );
+
+  toggleFollow(): void {
+    const wasFollowing = this.isFollowing();
+
+    this.isFollowing.set(!wasFollowing);
+    this.profile.update((profile) => ({
+      ...profile,
+      followers: profile.followers + (wasFollowing ? -1 : 1),
+    }));
+  }
+}
+```
+
+Lớp này không tìm `button`, không sửa `textContent` và không thêm class. Nó chỉ mô tả dữ liệu và ý định `toggleFollow()`. `computed()` tạo một signal dẫn xuất: nhãn được tính từ `isFollowing`, vì vậy không có biến nhãn riêng có thể quên cập nhật.
+
+### Template: khai báo DOM mong muốn
+
+```html
+<article class="profile-card">
+  <h2>{{ profile().name }}</h2>
+  <p>{{ profile().role }}</p>
+
+  <p aria-live="polite">
+    {{ profile().followers }} người theo dõi
+  </p>
+
+  <button
+    type="button"
+    [class.is-following]="isFollowing()"
+    [attr.aria-pressed]="isFollowing()"
+    (click)="toggleFollow()"
+  >
+    {{ followLabel() }}
+  </button>
+</article>
+```
+
+Một state `isFollowing()` ảnh hưởng đến ba vị trí: class để CSS trang trí, `aria-pressed` để công nghệ hỗ trợ hiểu trạng thái nút, và text để người dùng thấy hành động hiện tại. Đó là lợi ích thực tế của việc khai báo giao diện từ state: các biểu diễn khác nhau cùng đi từ một sự thật.
+
+Ví dụ CSS chỉ cần mô tả cách class được hiển thị, không cần biết ai thêm class:
+
+```css
+.profile-card button.is-following {
+  background: #0f766e;
+  color: white;
+}
+```
+
+### Lần theo một cú nhấp
+
+Giả sử `isFollowing()` ban đầu là `false` và `followers` là `128`.
+
+1. Template render nút với text `Theo dõi`, không có class `is-following`, và `aria-pressed="false"`.
+2. Người dùng nhấp nút. Listener `(click)` gọi `toggleFollow()`.
+3. Hàm cập nhật `isFollowing` thành `true` và cập nhật object `profile` với `followers: 129`.
+4. Angular thấy các binding đã đọc hai signal này cần được đồng bộ lại.
+5. DOM nhận text `Đang theo dõi`, class `is-following`, attribute `aria-pressed="true"` và text `129 người theo dõi`.
+
+Không bước nào yêu cầu bạn giữ một tham chiếu đến node nút. Nếu trạng thái được cập nhật từ API thay vì từ `click`, template vẫn cho kết quả đúng theo cùng quy tắc.
+
+## Điều kiện và danh sách: để template quyết định cấu trúc
+
+DOM không chỉ thay đổi text hay class. Có lúc một node cần tồn tại hoặc không tồn tại. Có lúc cần tạo một node cho mỗi item. Thay vì gọi `appendChild()` và `removeChild()` trong component, hãy thể hiện quy tắc cấu trúc trong template bằng control flow.
+
+```ts
+readonly projects = signal([
+  { id: 1, name: 'Cổng quản trị', archived: false },
+  { id: 2, name: 'Báo cáo tháng', archived: true },
+]);
+
+readonly showArchived = signal(false);
+```
+
+```html
+<button type="button" (click)="showArchived.set(!showArchived())">
+  {{ showArchived() ? 'Ẩn' : 'Hiện' }} dự án đã lưu trữ
+</button>
+
+<ul>
+  @for (project of projects(); track project.id) {
+    @if (showArchived() || !project.archived) {
+      <li [class.archived]="project.archived">
+        {{ project.name }}
+      </li>
+    }
+  }
+</ul>
+```
+
+`@if` nói khi nào một khối được đưa vào DOM. `@for` nói cách tạo các node lặp lại. Biểu thức `track project.id` cung cấp định danh ổn định để Angular ghép mỗi item dữ liệu với node DOM tương ứng khi danh sách đổi thứ tự, thêm hoặc xoá phần tử.
+
+<Callout type="warn" title="Đừng track theo index khi danh sách có thể thay đổi">
+  Index chỉ ổn định khi thứ tự và số phần tử không đổi. Nếu chèn một dự án lên đầu danh sách, Angular có thể ghép nhầm DOM cũ với dữ liệu mới. Hãy dùng khóa định danh duy nhất như <code>project.id</code> khi có thể.
+</Callout>
+
+## Lỗi phổ biến và điểm đánh đổi
+
+Binding làm luồng dữ liệu dễ theo dõi, nhưng cú pháp gần HTML cũng khiến vài lỗi trông có vẻ hợp lý. Những lỗi dưới đây thường gây giao diện không đồng bộ hoặc làm code khó bảo trì.
+
+### Sửa DOM rồi chờ Angular giữ nguyên
+
+Đoạn mã sau có thể hoạt động khi vừa chạy:
+
+```ts
+this.elementRef.nativeElement.querySelector('.status')!.textContent = 'Đã lưu';
+```
+
+Nhưng nếu template có `{{ saveStatus() }}`, lần đồng bộ sau của Angular sẽ ghi lại theo `saveStatus()`, không theo text bạn tự đặt. Cách sửa là đổi state:
+
+```ts
+this.saveStatus.set('Đã lưu');
+```
+
+rồi để template giữ `{{ saveStatus() }}`. Đây không chỉ là khác cú pháp; nó loại bỏ trạng thái ngầm nằm trong DOM.
+
+### Nhầm interpolation, property và attribute
+
+Ba cú pháp sau đều có thể xuất hiện cạnh nhau nhưng không tương đương:
+
+```html
+<!-- Text node -->
+<p>{{ isSaving() }}</p>
+
+<!-- Property boolean của button -->
+<button [disabled]="isSaving()">Lưu</button>
+
+<!-- Attribute cho accessibility -->
+<button [attr.aria-busy]="isSaving()">Lưu</button>
+```
+
+Một lỗi hay gặp là viết `disabled="false"`. Trong HTML, sự hiện diện của boolean attribute `disabled` đã làm nút bị vô hiệu hoá; chuỗi `"false"` không có nghĩa là boolean `false`. Khi giá trị thay đổi theo state, hãy dùng `[disabled]="isSaving()"`.
+
+Tương tự, không phải attribute nào cũng có property DOM cùng tên. Với `aria-*`, `data-*`, `colspan` và các trường hợp tương tự, cú pháp `[attr.tên]` làm ý định rõ ràng hơn.
+
+### Dùng hai chiều khi một chiều đã đủ
+
+`[(ngModel)]` tiện cho form nhỏ vì nó ghép property binding với event cập nhật. Tuy nhiên, hai chiều che bớt câu hỏi quan trọng: giá trị đổi ở đâu và lúc nào? Với một nút chỉ phát ra ý định hoặc một biểu mẫu có quy tắc xử lý rõ ràng, event binding một chiều thường dễ đọc hơn:
+
+```html
+<input
+  [value]="query()"
+  (input)="query.set($any($event.target).value)"
+/>
+```
+
+Ví dụ này cho thấy rõ input hiển thị `query()` và mỗi lần gõ sẽ cập nhật signal. Trong form lớn, Angular Reactive Forms thường là lựa chọn có cấu trúc hơn vì trạng thái, validation và luồng submit được gom vào mô hình form. Kết luận thực dụng: dùng hai chiều cho trường hợp đơn giản, nhưng không dùng nó để né việc thiết kế state.
+
+### Chèn HTML không tin cậy
+
+`[innerHTML]` có thể cần khi hiển thị nội dung giàu định dạng, nhưng không biến dữ liệu từ người dùng thành HTML rồi chèn tùy ý. Nội dung HTML không tin cậy có nguy cơ XSS (*cross-site scripting*): kẻ tấn công đưa script hoặc hành vi nguy hiểm vào trang của người dùng khác.
+
+```html
+<!-- Chỉ dùng với nội dung đã được kiểm soát hoặc làm sạch phù hợp. -->
+<div [innerHTML]="trustedContent()"></div>
+```
+
+Angular có cơ chế làm sạch cho nhiều ngữ cảnh, nhưng đó không phải lý do để bỏ qua chính sách dữ liệu đầu vào. Không dùng các API “bypass security” chỉ để loại bỏ cảnh báo. Nếu cần hiển thị Markdown hay HTML do người dùng tạo, hãy áp dụng một chiến lược sanitize được xem xét riêng.
+
+### Tối ưu quá sớm hoặc render quá nhiều
+
+Không phải mọi giá trị đều cần trở thành signal, và không phải mọi đoạn template đều cần bị tách thành component nhỏ. Tách quá mức làm luồng dữ liệu khó lần theo. Ngược lại, một template rất lớn, gọi hàm tốn kém trực tiếp trong binding hoặc render danh sách dài mà không có `track` cũng tạo chi phí không cần thiết.
+
+Một thứ tự xử lý hợp lý là:
+
+1. Giữ template thuần mô tả và để state là nguồn sự thật.
+2. Đo hiệu năng bằng Angular DevTools hoặc profiler của trình duyệt khi đã có dấu hiệu chậm.
+3. Chỉ tối ưu điểm đã đo được: dùng khóa `track` ổn định, tiền tính toán dữ liệu bằng `computed`, phân trang/ảo hoá danh sách dài, hoặc tách component ở ranh giới có ý nghĩa.
+
+Đừng thay đổi DOM thủ công để “tối ưu” trước khi đo. Bạn có thể đổi một vấn đề hiệu năng chưa chắc tồn tại thành lỗi đồng bộ chắc chắn tồn tại.
+
+## Khi nào được phép chạm vào DOM?
+
+Một số công việc vốn là giao tiếp với nền tảng trình duyệt, ví dụ focus một input sau khi nó xuất hiện, đo kích thước phần tử, dùng `IntersectionObserver`, tích hợp biểu đồ/canvas hoặc thư viện không có Angular wrapper. Các trường hợp này là ngoại lệ có chủ đích, không phải cách render giao diện thường ngày.
+
+Khi cần làm việc với DOM, hãy giữ các nguyên tắc sau:
+
+- Chờ đúng thời điểm phần tử đã được render, chẳng hạn dùng query view và hook render phù hợp; đừng giả định phần tử đã tồn tại ngay trong constructor.
+- Ưu tiên binding cho mọi thay đổi mà template có thể diễn tả. DOM API chỉ nên làm phần template không diễn tả được, như gọi `focus()` hoặc khởi tạo thư viện canvas.
+- Cô lập tích hợp trong directive hoặc component nhỏ thay vì rải `document.querySelector()` khắp ứng dụng.
+- Tính đến SSR: kiểm tra môi trường trình duyệt trước khi gọi API chỉ có ở browser, hoặc trì hoãn phần tích hợp sang phía client.
+- Dọn listener, observer và instance thư viện khi component bị huỷ để tránh rò rỉ bộ nhớ.
+
+<Callout type="idea" title="Ví dụ ngoại lệ hợp lý">
+  Nếu sau khi mở một hộp thoại bạn cần đưa bàn phím vào ô tìm kiếm, việc gọi <code>input.focus()</code> tại thời điểm render thích hợp là hợp lý. State vẫn quyết định hộp thoại có mở hay không; lệnh DOM chỉ thực hiện hiệu ứng trình duyệt không thể biểu diễn bằng HTML thuần.
+</Callout>
+
+## Tóm tắt và tự kiểm tra
+
+Hãy giữ chuỗi tư duy này khi viết Angular:
+
+```text
+State thay đổi
+    ↓
+Template đọc state qua binding
+    ↓
+Angular đồng bộ phần DOM liên quan
+    ↓
+Trình duyệt hiển thị kết quả và phát event mới
+```
+
+Trước khi thêm `querySelector`, `classList.add` hoặc `innerHTML`, tự hỏi:
+
+- Thay đổi này có phải là **trạng thái giao diện** không? Nếu có, hãy đặt nó trong component/service phù hợp và bind từ template.
+- Đây là text, property, attribute, class/style hay event? Chọn loại binding theo bản chất dữ liệu.
+- Node có thể biến mất do `@if`, thay đổi do `@for` hoặc chưa tồn tại vì component chưa render không?
+- Có chạy với SSR/hydration không? API trình duyệt này có cần được cô lập ở client không?
+- Có dữ liệu không tin cậy đi vào `[innerHTML]` hay URL không?
+
+Nếu trả lời rõ các câu hỏi này, bạn đang dùng Angular theo mô hình khai báo: dữ liệu mô tả giao diện, còn framework chịu trách nhiệm đưa mô tả đó xuống DOM.
+
+## Bước tiếp theo
+
+Bài này giải thích đường đi từ state đến giao diện. Để hiểu Angular nhận biết thay đổi của state bằng cách nào, hãy học tiếp về signals và Zone.js.
+
+<Cards>
+  <Card title="Kiến trúc Angular" href="/docs/nen-tang/kien-truc-angular" description="Đặt component, template và các khối khác vào bức tranh tổng thể." />
+  <Card title="Signals và Zone.js" href="/docs/nen-tang/signals-va-zonejs" description="Tìm hiểu Angular theo dõi thay đổi và quyết định cập nhật giao diện." />
+</Cards>

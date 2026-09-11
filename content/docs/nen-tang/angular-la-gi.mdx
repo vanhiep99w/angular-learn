@@ -1,10 +1,189 @@
 ---
 title: Angular là gì?
-description: Bối cảnh, ưu điểm, giới hạn và trường hợp nên sử dụng Angular.
+description: Angular là framework web có cấu trúc cho ứng dụng giao diện lớn; trang này giải thích phạm vi, điểm đánh đổi và mô hình tư duy cốt lõi.
 ---
 
-Trang này sẽ trình bày **Angular là gì?** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu">
+  Trang này dành cho người mới bắt đầu. Sau khi đọc, bạn nên biết Angular giải quyết vấn đề gì, khi nào nên chọn nó và cách nhìn một ứng dụng Angular trước khi đi vào component, template hay dependency injection.
 </Callout>
+
+## Mục lục
+
+- [Angular là gì?](#angular-là-gì)
+  - [Framework, không chỉ là thư viện giao diện](#framework-không-chỉ-là-thư-viện-giao-diện)
+  - [Angular và AngularJS là hai thế hệ khác nhau](#angular-và-angularjs-là-hai-thế-hệ-khác-nhau)
+- [Angular giải quyết những gì?](#angular-giải-quyết-những-gì)
+- [Khi nào nên dùng Angular?](#khi-nào-nên-dùng-angular)
+  - [Những bối cảnh phù hợp](#những-bối-cảnh-phù-hợp)
+  - [Những điểm cần cân nhắc trước](#những-điểm-cần-cân-nhắc-trước)
+- [Mô hình tinh thần cốt lõi](#mô-hình-tinh-thần-cốt-lõi)
+  - [Component là đơn vị sở hữu một phần giao diện](#component-là-đơn-vị-sở-hữu-một-phần-giao-diện)
+  - [Template khai báo giao diện từ trạng thái](#template-khai-báo-giao-diện-từ-trạng-thái)
+  - [Sự kiện tạo thay đổi, Angular đồng bộ giao diện](#sự-kiện-tạo-thay-đổi-angular-đồng-bộ-giao-diện)
+  - [Dịch vụ và dependency injection tách logic dùng chung](#dịch-vụ-và-dependency-injection-tách-logic-dùng-chung)
+- [Angular hiện đại: standalone, signals và render](#angular-hiện-đại-standalone-signals-và-render)
+- [Cách bắt đầu học đúng thứ tự](#cách-bắt-đầu-học-đúng-thứ-tự)
+- [Bước tiếp theo](#bước-tiếp-theo)
+
+## Angular là gì?
+
+**Angular** là framework mã nguồn mở để xây dựng ứng dụng web. Nó dùng TypeScript làm ngôn ngữ phát triển chính và chạy ứng dụng đã build trong trình duyệt. Angular cung cấp cách tổ chức giao diện theo component, liên kết dữ liệu với template, điều hướng, gọi HTTP, biểu mẫu, kiểm thử và công cụ build.
+
+Mục tiêu của Angular không chỉ là vẽ một nút bấm. Nó đưa ra một bộ quy ước để một đội ngũ có thể phát triển và duy trì ứng dụng có nhiều màn hình, nhiều luồng dữ liệu và vòng đời dài. Ví dụ, một cổng quản trị có đăng nhập, bảng dữ liệu, phân quyền và nhiều biểu mẫu thường cần các quy ước chung hơn một trang giới thiệu sản phẩm đơn giản.
+
+### Framework, không chỉ là thư viện giao diện
+
+Một thư viện giao diện thường tập trung vào cách tạo UI. Angular là một framework đầy đủ hơn: nó có cơ chế cho component, template, dependency injection, router, HTTP client, forms và toolchain. Bạn vẫn được phép chọn thêm thư viện, nhưng các phần cốt lõi đã có một cách làm nhất quán.
+
+Đổi lại, Angular có khái niệm và quy ước cần học. Ví dụ, một component có metadata, template có cú pháp riêng, và một dependency nên được lấy qua hệ thống injection thay vì tự tạo ngẫu nhiên trong mọi nơi. Chi phí học ban đầu này thường đáng giá khi ứng dụng và đội ngũ cùng lớn lên.
+
+### Angular và AngularJS là hai thế hệ khác nhau
+
+**AngularJS** là framework 1.x cũ, thường được gọi là Angular 1. Angular hiện nay là dòng framework bắt đầu từ Angular 2; kiến trúc, API và cách phát triển của hai dòng này khác nhau đáng kể.
+
+Khi tài liệu hiện đại nói “Angular”, hãy hiểu đó là Angular hiện tại, không phải AngularJS. Không nên áp dụng hướng dẫn AngularJS như `$scope`, controller hoặc module 1.x cho dự án Angular mới.
+
+## Angular giải quyết những gì?
+
+Ở mức thực tế, Angular giúp biến **trạng thái ứng dụng** thành giao diện có thể tương tác. Trạng thái là dữ liệu quyết định UI đang hiển thị gì, chẳng hạn người dùng đã đăng nhập chưa, danh sách đơn hàng nào vừa tải về, hoặc ô biểu mẫu nào đang lỗi.
+
+Angular cung cấp các khối ghép cho công việc đó:
+
+| Khối ghép | Vai trò | Ví dụ |
+| --- | --- | --- |
+| Component | Đóng gói một phần UI và hành vi liên quan | Thanh tìm kiếm, dòng đơn hàng, trang hồ sơ |
+| Template | Khai báo HTML động dựa trên dữ liệu component | Hiển thị tên, lặp danh sách, xử lý sự kiện click |
+| Directive và pipe | Mở rộng template hoặc chuyển đổi dữ liệu để hiển thị | Hiển thị có điều kiện, định dạng ngày tháng |
+| Service | Chứa logic không thuộc riêng một UI | Gọi API, xác thực, lưu tùy chọn |
+| Dependency injection | Cấp dependency theo cấu hình thay vì tự khởi tạo thủ công | Component nhận `UserService` |
+| Router | Ánh xạ URL với màn hình và điều phối điều hướng | `/orders/42` mở chi tiết đơn hàng 42 |
+
+Angular CLI và công cụ build bổ sung phần vòng đời phát triển: tạo workspace, chạy development server, kiểm tra mã, test và tạo bản build. Nhờ vậy, nhóm không phải tự ghép các quyết định nền tảng ngay từ đầu.
+
+<Callout type="idea" title="Đừng nhầm framework với kiến trúc sản phẩm">
+  Angular cung cấp các khối và quy ước kỹ thuật. Nó không tự quyết định domain của sản phẩm, ranh giới feature, quyền truy cập hay cách thiết kế API. Những quyết định đó vẫn thuộc về đội ngũ xây dựng ứng dụng.
+</Callout>
+
+## Khi nào nên dùng Angular?
+
+Không có framework nào tối ưu cho mọi loại trang. Hãy đánh giá loại sản phẩm, độ phức tạp dự kiến, kỹ năng của đội ngũ và các ràng buộc vận hành thay vì chọn theo xu hướng.
+
+### Những bối cảnh phù hợp
+
+Angular thường là lựa chọn tốt khi ứng dụng cần cấu trúc rõ ràng và phát triển lâu dài:
+
+- **Ứng dụng nghiệp vụ nhiều màn hình**: dashboard nội bộ, CRM, quản lý kho, kế toán hoặc quy trình phê duyệt. Những sản phẩm này thường có form phức tạp, dữ liệu từ API và nhiều vai trò người dùng.
+- **Đội ngũ nhiều thành viên**: quy ước component, injection, router và CLI giúp việc đọc mã giữa các thành viên nhất quán hơn.
+- **Sản phẩm cần tiêu chuẩn hóa**: Angular có sẵn các hướng đi cho kiểm thử, forms, HTTP, accessibility và i18n. Đây là lợi thế khi tổ chức muốn giảm số quyết định nền tảng lặp lại giữa các dự án.
+- **Ứng dụng cần render phía máy chủ**: Angular có thể render HTML ban đầu trên server và hydration ở trình duyệt. Điều này hữu ích khi cần cải thiện trải nghiệm tải trang đầu hoặc khả năng được máy tìm kiếm đọc nội dung.
+
+Ví dụ, một hệ thống quản lý đơn hàng có bảng lọc, chi tiết đơn, form chỉnh sửa và phân quyền là bài toán phù hợp. Các màn hình có thể là các component; router quản lý URL; service gọi API; còn template phản chiếu trạng thái tải, lỗi và dữ liệu thành công.
+
+### Những điểm cần cân nhắc trước
+
+Angular không phải lựa chọn mặc định chỉ vì dự án có giao diện. Các trường hợp sau cần cân nhắc kỹ hơn:
+
+- Một landing page rất nhỏ, ít tương tác có thể không cần toàn bộ cấu trúc của một SPA. Một công cụ tạo trang tĩnh hoặc HTML tối giản có thể phù hợp hơn.
+- Nếu đội ngũ chưa biết TypeScript và chưa quen tư duy component, template hay reactive state, thời gian onboarding ban đầu sẽ rõ rệt. Hãy tính thời gian học vào kế hoạch, thay vì kỳ vọng framework tự làm giảm độ phức tạp.
+- Angular không thay thế backend, cơ sở dữ liệu, mô hình phân quyền phía server hay kiểm tra bảo mật ở API. Client chỉ nên cải thiện trải nghiệm; server vẫn phải xác thực và cấp quyền độc lập.
+- Ứng dụng có yêu cầu nền tảng đặc biệt, như runtime ngoài web hoặc một hệ sinh thái UI đã bị ràng buộc, cần được đánh giá theo ràng buộc đó trước khi quyết định.
+
+Nói ngắn gọn: chọn Angular khi lợi ích của quy ước chung và hệ sinh thái tích hợp lớn hơn chi phí học và cấu hình của nó.
+
+## Mô hình tinh thần cốt lõi
+
+Cách nhìn hữu ích nhất là: **UI là kết quả của trạng thái hiện tại**. Người dùng tác động lên UI; mã của bạn cập nhật trạng thái; Angular cập nhật phần giao diện phụ thuộc vào trạng thái đó. Bạn mô tả giao diện mong muốn bằng template, thay vì tự tìm và sửa từng nút DOM trong hầu hết tình huống.
+
+```text
+Người dùng
+    │ click, nhập liệu, điều hướng
+    ▼
+Component / service
+    │ cập nhật trạng thái hoặc nhận dữ liệu bất đồng bộ
+    ▼
+Trạng thái ứng dụng
+    │ được template đọc
+    ▼
+Angular đồng bộ phần UI phụ thuộc
+    ▼
+DOM trên trình duyệt
+```
+
+### Component là đơn vị sở hữu một phần giao diện
+
+Component kết hợp một class TypeScript với template HTML và, khi cần, style. Mỗi component nên có một trách nhiệm giao diện rõ ràng. `OrderListComponent` có thể hiển thị danh sách đơn hàng; `OrderDetailComponent` có thể hiển thị và chỉnh sửa một đơn hàng.
+
+Component không nhất thiết phải là một màn hình hoàn chỉnh. Một trang thường là cây component nhỏ hơn: trang đơn hàng chứa thanh lọc, bảng đơn hàng, phân trang và hộp thoại xác nhận. Chia theo trách nhiệm giúp UI dễ kiểm thử và tái sử dụng hơn.
+
+### Template khai báo giao diện từ trạng thái
+
+Template là HTML có thêm cú pháp Angular để đọc dữ liệu, lắng nghe sự kiện và điều khiển cấu trúc hiển thị. Ví dụ dưới đây mô tả một bộ đếm; template không cần tự gọi `document.querySelector()` để đổi con số trên trang.
+
+```ts
+import { Component, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-counter',
+  standalone: true,
+  template: `
+    <p>Số lần bấm: {{ count() }}</p>
+    <button type="button" (click)="increment()">Tăng</button>
+  `,
+})
+export class CounterComponent {
+  readonly count = signal(0);
+
+  increment(): void {
+    this.count.update((value) => value + 1);
+  }
+}
+```
+
+`count` là một signal, tức giá trị reactive mà Angular có thể theo dõi. Khi người dùng bấm nút, `increment()` cập nhật signal. Vì template đã đọc `count()`, Angular biết phần hiển thị số lần bấm cần được đồng bộ. Điều quan trọng là mô tả mối quan hệ dữ liệu–UI, không phải thao tác DOM thủ công.
+
+### Sự kiện tạo thay đổi, Angular đồng bộ giao diện
+
+Luồng dữ liệu không chỉ đến từ click. Nó có thể đến từ phản hồi HTTP, timer, router hoặc dữ liệu do component cha truyền xuống. Dù nguồn là gì, hãy giữ luồng dễ lần theo: nhận sự kiện hoặc dữ liệu, cập nhật trạng thái, rồi để template phản ánh trạng thái mới.
+
+Không phải mọi dữ liệu đều cần trở thành signal ngay lập tức. Angular cũng làm việc tốt với `Observable` của RxJS cho các luồng dữ liệu bất đồng bộ, như kết quả HTTP hoặc WebSocket. Signals và RxJS thường bổ sung cho nhau: signal thuận tiện cho trạng thái đọc đồng bộ của UI, còn Observable biểu diễn một dòng giá trị theo thời gian. Quyết định cụ thể phụ thuộc vào luồng dữ liệu, không phải một quy tắc tuyệt đối.
+
+<Callout type="warn" title="Tránh hai nguồn sự thật">
+  Đừng vừa giữ một giá trị trong state của component vừa tự sửa DOM để biểu diễn cùng giá trị đó. Khi hai nơi có thể khác nhau, lỗi giao diện rất khó truy vết. Hãy để state là nguồn sự thật và để template render từ state.
+</Callout>
+
+### Dịch vụ và dependency injection tách logic dùng chung
+
+Không nên đưa mọi logic vào component. Logic gọi API, xác thực, cache hoặc quy tắc dùng chung thường thuộc về service. Component chỉ yêu cầu service cần dùng; hệ thống **dependency injection** của Angular tạo và cung cấp dependency theo cấu hình provider.
+
+Ví dụ, `OrderService` có thể lấy đơn hàng từ API, còn `OrderListComponent` chỉ gọi service và quản lý trạng thái hiển thị. Cách tách này làm component tập trung vào UI, đồng thời cho phép thay thế dependency bằng bản giả khi kiểm thử.
+
+## Angular hiện đại: standalone, signals và render
+
+Với ứng dụng mới, Angular ưu tiên **standalone component**. Một component standalone tự khai báo các dependency template của nó qua `imports`; bạn không cần tạo `NgModule` chỉ để ghép các component mới. `NgModule` vẫn tồn tại để tương thích với ứng dụng và thư viện cũ, vì vậy bạn sẽ gặp nó khi đọc mã có sẵn.
+
+**Signals** là primitive reactive tích hợp trong Angular. Chúng làm quan hệ “trạng thái nào được UI đọc” rõ hơn và là lựa chọn tự nhiên cho nhiều trạng thái cục bộ. Tuy nhiên, signals không buộc bạn phải bỏ RxJS hoặc một thư viện state đang phù hợp; chúng là một công cụ trong mô hình reactive của Angular.
+
+Angular cũng hỗ trợ nhiều chiến lược render. Ứng dụng có thể chạy hoàn toàn ở trình duyệt, hoặc tạo HTML ban đầu ở server rồi hydration ở client. Khi dùng server-side rendering, server trả HTML ban đầu; hydration gắn mã Angular ở trình duyệt vào HTML đó để trang tiếp tục tương tác. Đây là tối ưu render, không biến Angular thành nơi thay thế toàn bộ backend nghiệp vụ.
+
+Một số ứng dụng cũ dựa vào Zone.js để Angular biết khi nào cần kiểm tra giao diện. Angular hiện đại cũng hỗ trợ cách chạy không cần Zone.js trong các cấu hình phù hợp. Khi mới học, hãy tập trung vào quan hệ giữa state và template; cơ chế scheduling và change detection chi tiết sẽ được làm rõ trong bài về signals và Zone.js.
+
+## Cách bắt đầu học đúng thứ tự
+
+Đừng cố học mọi API trước khi tạo giao diện đầu tiên. Một lộ trình ngắn giúp các khái niệm kết nối với nhau:
+
+1. Chuẩn bị môi trường và dùng Angular CLI để tạo, chạy một workspace.
+2. Học component standalone, template, data binding và control flow để tạo UI.
+3. Học TypeScript vừa đủ để đọc kiểu dữ liệu, class, function và `async` code.
+4. Kết nối các component bằng input, output, service và dependency injection.
+5. Thêm router, forms và HTTP khi ứng dụng bắt đầu có nhiều màn hình hoặc dữ liệu thật.
+6. Sau cùng, đi sâu vào signals, RxJS, render phía server, kiểm thử và hiệu năng.
+
+Mỗi bước đều quay về mô hình ban đầu: dữ liệu nằm ở đâu, component nào sở hữu UI, sự kiện nào thay đổi dữ liệu, và template nào phản ánh thay đổi đó. Nếu trả lời được bốn câu hỏi này, bạn sẽ đọc phần lớn mã Angular dễ dàng hơn.
+
+## Bước tiếp theo
+
+<Cards>
+  <Card title="Kiến trúc Angular" href="/docs/nen-tang/kien-truc-angular" description="Tìm hiểu các khối chính của một ứng dụng Angular và cách chúng phối hợp." />
+  <Card title="TypeScript cần thiết" href="/docs/nen-tang/typescript-can-thiet" description="Ôn những phần TypeScript cần dùng thường xuyên trong Angular." />
+  <Card title="DOM và template" href="/docs/nen-tang/dom-va-template" description="Hiểu cách template Angular tạo và cập nhật DOM của trình duyệt." />
+</Cards>

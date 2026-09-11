@@ -1,10 +1,558 @@
 ---
 title: Computed và effect
-description: Dẫn xuất dữ liệu và thực hiện side effect an toàn.
+description: Dẫn xuất state bằng computed và thực hiện side effect có lifecycle rõ ràng trong Angular.
 ---
 
-Trang này sẽ trình bày **Computed và effect** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Phạm vi trang này">
+  `computed` dùng để tạo **giá trị dẫn xuất** từ signals. `effect` dùng để đồng bộ với thế giới bên ngoài như `localStorage`, API trình duyệt hoặc thư viện không thuộc Angular. Hai API đều theo dõi dependency tự động, nhưng không thay thế cho nhau.
 </Callout>
+
+## Mục lục
+
+- [Bài toán: state nguồn và state dẫn xuất](#bài-toán-state-nguồn-và-state-dẫn-xuất)
+  - [Ví dụ state bị trùng lặp](#ví-dụ-state-bị-trùng-lặp)
+  - [Quy tắc một nguồn sự thật](#quy-tắc-một-nguồn-sự-thật)
+- [Computed: giá trị dẫn xuất](#computed-giá-trị-dẫn-xuất)
+  - [Khai báo và đọc computed](#khai-báo-và-đọc-computed)
+  - [Dependency tracking động](#dependency-tracking-động)
+  - [Lazy evaluation và memoization](#lazy-evaluation-và-memoization)
+  - [Computed là readonly](#computed-là-readonly)
+  - [Ví dụ hoàn chỉnh: giỏ hàng](#ví-dụ-hoàn-chỉnh-giỏ-hàng)
+- [Effect: đồng bộ với thế giới bên ngoài](#effect-đồng-bộ-với-thế-giới-bên-ngoài)
+  - [Khi nào effect là lựa chọn đúng](#khi-nào-effect-là-lựa-chọn-đúng)
+  - [Cách Angular lên lịch effect](#cách-angular-lên-lịch-effect)
+  - [Tạo effect trong injection context](#tạo-effect-trong-injection-context)
+  - [Dọn dẹp tài nguyên](#dọn-dẹp-tài-nguyên)
+  - [Dependency động và untracked](#dependency-động-và-untracked)
+  - [Ví dụ: lưu tuỳ chọn giao diện](#ví-dụ-lưu-tuỳ-chọn-giao-diện)
+- [Khi không dùng effect](#khi-không-dùng-effect)
+  - [Không dùng effect để tạo derived state](#không-dùng-effect-để-tạo-derived-state)
+  - [Không dùng effect để gọi HTTP theo mọi thay đổi](#không-dùng-effect-để-gọi-http-theo-mọi-thay-đổi)
+  - [Không dùng effect thay lifecycle hook](#không-dùng-effect-thay-lifecycle-hook)
+- [Lỗi thường gặp và trade-off](#lỗi-thường-gặp-và-trade-off)
+  - [Có side effect trong computed](#có-side-effect-trong-computed)
+  - [Đọc signal nhưng không gọi nó](#đọc-signal-nhưng-không-gọi-nó)
+  - [Dựa vào thời điểm chạy đồng bộ](#dựa-vào-thời-điểm-chạy-đồng-bộ)
+  - [Quên cleanup](#quên-cleanup)
+  - [Chuỗi effect ghi signal](#chuỗi-effect-ghi-signal)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+
+## Bài toán: state nguồn và state dẫn xuất
+
+**State nguồn** là dữ liệu ứng dụng thật sự sở hữu và có quyền thay đổi, ví dụ danh sách sản phẩm trong giỏ hoặc chuỗi tìm kiếm người dùng vừa nhập. **State dẫn xuất** là giá trị có thể tính lại hoàn toàn từ state nguồn, ví dụ tổng tiền, số item đã chọn hoặc danh sách đã lọc.
+
+Phân biệt hai loại này giúp tránh giữ hai bản dữ liệu có thể lệch nhau. Nếu `items` là nguồn sự thật, `total` không cần là một writable signal khác; nó chỉ là kết quả của phép tính trên `items`.
+
+```text
+items (state nguồn) ───► total (computed) ───► template
+       │                       ▲
+       └──► selectedCount ─────┘
+
+Thay đổi items → computed bị invalid → lần đọc sau tính lại khi cần
+```
+
+### Ví dụ state bị trùng lặp
+
+Đoạn mã sau tự quản lý `total` bên cạnh `items`. Mỗi điểm thay đổi giỏ hàng phải nhớ cập nhật cả hai signal.
+
+```ts
+const items = signal<CartItem[]>([]);
+const total = signal(0);
+
+function add(item: CartItem): void {
+  items.update((current) => [...current, item]);
+  total.update((current) => current + item.price); // Dễ bị quên ở hàm khác.
+}
+```
+
+Ví dụ, nếu `remove()` chỉ cập nhật `items`, `total` sẽ hiển thị sai. Đây không phải lỗi của signal; đây là hậu quả của việc lưu một giá trị có thể tự tính lại dưới dạng state độc lập.
+
+### Quy tắc một nguồn sự thật
+
+Chỉ tạo writable signal khi giá trị cần được ghi một cách độc lập. Nếu một công thức luôn xác định giá trị, hãy mô tả công thức đó bằng `computed`.
+
+| Nhu cầu | Công cụ phù hợp | Ví dụ |
+| --- | --- | --- |
+| State người dùng hoặc ứng dụng thay đổi trực tiếp | `signal` | `quantity`, `items`, `query` |
+| Giá trị tính từ signals khác | `computed` | `subtotal`, `isEmpty`, `filteredItems` |
+| Tác động ra ngoài graph state | `effect` | ghi `localStorage`, cập nhật `document.title` |
+
+<Callout type="idea" title="Câu hỏi chọn nhanh">
+  Hỏi: “Nếu xoá giá trị này, tôi có tính lại chính xác từ state khác không?” Nếu có, đó thường là `computed`, không phải một `signal` mới.
+</Callout>
+
+## Computed: giá trị dẫn xuất
+
+`computed()` tạo một `Signal<T>` chỉ đọc. Angular chạy hàm tính của nó, ghi nhận các signals được đọc trong hàm và dùng các lần đọc đó làm dependency. Consumer sau đó gọi computed như mọi signal khác: `total()`.
+
+### Khai báo và đọc computed
+
+```ts
+import { computed, signal } from '@angular/core';
+
+const price = signal(120_000);
+const quantity = signal(2);
+
+const subtotal = computed(() => price() * quantity());
+
+console.log(subtotal()); // 240000
+quantity.set(3);
+console.log(subtotal()); // 360000
+```
+
+`subtotal` không nhận giá trị qua `.set()` và không nên chứa trạng thái riêng. Nó luôn phản ánh `price()` và `quantity()` tại thời điểm được đọc.
+
+### Dependency tracking động
+
+Dependency của computed được xác định bởi **lần thực thi gần nhất**, không phải bằng mọi signal xuất hiện trong mã nguồn. Điều này quan trọng với nhánh điều kiện.
+
+```ts
+const showDiscount = signal(false);
+const listPrice = signal(500_000);
+const discountRate = signal(0.1);
+
+const displayedPrice = computed(() => {
+  if (!showDiscount()) return listPrice();
+  return listPrice() * (1 - discountRate());
+});
+```
+
+Khi `showDiscount()` là `false`, `displayedPrice` không đọc `discountRate()`. Do đó, thay `discountRate` không làm computed này invalid. Khi bật giảm giá rồi đọc lại `displayedPrice()`, Angular mới ghi nhận `discountRate` là dependency.
+
+```text
+showDiscount ──► displayedPrice
+listPrice    ──► displayedPrice
+
+discountRate ──► displayedPrice  (chỉ khi showDiscount() là true)
+```
+
+Cơ chế này giảm tính toán thừa và tự bỏ dependency cũ khi nhánh điều kiện đổi. Đừng tự duy trì danh sách dependency; hãy để lần đọc signal thực tế quyết định nó.
+
+### Lazy evaluation và memoization
+
+Computed **lazy**: Angular không nhất thiết tính lại ngay lúc một dependency đổi. Thay vào đó, computed được đánh dấu là cần tính lại (*invalid*). Hàm tính chỉ chạy khi có consumer đọc `computed()`.
+
+Computed cũng **memoized**: nếu inputs chưa đổi kể từ lần tính gần nhất, Angular trả lại kết quả đã lưu thay vì chạy lại hàm tính. Vì vậy, một phép lọc array có thể được nhiều binding đọc mà không bị chạy lại cho từng binding trong cùng trạng thái.
+
+```ts
+const products = signal<Product[]>([]);
+let runs = 0;
+
+const availableProducts = computed(() => {
+  runs++;
+  return products().filter((product) => product.inStock);
+});
+
+availableProducts(); // runs = 1
+availableProducts(); // runs vẫn là 1: trả kết quả đã nhớ
+products.set([...products(), { id: 1, inStock: true }]);
+// Chưa đọc availableProducts() nên hàm filter chưa nhất thiết chạy lại.
+availableProducts(); // runs = 2
+```
+
+Lazy evaluation không có nghĩa là “computed sẽ không cập nhật UI”. Nếu template đã đọc `availableProducts()`, Angular biết template là consumer. Khi `products` thay đổi, Angular sẽ kiểm tra view phù hợp; trong lúc view đọc computed, kết quả mới được tính nếu cần.
+
+<Callout type="warn" title="Đừng dựa vào computed để thực hiện công việc bắt buộc ngay lập tức">
+  Vì computed có thể chưa bị đọc, không dùng nó để gửi analytics, ghi dữ liệu hoặc thay đổi biến bên ngoài. Hàm tính phải an toàn khi không chạy, chạy muộn hoặc chạy lại.
+</Callout>
+
+### Computed là readonly
+
+`computed()` trả về `Signal<T>`, nên API chỉ có quyền đọc. Việc cấm ghi bảo vệ quan hệ “output được quyết định bởi input”.
+
+```ts
+const firstName = signal('Lan');
+const lastName = signal('Nguyễn');
+const fullName = computed(() => `${firstName()} ${lastName()}`);
+
+// fullName.set('Tên khác'); // Lỗi TypeScript: Signal<string> không có set.
+```
+
+Nếu người dùng cần sửa tên, hãy cập nhật `firstName` hoặc `lastName`. Không thêm writable signal `fullName` trừ khi nó thực sự là input độc lập với quy tắc đồng bộ được thiết kế rõ ràng.
+
+### Ví dụ hoàn chỉnh: giỏ hàng
+
+Ví dụ này giữ duy nhất `items` là state nguồn. Ba giá trị hiển thị còn lại đều là computed.
+
+```ts
+import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+
+interface CartItem {
+  id: number;
+  name: string;
+  price: number;
+  quantity: number;
+}
+
+@Component({
+  selector: 'app-cart-summary',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <p>{{ itemCount() }} sản phẩm</p>
+    <p>Tạm tính: {{ subtotal() | number }} đ</p>
+    <p [class.free-shipping]="hasFreeShipping()">
+      {{ hasFreeShipping() ? 'Được miễn phí giao hàng' : 'Chưa đủ mức miễn phí giao hàng' }}
+    </p>
+
+    @for (item of items(); track item.id) {
+      <button type="button" (click)="increase(item.id)">
+        Thêm {{ item.name }}
+      </button>
+    }
+  `,
+})
+export class CartSummaryComponent {
+  readonly items = signal<CartItem[]>([
+    { id: 1, name: 'Sách Angular', price: 180_000, quantity: 1 },
+    { id: 2, name: 'Bút', price: 20_000, quantity: 2 },
+  ]);
+
+  readonly itemCount = computed(() =>
+    this.items().reduce((count, item) => count + item.quantity, 0),
+  );
+
+  readonly subtotal = computed(() =>
+    this.items().reduce((sum, item) => sum + item.price * item.quantity, 0),
+  );
+
+  readonly hasFreeShipping = computed(() => this.subtotal() >= 300_000);
+
+  increase(id: number): void {
+    this.items.update((current) =>
+      current.map((item) =>
+        item.id === id ? { ...item, quantity: item.quantity + 1 } : item,
+      ),
+    );
+  }
+}
+```
+
+`increase()` chỉ thay `items`. `itemCount`, `subtotal` và `hasFreeShipping` tự trở nên cũ rồi được tính lại khi template cần chúng. Không có nơi nào phải nhớ cập nhật ba giá trị dẫn xuất, nên không có nguy cơ một trong số chúng bị quên.
+
+## Effect: đồng bộ với thế giới bên ngoài
+
+`effect()` đăng ký một hàm phản ứng với signals mà nó đọc. Khác `computed`, giá trị trả về của effect không được dùng làm state. Mục đích của effect là tạo **side effect**: một tác động quan sát được nằm ngoài graph signals, chẳng hạn ghi vào browser storage, gọi API DOM hoặc giao tiếp với thư viện bên thứ ba.
+
+### Khi nào effect là lựa chọn đúng
+
+Dùng effect khi cần giữ một hệ thống bên ngoài đồng bộ với state Angular.
+
+```ts
+import { effect, signal } from '@angular/core';
+
+const theme = signal<'light' | 'dark'>('light');
+
+effect(() => {
+  document.documentElement.dataset['theme'] = theme();
+});
+```
+
+Các trường hợp phù hợp khác:
+
+- Lưu một tuỳ chọn người dùng vào `localStorage`.
+- Cập nhật `document.title` từ route hoặc state hiện tại.
+- Đồng bộ một chart, map hoặc widget JavaScript không biết gì về signals.
+- Ghi log/analytics dựa trên một state đã ổn định, khi đó việc ghi log là mục đích thật sự.
+
+Việc template hiển thị `theme()` **không** cần effect. Template đã là reactive consumer và Angular tự cập nhật DOM.
+
+### Cách Angular lên lịch effect
+
+Effect chạy ít nhất một lần để Angular biết nó phụ thuộc signal nào. Khi một dependency đổi, Angular đánh dấu effect cần chạy lại. Angular thực thi effect **bất đồng bộ trong quá trình change detection**, không chạy đồng bộ ngay bên trong `.set()` hay `.update()`.
+
+```ts
+const count = signal(0);
+
+effect(() => console.log('effect thấy:', count()));
+
+count.set(1);
+console.log('sau set');
+```
+
+Không viết logic dựa vào việc dòng log của effect chắc chắn xuất hiện trước hay sau một statement JavaScript cụ thể. Thứ tự hữu ích để ghi nhớ là:
+
+```text
+signal.set(...)
+     │
+     ▼
+Dependency của effect được thông báo là đã đổi
+     │
+     ▼
+Angular lên lịch / chạy một lượt change detection phù hợp
+     │
+     ▼
+Effect chạy với giá trị hiện tại và theo dõi dependency cho lượt sau
+```
+
+Nếu nhiều dependency đổi trước khi effect có cơ hội chạy, effect quan sát trạng thái hiện tại khi nó chạy; không nên dùng nó như một hàng đợi để xử lý từng giá trị trung gian. Với yêu cầu xử lý mọi event theo thời gian, Observable/RxJS thường diễn tả đúng hơn.
+
+### Tạo effect trong injection context
+
+Thông thường, tạo effect trong constructor, field initializer của component/directive/service, hoặc một nơi có injection context. Angular dùng context đó để gắn lifecycle của effect với `DestroyRef` tương ứng.
+
+```ts
+import { Component, effect, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-page-title',
+  template: `<button (click)="nextPage()">Trang kế</button>`,
+})
+export class PageTitleComponent {
+  readonly page = signal(1);
+
+  constructor() {
+    effect(() => {
+      document.title = `Trang ${this.page()}`;
+    });
+  }
+
+  nextPage(): void {
+    this.page.update((page) => page + 1);
+  }
+}
+```
+
+Nếu cần tạo effect ở một method hoặc utility không có injection context hiện hành, truyền `Injector` qua options. Giữ `Injector` tại lớp sở hữu lifecycle thay vì tạo effect vô chủ.
+
+```ts
+import { Injector, effect, inject } from '@angular/core';
+
+export class SearchBoxComponent {
+  private readonly injector = inject(Injector);
+  readonly query = signal('');
+
+  enableLogging(): void {
+    effect(
+      () => console.log('Từ khoá hiện tại:', this.query()),
+      { injector: this.injector },
+    );
+  }
+}
+```
+
+<Callout type="warn" title="Không tạo effect lặp lại từ event handler">
+  Mỗi lần gọi `enableLogging()` trong ví dụ trên tạo một effect mới. Chỉ dùng mẫu này khi code bảo đảm tạo một lần hoặc chủ động huỷ `EffectRef`. Với effect cố định của component, khai báo một lần trong constructor/field initializer sẽ rõ ràng và an toàn hơn.
+</Callout>
+
+### Dọn dẹp tài nguyên
+
+Hàm effect có thể nhận callback `onCleanup`. Angular gọi cleanup ngay trước lần chạy kế tiếp và khi effect bị destroy. Dùng nó cho timer, event listener, subscription hoặc instance của thư viện bên ngoài.
+
+```ts
+import { effect, signal } from '@angular/core';
+
+const selectedId = signal<number | null>(null);
+
+effect((onCleanup) => {
+  const id = selectedId();
+  if (id === null) return;
+
+  const timerId = window.setInterval(() => {
+    console.log(`Đồng bộ trạng thái cho ${id}`);
+  }, 5_000);
+
+  onCleanup(() => window.clearInterval(timerId));
+});
+```
+
+Khi `selectedId` đổi từ `1` sang `2`, interval cho `1` được dừng trước rồi effect mới tạo interval cho `2`. Khi component/service sở hữu effect bị destroy, interval cuối cùng cũng được dừng.
+
+Mặc định Angular tự destroy effect cùng injection context. `effect()` trả về `EffectRef`; chỉ dùng `{ manualCleanup: true }` khi bạn thực sự cần lifecycle độc lập, rồi gọi `effectRef.destroy()` ở nơi chắc chắn chạy. Nếu không, manual cleanup dễ gây rò rỉ tài nguyên.
+
+### Dependency động và untracked
+
+Giống computed, effect chỉ phụ thuộc các signals được đọc ở lần chạy hiện tại. Tuy nhiên, đôi khi effect cần đọc một signal phụ để lấy snapshot mà **không** muốn lần đọc đó kích hoạt lại effect. Dùng `untracked` cho đúng lần đọc đó.
+
+```ts
+import { effect, signal, untracked } from '@angular/core';
+
+const currentUser = signal<User | null>(null);
+const logLevel = signal<'debug' | 'silent'>('debug');
+
+effect(() => {
+  const user = currentUser(); // dependency: đổi user thì log lại
+  const level = untracked(() => logLevel()); // chỉ đọc snapshot
+
+  if (level === 'debug' && user) {
+    console.log('Người dùng hiện tại:', user.id);
+  }
+});
+```
+
+Đổi `logLevel` không làm effect chạy lại. Đổi `currentUser` thì effect chạy lại và đọc `logLevel` mới nhất. Không dùng `untracked` để che một dependency cần phản ứng thật; nó chỉ phù hợp cho dữ liệu ngữ cảnh phụ, logging hoặc API bên ngoài có thể đọc signal nội bộ.
+
+### Ví dụ: lưu tuỳ chọn giao diện
+
+Component dưới đây đọc giá trị khởi tạo một lần từ `localStorage`, sau đó effect chỉ chịu trách nhiệm ghi thay đổi ra storage. State UI vẫn là `theme`; effect không tạo state dẫn xuất nào.
+
+```ts
+import { Component, effect, signal } from '@angular/core';
+
+type Theme = 'light' | 'dark';
+
+@Component({
+  selector: 'app-theme-toggle',
+  template: `
+    <button type="button" (click)="toggle()">
+      Dùng giao diện {{ theme() === 'dark' ? 'sáng' : 'tối' }}
+    </button>
+  `,
+})
+export class ThemeToggleComponent {
+  readonly theme = signal<Theme>(this.readInitialTheme());
+
+  constructor() {
+    effect(() => {
+      const value = this.theme();
+      document.documentElement.dataset['theme'] = value;
+      localStorage.setItem('theme', value);
+    });
+  }
+
+  toggle(): void {
+    this.theme.update((value) => (value === 'dark' ? 'light' : 'dark'));
+  }
+
+  private readInitialTheme(): Theme {
+    return localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
+  }
+}
+```
+
+Trong ứng dụng server-side rendering, `window`, `document` và `localStorage` không tồn tại trên server. Hãy chỉ đọc/ghi các browser API sau khi kiểm tra platform hoặc đặt logic đó vào đoạn chỉ chạy trên browser. Đây là ranh giới môi trường, không phải điều effect tự giải quyết.
+
+## Khi không dùng effect
+
+Effect có vẻ tiện vì “chạy khi signal đổi”, nhưng đó không phải tiêu chí đủ. Trước khi thêm effect, hãy xác định output cần là giá trị reactive, thay đổi DOM trong template, hay một tác động ngoài Angular. Hai trường hợp đầu thường không cần effect.
+
+### Không dùng effect để tạo derived state
+
+Đây là anti-pattern phổ biến:
+
+```ts
+const price = signal(100);
+const quantity = signal(2);
+const total = signal(0);
+
+// Không nên: effect dùng để truyền state.
+effect(() => {
+  total.set(price() * quantity());
+});
+```
+
+`total` có thể tạm giữ giá trị cũ vì effect được lên lịch bất đồng bộ. Mã cũng tạo thêm một nguồn state phải quản lý và có nguy cơ vòng lặp nếu effect sau đó đọc/ghi lẫn nhau.
+
+Dùng `computed` thay thế:
+
+```ts
+const total = computed(() => price() * quantity());
+```
+
+Kết quả là luôn nhất quán với input ở thời điểm đọc, có memoization và không cần lịch chạy effect.
+
+### Không dùng effect để gọi HTTP theo mọi thay đổi
+
+Có thể viết effect gọi HTTP khi `query()` đổi, nhưng cách này nhanh chóng cần debounce, huỷ request cũ, xử lý lỗi, retry và tránh race condition. Effect không tự cung cấp các toán tử hoặc cancellation semantics cho luồng đó.
+
+```ts
+// Cẩn thận: request cũ có thể trả về sau request mới.
+effect(() => {
+  fetch(`/api/search?q=${encodeURIComponent(query())}`)
+    .then((response) => response.json())
+    .then((data) => results.set(data));
+});
+```
+
+Với tìm kiếm phản ứng, hãy dùng RxJS `switchMap` để huỷ subscription cũ khi query đổi, hoặc dùng resource/API bất đồng bộ phù hợp với phiên bản Angular của dự án. Sau đó đưa kết quả mới nhất về signal cho template nếu cần. Xem thêm [Signals và RxJS](/docs/reactivity-state/signals-rxjs).
+
+### Không dùng effect thay lifecycle hook
+
+Effect không thay `ngOnInit`, `ngOnChanges` hoặc một event handler chỉ vì chúng có thể chạy mã. Nếu công việc phải xảy ra một lần khi component khởi tạo và không phụ thuộc signal, lifecycle hook hoặc constructor phù hợp hơn. Nếu công việc bắt nguồn trực tiếp từ click người dùng, gọi method từ handler sẽ dễ đọc hơn effect gián tiếp.
+
+Nói ngắn gọn: dùng effect khi cần **đồng bộ một external system với reactive state**. Không dùng nó để thay thế mọi đoạn mã chạy sau khi component tồn tại.
+
+## Lỗi thường gặp và trade-off
+
+### Có side effect trong computed
+
+```ts
+// Không nên: computed vừa tính giá trị vừa ghi ra ngoài.
+const label = computed(() => {
+  localStorage.setItem('name', name());
+  return `Xin chào ${name()}`;
+});
+```
+
+Vì computed lazy và memoized, thao tác ghi có thể không xảy ra hoặc không xảy ra ở thời điểm bạn đoán. Giữ computed thuần: chỉ đọc input và trả value. Đưa `localStorage.setItem` vào effect riêng.
+
+### Đọc signal nhưng không gọi nó
+
+```ts
+// Sai: `theme` là function object, không tạo lần đọc reactive.
+console.log(theme);
+
+// Đúng: gọi signal để lấy giá trị và tạo dependency trong effect/computed.
+console.log(theme());
+```
+
+Quy tắc này giống trong template: viết `{{ theme() }}`, không phải `{{ theme }}`.
+
+### Dựa vào thời điểm chạy đồng bộ
+
+Không đọc một biến ngoài để kỳ vọng effect đã cập nhật nó ngay sau `.set()`. Effect chạy trong quá trình change detection, vì vậy thời điểm chính xác không phải public contract để điều phối logic nghiệp vụ. Nếu cần giá trị dẫn xuất ngay, đọc `computed()`. Nếu cần xử lý chuỗi bất đồng bộ theo thứ tự, dùng một abstraction dành cho stream hoặc promise flow.
+
+### Quên cleanup
+
+```ts
+// Không nên: mỗi lần roomId đổi tạo thêm listener.
+effect(() => {
+  socket.join(roomId(), (message) => messages.update((all) => [...all, message]));
+});
+```
+
+Nếu API `socket.join` trả về hàm huỷ, đăng ký nó bằng `onCleanup`:
+
+```ts
+effect((onCleanup) => {
+  const leave = socket.join(roomId(), (message) => {
+    messages.update((all) => [...all, message]);
+  });
+
+  onCleanup(() => leave());
+});
+```
+
+Cleanup làm rõ một effect chỉ có một subscription đang hoạt động cho `roomId` hiện tại. Nó đổi thêm vài dòng code lấy sự an toàn lifecycle và tránh listener cũ tiếp tục sửa state.
+
+### Chuỗi effect ghi signal
+
+Một effect ghi signal mà effect khác đọc tạo luồng điều khiển gián tiếp. Nhiều effect nối nhau dễ khó debug, gây thứ tự chạy không rõ và có thể tạo vòng lặp phản hồi.
+
+```text
+query ──► effect A ──► result signal ──► effect B ──► trạng thái khác
+```
+
+Tách rõ trách nhiệm: dùng `computed` cho biến đổi state đồng bộ; giữ logic bất đồng bộ trong RxJS/resource; chỉ dùng effect tại ranh giới ngoài cùng. Một effect thật sự cần cập nhật signal vẫn có thể hợp lệ, nhưng cần có lý do nghiệp vụ rõ ràng, điều kiện dừng và cleanup nếu tạo tài nguyên.
+
+## Checklist và tóm tắt
+
+Trước khi viết reactive code, kiểm tra theo thứ tự:
+
+1. Giá trị có được tính hoàn toàn từ signals khác không? Dùng `computed`.
+2. Giá trị có phải state gốc được người dùng/API thay đổi trực tiếp không? Dùng `signal`.
+3. Có cần đồng bộ với DOM API, storage hoặc thư viện ngoài Angular không? Cân nhắc `effect`.
+4. Effect có đọc browser API, timer, listener hoặc subscription không? Kiểm tra SSR và đăng ký `onCleanup` khi cần.
+5. Bạn có đang dùng effect để truyền state, render template hoặc chạy request có debounce/cancellation không? Dừng lại và chọn `computed`, template, RxJS hoặc resource phù hợp hơn.
+
+Tóm tắt các điểm chính:
+
+- `computed` là signal readonly cho derived state. Nó theo dõi dependency động, lazy và memoized.
+- Đọc computed trong template hoặc code bằng `computedSignal()`. Không ghi vào computed bằng `.set()`.
+- `effect` phản ứng với signals để đồng bộ external system; nó chạy bất đồng bộ trong change detection.
+- Effect được Angular tự huỷ theo injection context. Dùng `onCleanup` cho mọi tài nguyên cần giải phóng giữa các lần chạy hoặc khi destroy.
+- Không dùng effect để giữ hai signals đồng bộ, cập nhật DOM mà template đã quản lý, hoặc mô phỏng stream RxJS phức tạp.
+
+<Cards>
+  <Card title="Signals" href="/docs/reactivity-state/signals" description="Nắm vững signal, quyền ghi và cập nhật immutable trước khi dẫn xuất state." />
+  <Card title="Signals và RxJS" href="/docs/reactivity-state/signals-rxjs" description="Chọn đúng ranh giới giữa state hiện tại và luồng bất đồng bộ." />
+</Cards>

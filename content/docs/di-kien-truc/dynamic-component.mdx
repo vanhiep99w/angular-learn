@@ -1,10 +1,566 @@
 ---
 title: Dynamic component
-description: Tạo và chèn component động theo ngữ cảnh chạy.
+description: Tạo, cấu hình và hủy component Angular tại thời điểm chạy bằng ViewContainerRef mà vẫn kiểm soát được DI và vòng đời.
 ---
 
-Trang này sẽ trình bày **Dynamic component** trong Angular, bao gồm kiến thức cốt lõi và hướng áp dụng thực tế.
-
-<Callout type="info" title="Trang khung">
-  Nội dung chi tiết sẽ được bổ sung trong lượt viết tài liệu chuyên sâu tiếp theo.
+<Callout type="info" title="Mục tiêu trang này">
+  Sau bài này, bạn có thể tạo một vùng UI mà loại component chỉ được biết khi ứng dụng đang chạy, truyền input/nhận output, chọn injector phù hợp và dọn dẹp instance đúng lúc.
 </Callout>
+
+## Mục lục
+
+- [Khái niệm dynamic component](#khái-niệm-dynamic-component)
+  - [Use case phù hợp](#use-case-phù-hợp)
+  - [Khi không nên dùng](#khi-không-nên-dùng)
+- [Cơ chế tạo component lúc chạy](#cơ-chế-tạo-component-lúc-chạy)
+  - [Vùng chèn view](#vùng-chèn-view)
+  - [Tạo instance và gắn vào cây view](#tạo-instance-và-gắn-vào-cây-view)
+  - [Vòng đời sau khi được chèn](#vòng-đời-sau-khi-được-chèn)
+- [Ví dụ hoàn chỉnh về widget khuyến mãi](#ví-dụ-hoàn-chỉnh-về-widget-khuyến-mãi)
+  - [Các component có thể chọn](#các-component-có-thể-chọn)
+  - [Host tạo component theo cấu hình](#host-tạo-component-theo-cấu-hình)
+  - [Luồng chạy của ví dụ](#luồng-chạy-của-ví-dụ)
+- [Truyền input và nhận output](#truyền-input-và-nhận-output)
+  - [Cập nhật input qua component reference](#cập-nhật-input-qua-component-reference)
+  - [Đăng ký output](#đăng-ký-output)
+- [Chọn injector cho component động](#chọn-injector-cho-component-động)
+  - [Injector mặc định của container](#injector-mặc-định-của-container)
+  - [Tạo phạm vi dependency riêng](#tạo-phạm-vi-dependency-riêng)
+- [Cleanup và quyền sở hữu vòng đời](#cleanup-và-quyền-sở-hữu-vòng-đời)
+  - [Thay thế component cũ](#thay-thế-component-cũ)
+  - [Subscription và tài nguyên bên trong](#subscription-và-tài-nguyên-bên-trong)
+- [Lỗi thường gặp và cách chẩn đoán](#lỗi-thường-gặp-và-cách-chẩn-đoán)
+- [Trade-off thiết kế](#trade-off-thiết-kế)
+- [Các lựa chọn thay thế](#các-lựa-chọn-thay-thế)
+- [Kiểm thử vùng UI động](#kiểm-thử-vùng-ui-động)
+- [Tóm tắt](#tóm-tắt)
+
+## Khái niệm dynamic component
+
+**Dynamic component** là component mà Angular chỉ quyết định *class nào sẽ được tạo* khi ứng dụng đang chạy. Thay vì viết thẳng một selector trong template, code lấy một `Type<Component>` rồi tạo instance của type đó và chèn view của instance vào một vị trí đã định.
+
+Ví dụ, máy chủ trả về cấu hình chiến dịch `{ kind: 'banner' }` hoặc `{ kind: 'code' }`. Trang checkout biết phải dành một vùng cho khuyến mãi, nhưng chỉ sau khi nhận cấu hình mới biết vùng đó hiển thị `PromoBannerComponent` hay `PromoCodeComponent`.
+
+Dynamic component không có nghĩa Angular biên dịch template tùy ý từ chuỗi do máy chủ gửi. Các class component vẫn phải được biên dịch và có trong bundle của ứng dụng. Dữ liệu chạy chỉ chọn trong **danh sách component được application tin cậy**.
+
+### Use case phù hợp
+
+Dùng dynamic component khi loại UI là một điểm mở rộng thực sự và không thể quyết định hoàn toàn lúc viết template, chẳng hạn:
+
+- Dashboard cho phép người dùng chọn các widget đã được ứng dụng đăng ký.
+- CMS hoặc remote configuration chọn một khối giao diện từ allowlist của client.
+- Wizard có bước thay đổi theo loại hồ sơ, quyền hoặc kết quả bước trước.
+- Hệ thống plugin nội bộ có hợp đồng input/output rõ ràng.
+- Modal, toast hoặc overlay cần tạo nội dung tại một container dịch vụ quản lý.
+
+Điểm chung là host chỉ biết **hợp đồng và vị trí đặt UI**, còn implementation cụ thể được chọn tại runtime.
+
+### Khi không nên dùng
+
+Nếu mọi nhánh UI đã biết trong mã nguồn và chỉ thay đổi theo một boolean hoặc enum nhỏ, `@if` hay `@switch` thường tốt hơn. Template tường minh giúp Angular kiểm tra binding, người đọc thấy đủ nhánh UI ở một nơi và test dễ hơn.
+
+```html
+@switch (paymentMethod()) {
+  @case ('card') {
+    <app-card-payment />
+  }
+  @case ('bank-transfer') {
+    <app-bank-transfer />
+  }
+}
+```
+
+Cũng không dùng dynamic component chỉ để gọi một component con từ TypeScript. Component con tĩnh với input/output thường ít code hơn, ít rủi ro cleanup hơn và giữ được quan hệ cha-con rõ ràng.
+
+<Callout type="idea" title="Quy tắc quyết định nhanh">
+  Nếu có thể viết các nhánh cố định trong template mà không làm mã khó đọc, hãy ưu tiên template. Chỉ tạo component động khi **type component** là dữ liệu quyết định ở lúc chạy, không chỉ khi dữ liệu hiển thị thay đổi.
+</Callout>
+
+## Cơ chế tạo component lúc chạy
+
+API trung tâm là `ViewContainerRef.createComponent()`. `ViewContainerRef` đại diện cho một container của các view Angular. Nó có thể chứa embedded view từ structural directive hoặc host view của component được tạo bằng code.
+
+### Vùng chèn view
+
+Trong một component host, lấy `ViewContainerRef` từ một điểm neo trong template. Ví dụ sau dùng `ng-container`, nên Angular có vị trí để chèn view nhưng không tạo thêm phần tử HTML bao quanh.
+
+```ts
+import { Component, ViewChild, ViewContainerRef } from '@angular/core';
+
+@Component({
+  selector: 'app-checkout-promotion',
+  standalone: true,
+  template: `<ng-container #widgetSlot></ng-container>`,
+})
+export class CheckoutPromotionComponent {
+  @ViewChild('widgetSlot', { read: ViewContainerRef, static: true })
+  private readonly widgetSlot!: ViewContainerRef;
+}
+```
+
+`widgetSlot` là nơi host sở hữu. Gọi `createComponent()` trên container này sẽ chèn component mới vào đúng vị trí của `ng-container` trong DOM và trong cây view Angular.
+
+### Tạo instance và gắn vào cây view
+
+`createComponent()` nhận class component và tùy chọn như `environmentInjector`. Nó trả về `ComponentRef<C>`, là handle để điều khiển instance vừa tạo.
+
+```ts
+const reference = this.widgetSlot.createComponent(PromoBannerComponent, {
+  environmentInjector: this.environmentInjector,
+});
+
+reference.setInput('title', 'Ưu đãi cho đơn hàng đầu tiên');
+```
+
+`ComponentRef` cho phép:
+
+| Thành phần | Công dụng |
+| --- | --- |
+| `reference.instance` | Lấy instance component để dùng API public, ví dụ đăng ký output. |
+| `reference.setInput(name, value)` | Gán input theo cơ chế Angular. |
+| `reference.location` | Truy cập `ElementRef` của host element khi thật sự cần thao tác DOM. |
+| `reference.changeDetectorRef` | Điều khiển change detection thủ công trong trường hợp đặc biệt. |
+| `reference.onDestroy(callback)` | Đăng ký logic chạy khi reference bị hủy. |
+| `reference.destroy()` | Hủy component và host view mà reference sở hữu. |
+
+Không gọi `new PromoBannerComponent()` trực tiếp. Cách đó chỉ tạo object TypeScript; Angular không tạo host view, không thiết lập injector, không chạy binding template và không quản lý lifecycle cho object đó.
+
+### Vòng đời sau khi được chèn
+
+Sau khi component được chèn vào `ViewContainerRef`, nó tham gia cây view bình thường. Angular chạy change detection theo lịch của ứng dụng; input được đặt bằng `setInput()` có thể được component quan sát qua input signal hoặc `ngOnChanges`.
+
+```text
+Cấu hình lúc chạy
+       │ chọn type từ allowlist
+       ▼
+┌───────────────────────────────┐
+│ Component host                │
+│ ViewContainerRef widgetSlot   │
+└───────────────┬───────────────┘
+                │ createComponent(type, options)
+                ▼
+┌───────────────────────────────┐
+│ ComponentRef                  │
+│ instance + host view + handle │
+└───────┬───────────┬───────────┘
+        │           │
+        │           └── setInput / subscribe output
+        ▼
+Cây view Angular → render DOM → destroy khi host thay thế hoặc bị hủy
+```
+
+Trong ứng dụng dùng change detection mặc định hoặc signals, không cần gọi `detectChanges()` sau mọi `setInput()`. Chỉ dùng `reference.changeDetectorRef.detectChanges()` khi bạn đang tạo component ở một luồng rất đặc biệt và biết chính xác vì sao cần render đồng bộ. Lạm dụng nó làm thứ tự render khó đoán hơn.
+
+## Ví dụ hoàn chỉnh về widget khuyến mãi
+
+Ví dụ này hiển thị một widget khuyến mãi trên checkout. Máy chủ chỉ được phép trả `kind`; client ánh xạ `kind` sang class qua registry cục bộ. Vì registry do mã ứng dụng kiểm soát, dữ liệu từ máy chủ không thể yêu cầu Angular tạo một class bất kỳ.
+
+### Các component có thể chọn
+
+Hai component triển khai cùng một hợp đồng output `selected`. Chúng nhận input signal `title` và `value`, rồi phát mã khuyến mãi người dùng đã chọn.
+
+```ts
+import {
+  Component,
+  input,
+  output,
+  type OutputEmitterRef,
+} from '@angular/core';
+
+export interface PromoWidget {
+  readonly selected: OutputEmitterRef<string>;
+}
+
+@Component({
+  selector: 'app-promo-banner',
+  standalone: true,
+  template: `
+    <section class="promo-banner">
+      <h2>{{ title() }}</h2>
+      <button type="button" (click)="select()">Dùng {{ value() }}</button>
+    </section>
+  `,
+})
+export class PromoBannerComponent implements PromoWidget {
+  readonly title = input.required<string>();
+  readonly value = input.required<string>();
+  readonly selected = output<string>();
+
+  select(): void {
+    this.selected.emit(this.value());
+  }
+}
+
+@Component({
+  selector: 'app-promo-code',
+  standalone: true,
+  template: `
+    <section class="promo-code">
+      <p>{{ title() }}</p>
+      <button type="button" (click)="select()">Sao chép mã</button>
+    </section>
+  `,
+})
+export class PromoCodeComponent implements PromoWidget {
+  readonly title = input.required<string>();
+  readonly value = input.required<string>();
+  readonly selected = output<string>();
+
+  select(): void {
+    this.selected.emit(this.value());
+  }
+}
+```
+
+`PromoWidget` là hợp đồng nhỏ mà host thực sự cần: widget có output `selected`. Host không cần biết chi tiết template hoặc phương thức riêng của từng loại widget.
+
+### Host tạo component theo cấu hình
+
+Host dùng `Record` làm allowlist. Nếu `kind` không có trong record, code fail sớm thay vì cố tạo một component từ chuỗi tên class.
+
+```ts
+import {
+  Component,
+  ComponentRef,
+  EnvironmentInjector,
+  OnDestroy,
+  Type,
+  ViewChild,
+  ViewContainerRef,
+  inject,
+} from '@angular/core';
+import {
+  PromoBannerComponent,
+  PromoCodeComponent,
+  type PromoWidget,
+} from './promo-widgets';
+
+type PromoWidgetKind = 'banner' | 'code';
+
+interface PromoDefinition {
+  readonly kind: PromoWidgetKind;
+  readonly title: string;
+  readonly value: string;
+}
+
+const WIDGET_TYPES: Record<PromoWidgetKind, Type<PromoWidget>> = {
+  banner: PromoBannerComponent,
+  code: PromoCodeComponent,
+};
+
+@Component({
+  selector: 'app-checkout-promotion',
+  standalone: true,
+  template: `<ng-container #widgetSlot></ng-container>`,
+})
+export class CheckoutPromotionComponent implements OnDestroy {
+  @ViewChild('widgetSlot', { read: ViewContainerRef, static: true })
+  private readonly widgetSlot!: ViewContainerRef;
+
+  private readonly environmentInjector = inject(EnvironmentInjector);
+  private widgetRef?: ComponentRef<PromoWidget>;
+
+  show(definition: PromoDefinition): void {
+    // Slot này chỉ thuộc widget hiện tại, nên component cũ phải được bỏ trước.
+    this.widgetRef?.destroy();
+
+    const componentType = WIDGET_TYPES[definition.kind];
+    const reference = this.widgetSlot.createComponent(componentType, {
+      environmentInjector: this.environmentInjector,
+    });
+
+    reference.setInput('title', definition.title);
+    reference.setInput('value', definition.value);
+
+    reference.instance.selected.subscribe((code) => {
+      this.applyPromotion(code);
+    });
+
+    this.widgetRef = reference;
+  }
+
+  ngOnDestroy(): void {
+    this.widgetRef?.destroy();
+  }
+
+  private applyPromotion(code: string): void {
+    // Gọi facade hoặc service của feature để áp dụng mã cho đơn hàng.
+    console.log(`Áp dụng mã: ${code}`);
+  }
+}
+```
+
+Trong ứng dụng thật, gọi `show()` sau khi nhận `PromoDefinition` đã được validate. `kind` nên là union type ở client; nếu API có thể gửi giá trị không hợp lệ, hãy kiểm tra schema ở boundary HTTP trước khi gọi hàm này.
+
+### Luồng chạy của ví dụ
+
+1. Host nhận cấu hình, ví dụ `{ kind: 'banner', title: 'Giảm 10%', value: 'NEW10' }`.
+2. Host tra `WIDGET_TYPES` để lấy `PromoBannerComponent` từ allowlist.
+3. Host hủy `ComponentRef` cũ, nếu có, để vùng này chỉ chứa một widget.
+4. `ViewContainerRef.createComponent()` tạo host view, giải quyết dependency qua injector và chèn view vào `widgetSlot`.
+5. Host gọi `setInput()` rồi lắng nghe output `selected`.
+6. Khi người dùng nhấn nút, widget emit mã. Host nhận mã và chuyển nghiệp vụ sang facade/service.
+7. Khi cấu hình đổi hoặc host bị destroy, `ComponentRef.destroy()` hủy widget cũ và lifecycle cleanup của widget chạy.
+
+<Callout type="warn" title="Không dùng dữ liệu chạy làm đường dẫn import">
+  Không tải một module bất kỳ bằng chuỗi do máy chủ hoặc người dùng cung cấp rồi truyền export vào `createComponent()`. Hãy giữ một registry allowlist, kiểm tra quyền chọn widget tại server nếu cần, và validate dữ liệu input trước khi hiển thị.
+</Callout>
+
+## Truyền input và nhận output
+
+Dynamic component không thay đổi mô hình giao tiếp Angular. Host vẫn đưa dữ liệu xuống qua input và nhận sự kiện đi lên qua output. Khác biệt là host giữ `ComponentRef` thay vì Angular tự nối binding từ template tĩnh.
+
+### Cập nhật input qua component reference
+
+Dùng `reference.setInput('inputName', value)` để đặt input. Tên truyền vào là tên input public; trong ví dụ, `title` và `value` trùng tên property.
+
+```ts
+reference.setInput('title', 'Miễn phí vận chuyển');
+reference.setInput('value', 'FREESHIP');
+```
+
+Đây là lựa chọn nên dùng thay vì gán trực tiếp `reference.instance.title = ...`. `setInput()` đi qua cơ chế binding của Angular, nên phù hợp với input signal, alias input và lifecycle như `ngOnChanges` của component dùng decorator `@Input()`.
+
+Để cập nhật khi state host đổi, gọi lại `setInput()` với giá trị mới. Không cần tạo lại component nếu chỉ dữ liệu thay đổi và component type vẫn đúng.
+
+```ts
+updatePromotionTitle(title: string): void {
+  this.widgetRef?.setInput('title', title);
+}
+```
+
+Nếu tập input thay đổi theo từng type, đừng ép mọi component nhận một object `any` khổng lồ. Có hai cách rõ ràng hơn:
+
+- Thiết kế một contract input chung thật sự nhỏ, như `title` và `value` trong ví dụ.
+- Tạo hàm render riêng cho từng type để TypeScript kiểm soát shape input của type đó.
+
+### Đăng ký output
+
+Với API `output()`, output là `OutputEmitterRef`. Host đăng ký trực tiếp trên instance.
+
+```ts
+const subscription = reference.instance.selected.subscribe((code) => {
+  this.applyPromotion(code);
+});
+```
+
+Angular tự dọn subscription được tạo trên output khi component phát output bị destroy. Biến `subscription` chỉ cần giữ lại nếu host muốn chủ động `unsubscribe()` sớm, chẳng hạn tạm ngừng phản hồi sự kiện trước khi hủy widget.
+
+Với component cũ dùng `@Output() readonly selected = new EventEmitter<string>()`, host cũng có thể gọi `reference.instance.selected.subscribe(...)`. Tuy nhiên, cần kiểm tra API component đó và tự quản lý subscription như với bất kỳ `EventEmitter`/RxJS subscription nào khi vòng đời không rõ ràng.
+
+<Callout type="idea" title="Giữ chiều giao tiếp một chiều">
+  Component động nên emit ý định như `selected`, `saved` hoặc `closed`. Host quyết định gọi API, điều hướng hay cập nhật store. Đừng để plugin UI tự inject và sửa state toàn cục nếu hành vi đó thực chất thuộc về host feature.
+</Callout>
+
+## Chọn injector cho component động
+
+Component động vẫn cần dependency như component tĩnh: `HttpClient`, service feature, token cấu hình hoặc `DestroyRef`. Việc chọn injector xác định instance nào component nhận và khi nào các dependency cục bộ bị hủy.
+
+### Injector mặc định của container
+
+Nếu không truyền tùy chọn injector, Angular dùng context gắn với `ViewContainerRef`. Đây là mặc định tốt khi dynamic component là một phần tự nhiên của cây UI hiện tại và cần nhìn thấy các provider của host, route hoặc ứng dụng.
+
+Ví dụ ở trên truyền rõ `environmentInjector: this.environmentInjector`. Điều này làm dependency environment của widget được xác định tường minh là environment injector tại host. Nó phù hợp khi tạo component từ code và đặc biệt hữu ích nếu host có nhiều loại container hoặc đang xây service/overlay.
+
+- `environmentInjector` cung cấp provider môi trường như application, route hoặc feature providers.
+- `injector` trong options là injector cha ở cấp element. Chỉ truyền nó khi bạn có lý do cụ thể để thay quan hệ injector của component.
+- Provider gần component hơn vẫn có thể che provider ở environment injector, theo quy tắc DI thông thường.
+
+Không tạo injector riêng chỉ để truyền một primitive. Nếu dữ liệu đó là state hiển thị, input rõ nghĩa thường tốt hơn. Injector nên truyền dependency hoặc capability mà component cần độc lập với lần render cụ thể.
+
+### Tạo phạm vi dependency riêng
+
+Một plugin có thể cần context DI riêng, ví dụ token ghi nhận `campaignId`. Tạo `EnvironmentInjector` con với injector hiện tại làm cha, rồi hủy nó khi owner hủy widget.
+
+```ts
+import {
+  ComponentRef,
+  EnvironmentInjector,
+  InjectionToken,
+  ViewContainerRef,
+  createEnvironmentInjector,
+  inject,
+} from '@angular/core';
+
+export const WIDGET_CONTEXT = new InjectionToken<{ campaignId: string }>(
+  'widget.context',
+);
+
+export class WidgetHost {
+  private readonly parentInjector = inject(EnvironmentInjector);
+  private widgetInjector?: EnvironmentInjector;
+  private widgetRef?: ComponentRef<PromoWidget>;
+
+  constructor(private readonly slot: ViewContainerRef) {}
+
+  showForCampaign(campaignId: string): void {
+    this.destroyCurrentWidget();
+
+    this.widgetInjector = createEnvironmentInjector(
+      [{ provide: WIDGET_CONTEXT, useValue: { campaignId } }],
+      this.parentInjector,
+    );
+
+    this.widgetRef = this.slot.createComponent(PromoBannerComponent, {
+      environmentInjector: this.widgetInjector,
+    });
+  }
+
+  destroyCurrentWidget(): void {
+    this.widgetRef?.destroy();
+    this.widgetRef = undefined;
+
+    this.widgetInjector?.destroy();
+    this.widgetInjector = undefined;
+  }
+}
+```
+
+`WidgetHost` trong đoạn này là ví dụ service/class điều phối, không phải component hoàn chỉnh. Điều quan trọng là **cùng một owner tạo và hủy injector con**. Nếu quên `widgetInjector.destroy()`, các service scope này có thể còn sống dù component đã biến mất.
+
+## Cleanup và quyền sở hữu vòng đời
+
+Tạo component động cũng tạo trách nhiệm dọn dẹp. Hãy xác định rõ container nào sở hữu view, class nào giữ `ComponentRef`, và lúc nào instance không còn hợp lệ.
+
+### Thay thế component cũ
+
+Khi slot chỉ hiển thị một component tại một thời điểm, giữ một reference và hủy reference trước khi tạo component mới. Đây là cách ví dụ `show()` hoạt động.
+
+```ts
+this.widgetRef?.destroy();
+this.widgetRef = this.widgetSlot.createComponent(componentType);
+```
+
+`ViewContainerRef.clear()` cũng hủy mọi view trong container. Nó tiện khi host sở hữu toàn bộ slot và muốn xóa tất cả. Không gọi `clear()` trên container đang chứa view mà phần khác của feature sở hữu, vì bạn sẽ hủy cả những component không liên quan.
+
+```ts
+// Chỉ an toàn khi widgetSlot là vùng dành riêng cho các widget của host này.
+this.widgetSlot.clear();
+```
+
+Khi component host bị hủy, Angular hủy các view nằm trong container của nó. Dù vậy, gọi `destroy()` cho reference mà host đang giữ vẫn có ích khi cần thay thế sớm hoặc hủy một resource owner đi kèm như `EnvironmentInjector` riêng.
+
+### Subscription và tài nguyên bên trong
+
+Component động nên tự dọn tài nguyên nội bộ giống component tĩnh. Ví dụ, một widget mở `WebSocket`, timer hoặc subscription RxJS có vòng đời dài phải dùng `DestroyRef` hoặc `takeUntilDestroyed()` để đóng nó khi component bị destroy.
+
+```ts
+import { Component, DestroyRef, inject } from '@angular/core';
+import { interval } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+@Component({
+  selector: 'app-live-promo',
+  standalone: true,
+  template: `Đang cập nhật ưu đãi`,
+})
+export class LivePromoComponent {
+  private readonly destroyRef = inject(DestroyRef);
+
+  constructor() {
+    interval(5_000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.refreshOffer());
+  }
+
+  private refreshOffer(): void {
+    // Tải lại dữ liệu hoặc phát trạng thái mới.
+  }
+}
+```
+
+Host không nên với vào subscription nội bộ này. Ranh giới tốt là: component chịu trách nhiệm tài nguyên của chính nó; host chịu trách nhiệm `ComponentRef`, output subscription do host tạo và injector con do host tạo.
+
+## Lỗi thường gặp và cách chẩn đoán
+
+| Dấu hiệu | Nguyên nhân thường gặp | Cách xử lý |
+| --- | --- | --- |
+| Không thấy component trên màn hình | Chưa gọi `createComponent()` trên đúng container, `@ViewChild` chưa sẵn sàng, hoặc condition không gọi `show()`. | Đặt log/breakpoint tại điểm lấy `ViewContainerRef` và sau `createComponent()`; dùng `static: true` chỉ khi điểm neo không nằm trong nhánh condition. |
+| `Cannot read properties of undefined` với slot | Dùng `@ViewChild` trước khi view được tạo hoặc điểm neo nằm trong `@if` chưa render. | Tạo sau lifecycle phù hợp, hoặc đặt container ngoài nhánh condition; kiểm tra `ViewChild` có thể `undefined`. |
+| `NullInjectorError` trong widget | Component được tạo bằng environment injector không có provider cần thiết, hoặc provider ở element host không nằm trên đường tra cứu mong đợi. | Kiểm tra token, scope provider và `environmentInjector`/`injector` truyền vào. Đừng sửa bằng `optional: true` nếu dependency là bắt buộc. |
+| Input không cập nhật hoặc `ngOnChanges` không chạy như mong đợi | Gán trực tiếp vào `instance` thay vì đi qua binding Angular. | Dùng `reference.setInput()`; kiểm tra đúng public input name và alias. |
+| Nhiều widget chồng lên nhau | Mỗi lần đổi cấu hình lại tạo thêm view mà không hủy view trước. | Giữ `ComponentRef` hiện tại và gọi `destroy()`, hoặc dùng `clear()` trên slot chuyên dụng. |
+| Xử lý output bị gọi nhiều lần | Output subscription từ component cũ còn sống hoặc component cũ chưa bị hủy. | Hủy reference cũ trước khi thay; với subscription không thuộc output tự dọn, lưu và `unsubscribe()` rõ ràng. |
+| Cùng widget nhưng nhận state/service khác dự kiến | Injector cục bộ che provider cha hoặc mỗi lần render tạo environment injector mới. | Vẽ lại cây injector, kiểm tra `providers` trên component/route và chỉ tạo scope mới khi thực sự cần state cô lập. |
+
+<Callout type="warn" title="Tránh API cũ khi bắt đầu mã mới">
+  Angular hiện đại không cần `ComponentFactoryResolver`, `ComponentFactory` hay khai báo `entryComponents` để tạo dynamic component. Với mã mới, dùng `ViewContainerRef.createComponent(ComponentType, options)`; chỉ giữ API cũ khi đang bảo trì phiên bản Angular cũ.
+</Callout>
+
+## Trade-off thiết kế
+
+Dynamic component tăng khả năng mở rộng, nhưng nó chuyển một phần quan hệ vốn nhìn thấy trong template sang TypeScript runtime. Vì vậy cần cân nhắc chi phí trước khi dựng một hệ plugin.
+
+| Quyết định | Lợi ích | Chi phí và rủi ro | Quy ước đề xuất |
+| --- | --- | --- | --- |
+| Component tĩnh với `@if`/`@switch` | Template tường minh, type checking và test đơn giản | Không phù hợp khi type UI đến từ cấu hình chạy | Dùng làm mặc định. |
+| `ViewContainerRef.createComponent()` | Có `ComponentRef`, kiểm soát input, output, vị trí và lifecycle | Nhiều code điều phối, phải quản lý reference | Dùng cho host imperative, dashboard, overlay hoặc plugin. |
+| Registry allowlist | Giới hạn component có thể tạo, dễ kiểm soát quyền | Phải cập nhật registry khi thêm plugin | Đặt registry gần feature sở hữu extension point. |
+| Environment injector con | Cô lập dependency/state theo plugin hoặc feature con | Có thêm vòng đời cần hủy, dễ tạo state phân mảnh | Chỉ tạo khi scope DI có ý nghĩa rõ ràng. |
+| Contract chung quá rộng | Host gọi được nhiều API trên plugin | Plugin bị ghép chặt, khó thêm implementation mới | Giữ contract ở mức input/output hoặc capability nhỏ nhất. |
+
+Tải component bằng dynamic `import()` có thể giảm JavaScript ban đầu cho widget hiếm dùng. Nhưng nó thêm loading state, lỗi tải chunk và ranh giới async. Chỉ tối ưu sau khi đo bundle hoặc hiệu năng; dynamic component không tự động làm ứng dụng lazy-load.
+
+## Các lựa chọn thay thế
+
+Không phải mọi UI “động” đều cần `ViewContainerRef`. Chọn cơ chế diễn đạt đúng loại biến thiên.
+
+| Nhu cầu | Lựa chọn phù hợp | Vì sao |
+| --- | --- | --- |
+| Một vài nhánh đã biết trong template | `@if` hoặc `@switch` | Đơn giản nhất và giữ binding tường minh. |
+| Lặp danh sách cùng một component | `@for` | Type component không đổi; chỉ data thay đổi. |
+| Chọn component động nhưng muốn khai báo trong template | `NgComponentOutlet` | Phù hợp khi host chỉ cần bind type/input/injector theo phong cách declarative; ít imperative code hơn. |
+| Đưa nội dung do parent cung cấp vào layout cố định | Content projection với `ng-content` | Parent quyết định nội dung ở compile time, không cần tạo class lúc chạy. |
+| Điều hướng đến màn hình khác | Router và `router-outlet` | Router quản lý URL, guards, lazy loading và vòng đời route. |
+| Modal/popover/overlay có vị trí linh hoạt | Angular CDK Overlay hoặc dịch vụ UI của dự án | Các API này giải quyết cả vị trí, backdrop, focus và stacking; dynamic component chỉ là một phần của bài toán. |
+
+`NgComponentOutlet` đáng cân nhắc khi template có thể mô tả phần lớn ý định. Ngược lại, `ViewContainerRef` phù hợp hơn khi cần giữ `ComponentRef`, thay component theo lệnh, đăng ký output trực tiếp hoặc quản lý nhiều container từ một service.
+
+## Kiểm thử vùng UI động
+
+Bài test nên kiểm tra hành vi observable: host chọn đúng type, input được hiển thị, output đi đến use case đúng và component cũ đã bị thay. Không cần test Angular đã tự chèn host view như thế nào.
+
+Ví dụ kiểm tra host render đúng widget và nhận output:
+
+```ts
+import { TestBed } from '@angular/core/testing';
+import { CheckoutPromotionComponent } from './checkout-promotion.component';
+
+describe('CheckoutPromotionComponent', () => {
+  it('tạo banner và áp dụng mã từ output', () => {
+    const fixture = TestBed.createComponent(CheckoutPromotionComponent);
+    const component = fixture.componentInstance;
+    const applyPromotion = spyOn(component as any, 'applyPromotion');
+
+    component.show({
+      kind: 'banner',
+      title: 'Giảm 10%',
+      value: 'NEW10',
+    });
+    fixture.detectChanges();
+
+    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    expect(button.textContent).toContain('NEW10');
+
+    button.click();
+    expect(applyPromotion).toHaveBeenCalledWith('NEW10');
+  });
+});
+```
+
+Trong production, `applyPromotion` nên gọi facade/service thay vì `console.log`. Test khi đó có thể provide fake facade và xác nhận fake nhận đúng mã. Cách này kiểm tra ranh giới host-widget mà không phụ thuộc chi tiết implementation của API mạng.
+
+## Tóm tắt
+
+- Dynamic component tạo một class component đã biết trong bundle tại thời điểm chạy; nó không biên dịch template tùy ý từ dữ liệu.
+- Dùng `ViewContainerRef.createComponent()` để tạo và chèn host view. Giữ `ComponentRef` để đặt input, nghe output và hủy instance.
+- Dùng `setInput()` thay vì gán trực tiếp instance. Đăng ký output như API component thông thường và để host xử lý ý định nghiệp vụ.
+- Mặc định kế thừa context của container; chỉ tạo hoặc truyền injector riêng khi phạm vi dependency thực sự thay đổi.
+- Owner tạo `ComponentRef` phải xác định thời điểm `destroy()`. Nếu tạo `EnvironmentInjector` con, owner cũng phải hủy injector đó.
+- Trước khi dùng dynamic component, so sánh với `@switch`, `NgComponentOutlet`, content projection, Router hoặc CDK Overlay. Giải pháp đơn giản hơn thường dễ đọc và kiểm thử hơn.
+
+<Cards>
+  <Card title="Dependency Injection" href="/docs/di-kien-truc/dependency-injection" description="Ôn cây injector, scope provider và vòng đời dependency." />
+  <Card title="Provider và token" href="/docs/di-kien-truc/provider-token" description="Thiết kế token và provider cho component hoặc plugin động." />
+  <Card title="Giao tiếp component" href="/docs/component-template/giao-tiep-component" description="Củng cố input, output và chiều dữ liệu giữa các component." />
+</Cards>
