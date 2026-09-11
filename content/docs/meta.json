@@ -1,0 +1,15 @@
+{
+  "title": "Angular Learning",
+  "pages": [
+    "index",
+    "nen-tang",
+    "bat-dau",
+    "component-template",
+    "reactivity-state",
+    "di-kien-truc",
+    "routing-forms",
+    "http-api-auth",
+    "testing-performance-deploy",
+    "production-troubleshooting"
+  ]
+}

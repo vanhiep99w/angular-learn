@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/style.css';
+
+html,
+:root {
+  --fd-layout-width: 100% !important;
+  /* Fallback nếu một bản Fumadocs khác xử lý phần trăm không đúng: */
+  /* --fd-layout-width: 140rem !important; */
+}
+
+#nd-docs-layout {
+  padding-inline: 0.5rem;
+}
+
+@media (min-width: 768px) {
+  #nd-docs-layout {
+    padding-inline: 1rem;
+  }
+}

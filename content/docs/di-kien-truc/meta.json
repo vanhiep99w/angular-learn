@@ -1,0 +1,12 @@
+{
+  "title": "DI & Kiến trúc",
+  "pages": [
+    "index",
+    "dependency-injection",
+    "provider-token",
+    "service",
+    "standalone-architecture",
+    "feature-architecture",
+    "dynamic-component"
+  ]
+}

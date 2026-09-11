@@ -1,0 +1,13 @@
+{
+  "title": "Component & Template",
+  "pages": [
+    "index",
+    "component-standalone",
+    "data-binding",
+    "control-flow",
+    "giao-tiep-component",
+    "lifecycle-hooks",
+    "content-projection",
+    "styling-component"
+  ]
+}

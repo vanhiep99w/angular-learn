@@ -1,0 +1,12 @@
+{
+  "title": "Reactivity & State",
+  "pages": [
+    "index",
+    "signals",
+    "computed-effect",
+    "rxjs-can-ban",
+    "signals-rxjs",
+    "state-cuc-bo",
+    "ngrx"
+  ]
+}

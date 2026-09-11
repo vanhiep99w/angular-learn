@@ -1,0 +1,11 @@
+{
+  "title": "Nền tảng Angular",
+  "pages": [
+    "index",
+    "angular-la-gi",
+    "kien-truc-angular",
+    "typescript-can-thiet",
+    "dom-va-template",
+    "signals-va-zonejs"
+  ]
+}
