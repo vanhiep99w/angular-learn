@@ -25,6 +25,10 @@ description: Quản lý state đồng bộ trong Angular bằng giá trị react
   - [mutate: mã cũ và lý do không dùng](#mutate-mã-cũ-và-lý-do-không-dùng)
   - [Object và array: cập nhật bất biến](#object-và-array-cập-nhật-bất-biến)
 - [Flow từ event đến DOM](#flow-từ-event-đến-dom)
+- [Signal đổi thì Angular kiểm tra phần nào?](#signal-đổi-thì-angular-kiểm-tra-phần-nào)
+  - [Signal theo dõi view, không theo dõi từng DOM node](#signal-theo-dõi-view-không-theo-dõi-từng-dom-node)
+  - [Component class không chạy lại từ đầu](#component-class-không-chạy-lại-từ-đầu)
+  - [So sánh với React function component](#so-sánh-với-react-function-component)
 - [Ví dụ hoàn chỉnh: danh sách công việc](#ví-dụ-hoàn-chỉnh-danh-sách-công-việc)
   - [Component](#component)
   - [Template và chuyện gì được theo dõi](#template-và-chuyện-gì-được-theo-dõi)
@@ -309,6 +313,72 @@ WritableSignal có giá trị mới
 ```
 
 Có hai ý cần nhớ. Thứ nhất, Angular chỉ theo dõi signal khi template **gọi** nó. Thứ hai, ghi signal không đồng nghĩa render đồng bộ toàn bộ ứng dụng; Angular lên lịch công việc cần thiết rồi cập nhật các binding có giá trị khác.
+
+## Signal đổi thì Angular kiểm tra phần nào?
+
+Câu trả lời ngắn: signal không tìm trực tiếp một text node để sửa. Khi template đọc signal, Angular ghi nhận **view** đang đọc nó. Khi signal đổi, Angular đánh dấu view đó để kiểm tra ở lượt đồng bộ tiếp theo. Với ví dụ component thông thường, bạn có thể hiểu view này là **template của component đó**.
+
+### Signal theo dõi view, không theo dõi từng DOM node
+
+Xét template có hai binding:
+
+```ts
+@Component({
+  selector: 'app-profile',
+  template: `
+    <p>Số lần mở: {{ openCount() }}</p>
+    <p>Người dùng: {{ userName }}</p>
+  `,
+})
+export class ProfileComponent {
+  readonly openCount = signal(0);
+  userName = 'An';
+}
+```
+
+Lần render đầu, Angular biết template của `ProfileComponent` đã đọc `openCount()`. Khi gọi `openCount.update((count) => count + 1)`, Angular đánh dấu **view của `ProfileComponent`**, chứ không lưu kiểu “sửa chính xác text node thứ nhất ngay bây giờ”.
+
+Ở lượt kiểm tra, template đã được Angular compile thành các lệnh cập nhật binding. Angular đánh giá các binding của view cần kiểm tra, so sánh giá trị mới với giá trị trước đó và chỉ ghi DOM nơi có khác biệt:
+
+```text
+openCount.update(...)
+        │
+        ▼
+ProfileComponent view được đánh dấu
+        │
+        ▼
+Angular kiểm tra binding trong view
+        │
+        ├── {{ openCount() }}: 0 → 1  → đổi text node thứ nhất
+        │
+        └── {{ userName }}: "An" → "An" → không ghi lại DOM
+```
+
+Vì vậy, câu đúng là: **signal giúp Angular chọn đúng view để kiểm tra; Angular chỉ sửa đúng DOM binding có giá trị đổi.** Nó không có nghĩa Angular luôn chỉ chạy một expression duy nhất, và cũng không có nghĩa Angular dựng lại toàn bộ component.
+
+### Component class không chạy lại từ đầu
+
+Khi signal đổi, Angular không tạo `ProfileComponent` mới. Constructor, field initializer và `ngOnInit()` không chạy lại chỉ vì `openCount` đổi. Instance component hiện tại vẫn được giữ.
+
+Điều có thể chạy lại là phần template của view đang được kiểm tra. Nếu template gọi method, chẳng hạn `{{ calculateLabel() }}`, method đó cũng có thể được gọi ở mỗi lượt kiểm tra view. Đây là lý do nên giữ expression template đơn giản và dùng `computed` cho giá trị dẫn xuất nặng, thay vì đặt phép tính đắt tiền trong method template.
+
+<Callout type="idea" title="Mô hình nhớ nhanh">
+  Signal đổi → Angular kiểm tra **view đã đọc signal** → chỉ DOM binding có giá trị khác được ghi. Không có chuyện constructor hoặc `ngOnInit()` chạy lại chỉ vì signal đổi.
+</Callout>
+
+### So sánh với React function component
+
+Với React, mô hình gần đúng của bạn là đúng: khi state của function component đổi, React thường gọi lại function component để tạo cây React element mới. Reconciler so sánh cây mới với cây trước đó, rồi commit thay đổi DOM tối thiểu. `memo`, `useMemo` và cơ chế scheduling có thể giảm phần cần làm, nên không nên hiểu nó là “luôn render toàn bộ trang”.
+
+Angular khác ở chỗ component class không phải một hàm render được gọi lại để trả về virtual DOM. Angular compile template thành các lệnh tạo/cập nhật view. Khi một signal được template đọc đổi, Angular đánh dấu view consumer, chạy các lệnh cập nhật cho view đó và chỉ ghi DOM binding khác giá trị.
+
+| Câu hỏi | React function component | Angular component + Signals |
+| --- | --- | --- |
+| Khi state đổi, đơn vị thường được chạy lại là gì? | Function component tạo React element tree mới. | Template update của view đã được đánh dấu. |
+| Instance/component có bị tạo lại không? | Function body chạy lại, nhưng state hook được React giữ theo vị trí. | Class instance giữ nguyên; không gọi lại constructor hay `ngOnInit()`. |
+| Làm sao DOM đổi? | React reconcile cây element mới với cây trước đó rồi commit. | Angular so sánh các binding đã compile và ghi DOM binding khác giá trị. |
+
+Ở cả hai framework, mục tiêu cuối cùng giống nhau: tránh ghi lại DOM khi giá trị không đổi. Khác biệt chính là React lấy function component chạy lại làm mô hình render trung tâm, còn Angular dùng template đã compile và change detection để làm mới view.
 
 ## Ví dụ hoàn chỉnh: danh sách công việc
 
