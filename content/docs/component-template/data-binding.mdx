@@ -177,13 +177,30 @@ export class WelcomeComponent {
 <p>Đăng nhập gần nhất: {{ lastLogin ?? 'Chưa có dữ liệu' }}</p>
 ```
 
-Interpolation cũng có thể xuất hiện trong một attribute dạng chuỗi:
+Interpolation cũng có thể xuất hiện trong một attribute khi kết quả cuối cùng là chuỗi:
 
 ```html
 <img alt="Ảnh đại diện của {{ userName }}" />
 ```
 
-Cách này phù hợp khi bạn đang tạo một chuỗi. Nếu mục tiêu là truyền giá trị thật, đặc biệt là boolean, object, số hoặc giá trị có thể `null`, hãy ưu tiên property binding. Ví dụ `[disabled]="hasErrors"` rõ nghĩa và đúng kiểu hơn `disabled="{{ hasErrors }}"`.
+Với URL đã là chuỗi, hai cách sau đều có thể đạt mục đích hiển thị cùng một ảnh:
+
+```html
+<img [src]="imageUrl" />
+<img src="{{ imageUrl }}" />
+```
+
+Điều đó không biến interpolation thành bản thay thế hoàn toàn của property binding. Interpolation luôn tạo text; property binding truyền giá trị của biểu thức vào property hoặc input. Khi component con cần object, hãy dùng `[]`:
+
+```html
+<!-- Giữ nguyên object selectedProduct -->
+<app-product-card [product]="selectedProduct" />
+
+<!-- Tạo chuỗi từ object (thường là "[object Object]"), không phải product object -->
+<app-product-card product="{{ selectedProduct }}" />
+```
+
+Tương tự, `[disabled]="hasErrors"` truyền boolean `true` hoặc `false`, còn `disabled="{{ hasErrors }}"` tạo chuỗi `"true"` hoặc `"false"`; với DOM property boolean, cả hai chuỗi đều là giá trị truthy. **Kết luận:** dùng interpolation khi đầu ra cần là text; dùng property binding khi cần giữ boolean, number, object, array hoặc phân biệt đúng `null`/`undefined`.
 
 <Callout type="info" title="Hiển thị text an toàn">
   Khi interpolation dữ liệu không tin cậy vào nội dung text, Angular không coi chuỗi đó là HTML để thực thi. Ví dụ `{{ comment }}` hiển thị các ký tự thẻ HTML như text thay vì tự chạy script. Dù vậy, điều này không thay thế việc kiểm soát dữ liệu ở server hoặc xử lý đúng ngữ cảnh URL và HTML.
