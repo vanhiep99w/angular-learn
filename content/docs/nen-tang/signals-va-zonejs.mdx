@@ -1,356 +1,317 @@
 ---
-title: Signals và Zone.js
-description: Hiểu Signals, Zone.js và change detection để chọn đúng mô hình cập nhật giao diện trong Angular.
+title: Signals, Zone.js và Change Detection
+description: Hiểu Angular biết lúc nào phải cập nhật giao diện như thế nào, vì sao Signals xuất hiện và khi nào Zone.js còn tham gia.
 ---
 
-<Callout type="info" title="Ý chính">
-  **Signals** mô tả dữ liệu đã thay đổi; **Zone.js** giúp Angular biết một công việc bất đồng bộ có thể đã làm thay đổi dữ liệu; **change detection** là quá trình Angular đối chiếu dữ liệu với template để cập nhật DOM. Ba khái niệm liên quan nhưng không thay thế nhau.
+<Callout type="info" title="Đọc trang này để trả lời một câu hỏi">
+  Khi một giá trị JavaScript đổi, vì sao chữ trên màn hình Angular lại đổi theo? Câu trả lời có ba phần: **change detection** cập nhật DOM, **Zone.js** từng là cách phổ biến để đánh thức Angular sau async work, và **Signals** thông báo trực tiếp state nào vừa đổi.
 </Callout>
 
 ## Mục lục
 
-- [Bài toán mà Angular cần giải](#bài-toán-mà-angular-cần-giải)
-- [Ba khái niệm cần tách bạch](#ba-khái-niệm-cần-tách-bạch)
-  - [Signal: một giá trị có thể được theo dõi](#signal-một-giá-trị-có-thể-được-theo-dõi)
-  - [Zone.js: nguồn thông báo bất đồng bộ](#zonejs-nguồn-thông-báo-bất-đồng-bộ)
-  - [Change detection: bước đồng bộ view](#change-detection-bước-đồng-bộ-view)
-- [Cơ chế hoạt động bên dưới](#cơ-chế-hoạt-động-bên-dưới)
-  - [Đồ thị dependency của Signals](#đồ-thị-dependency-của-signals)
-  - [Zone.js vá API trình duyệt như thế nào](#zonejs-vá-api-trình-duyệt-như-thế-nào)
-  - [Khi nào một component được kiểm tra](#khi-nào-một-component-được-kiểm-tra)
-- [Flow cập nhật giao diện](#flow-cập-nhật-giao-diện)
-  - [Flow dùng Signal](#flow-dùng-signal)
-  - [Flow dựa vào Zone.js](#flow-dựa-vào-zonejs)
-- [Ví dụ: bộ đếm không cần quản lý subscription](#ví-dụ-bộ-đếm-không-cần-quản-lý-subscription)
-  - [Đọc, ghi và suy diễn giá trị](#đọc-ghi-và-suy-diễn-giá-trị)
-  - [Tác dụng phụ với effect](#tác-dụng-phụ-với-effect)
-- [OnPush, Signals và hiệu năng](#onpush-signals-và-hiệu-năng)
-- [Zoneless: Angular không phụ thuộc Zone.js](#zoneless-angular-không-phụ-thuộc-zonejs)
-  - [Kích hoạt và điều kiện tương thích](#kích-hoạt-và-điều-kiện-tương-thích)
-  - [Các tín hiệu đánh thức Angular trong zoneless](#các-tín-hiệu-đánh-thức-angular-trong-zoneless)
-- [Trade-off và các lỗi thường gặp](#trade-off-và-các-lỗi-thường-gặp)
-  - [Mutate object bên trong Signal](#mutate-object-bên-trong-signal)
-  - [Dùng effect để lan truyền state](#dùng-effect-để-lan-truyền-state)
-  - [Callback chạy ngoài Angular](#callback-chạy-ngoài-angular)
-  - [Nhầm Signals với công cụ thay thế RxJS](#nhầm-signals-với-công-cụ-thay-thế-rxjs)
-- [Quy trình chẩn đoán UI không cập nhật](#quy-trình-chẩn-đoán-ui-không-cập-nhật)
+- [Mô hình cần nhớ trước](#mô-hình-cần-nhớ-trước)
+- [Change detection thực sự là gì?](#change-detection-thực-sự-là-gì)
+  - [DOM không tự theo dõi field JavaScript](#dom-không-tự-theo-dõi-field-javascript)
+  - [Một lượt change detection làm những gì?](#một-lượt-change-detection-làm-những-gì)
+- [Trước Signals: Zone.js đánh thức Angular](#trước-signals-zonejs-đánh-thức-angular)
+  - [Zone.js làm được gì?](#zonejs-làm-được-gì)
+  - [Zone.js không làm gì?](#zonejs-không-làm-gì)
+  - [Vì sao cách này có giới hạn?](#vì-sao-cách-này-có-giới-hạn)
+- [Signals giải quyết phần nào?](#signals-giải-quyết-phần-nào)
+  - [Signal tạo liên kết từ state đến view](#signal-tạo-liên-kết-từ-state-đến-view)
+  - [Signal không thay thế change detection](#signal-không-thay-thế-change-detection)
+  - [Signals không thay thế RxJS](#signals-không-thay-thế-rxjs)
+- [So sánh ba khái niệm](#so-sánh-ba-khái-niệm)
+- [OnPush thay đổi điều gì?](#onpush-thay-đổi-điều-gì)
+- [Zoneless: khi Angular không dùng Zone.js](#zoneless-khi-angular-không-dùng-zonejs)
+  - [Angular nhận notification bằng cách nào?](#angular-nhận-notification-bằng-cách-nào)
+  - [Kiểm tra dự án cũ trước khi gỡ Zone.js](#kiểm-tra-dự-án-cũ-trước-khi-gỡ-zonejs)
+- [Khi UI không cập nhật: kiểm tra theo thứ tự này](#khi-ui-không-cập-nhật-kiểm-tra-theo-thứ-tự-này)
 - [Tóm tắt](#tóm-tắt)
 
-## Bài toán mà Angular cần giải
+## Mô hình cần nhớ trước
 
-Giao diện là hàm của state. Khi `currentUser`, danh sách sản phẩm hoặc trạng thái tải dữ liệu đổi, DOM phải phản ánh giá trị mới. JavaScript thuần không tự nối một biến với một nút DOM; framework cần hai khả năng:
-
-1. **Biết hoặc được báo rằng có việc có thể đã đổi state.** Ví dụ: click, `setTimeout`, Promise hoàn tất hoặc phản hồi HTTP.
-2. **Biết view nào cần được làm mới.** Angular đọc các binding trong template rồi ghi giá trị mới vào DOM khi cần.
-
-Trong Angular truyền thống, Zone.js chủ yếu giải quyết vế thứ nhất: nó báo cho Angular sau các tác vụ bất đồng bộ đã vá. Signals bổ sung một cách chính xác hơn để biểu diễn vế thứ hai: component nào đã đọc signal nào. Change detection vẫn là cơ chế thực hiện việc đồng bộ template với DOM.
+Hãy tách ba việc sau. Nếu trộn chúng vào nhau, `Signals`, `Zone.js` và change detection sẽ rất khó hiểu.
 
 ```text
-Nguyên nhân cập nhật                    Angular phản ứng
-───────────────────                     ─────────────────────────────
-click / timer / Promise / HTTP  ─────►  Zone.js có thể báo có việc xong
-signal.set(...)                 ─────►  Signal biết giá trị đã đổi
-                                               │
-                                               ▼
-                                      Scheduler / change detection
-                                               │
-                                               ▼
-                                  Template được kiểm tra và DOM đổi
+1. State đổi             2. Angular được báo          3. Angular đồng bộ view
+   message = 'Xong'  ───►    “hãy kiểm tra”       ───►   {{ message }} → DOM
 ```
 
-<Callout type="idea" title="Cách nhớ ngắn gọn">
-  Signal trả lời **"dữ liệu nào đổi?"**. Zone.js thường trả lời **"khi nào nên kiểm tra sau async work?"**. Change detection trả lời **"render lại binding nào?"**.
-</Callout>
+- **State** là dữ liệu trong component hoặc service, ví dụ `message`, `items`, `isLoading`.
+- **Notification** là tín hiệu để Angular biết có thể cần kiểm tra giao diện.
+- **Change detection** là lượt Angular đọc template, so sánh giá trị và ghi phần khác biệt vào DOM.
 
-## Ba khái niệm cần tách bạch
+Zone.js và Signals chủ yếu liên quan đến bước **notification**. Change detection là bước cập nhật giao diện thực tế.
 
-### Signal: một giá trị có thể được theo dõi
+## Change detection thực sự là gì?
 
-Signal là một wrapper reactive quanh một giá trị. Gọi signal như hàm để **đọc** giá trị; dùng `set()` hoặc `update()` để **ghi**. Angular ghi nhận nơi signal được đọc trong template, `computed`, hoặc `effect`.
+### DOM không tự theo dõi field JavaScript
 
-```ts
-import { computed, signal } from '@angular/core';
-
-const quantity = signal(2);
-const unitPrice = signal(15);
-const total = computed(() => quantity() * unitPrice());
-
-quantity.update((value) => value + 1);
-console.log(total()); // 45
-```
-
-- `signal()` tạo **writable signal**: giá trị nguồn có thể thay đổi.
-- `computed()` tạo giá trị dẫn xuất, chỉ đọc. Nó được tính lười khi có nơi đọc và được cache khi dependency chưa đổi.
-- `effect()` chạy một tác dụng phụ khi những signal nó đọc thay đổi. Đây không phải nơi phù hợp để tính state dẫn xuất.
-
-Signal không tự render DOM. Giá trị trở nên liên quan đến giao diện khi template của component đọc nó, chẳng hạn `{{ quantity() }}`.
-
-### Zone.js: nguồn thông báo bất đồng bộ
-
-Zone.js là thư viện vá (patch) một số API bất đồng bộ của trình duyệt và JavaScript, chẳng hạn event listener, timer và Promise. Bản vá cho phép Angular biết một callback đã chạy trong "vùng" Angular. Khi vùng này trở nên ổn định, Angular có thể lên lịch một lượt change detection.
-
-Ví dụ, với ứng dụng có Zone.js, callback sau thường làm giao diện được kiểm tra dù `message` chỉ là một field thường:
+Giả sử component có một field và template hiển thị field đó:
 
 ```ts
-message = 'Đang chờ';
-
-ngOnInit() {
-  setTimeout(() => {
-    this.message = 'Đã tải xong';
-  }, 1_000);
+@Component({
+  selector: 'app-status',
+  template: `<p>{{ message }}</p>`,
+})
+export class StatusComponent {
+  message = 'Đang chờ';
 }
 ```
 
-Điều này tiện lợi, nhưng Zone.js không biết chính xác callback vừa đổi binding nào. Nó chỉ biết có một tác vụ đã hoàn thành và Angular *có thể* cần kiểm tra view.
-
-### Change detection: bước đồng bộ view
-
-Change detection là lúc Angular đánh giá expression trong template, so sánh với giá trị lần trước và ghi khác biệt vào DOM. Nó không phải là thao tác "render lại toàn bộ trang" theo mặc định. Angular duyệt các view phù hợp, đánh giá binding và chỉ cập nhật các DOM node có giá trị khác.
-
-Sự khác biệt quan trọng là:
-
-| Cơ chế | Nó cung cấp thông tin gì? | Nó không tự làm gì? |
-| --- | --- | --- |
-| Signal | Giá trị và dependency đã thay đổi | Không tự thay DOM nếu không có view/effect đọc nó |
-| Zone.js | Một tác vụ async đã chạy trong Angular zone | Không biết chính xác state hay component nào đã đổi |
-| Change detection | Đánh giá binding để đồng bộ DOM | Không tự biết khi nào cần chạy nếu không có notification |
-
-## Cơ chế hoạt động bên dưới
-
-### Đồ thị dependency của Signals
-
-Khi `computed` hoặc template đọc một signal, Angular tạo một cạnh dependency. Nếu callback của `computed` rẽ nhánh, dependency cũng có thể thay đổi theo lần chạy gần nhất.
+Ở lần render đầu, Angular đặt text của thẻ `<p>` thành `Đang chờ`. Sau đó, JavaScript chạy dòng này:
 
 ```ts
-const showDetails = signal(false);
-const product = signal({ name: 'Bàn phím', stock: 4 });
-
-const label = computed(() => {
-  if (!showDetails()) return 'Ẩn chi tiết';
-  return `${product().name}: còn ${product().stock}`;
-});
+this.message = 'Đã tải xong';
 ```
 
-Khi `showDetails()` là `false`, `label` không đọc `product()`. Vì vậy, đổi `product` ở trạng thái đó không làm `label` bị invalid. Khi bật chi tiết, lần tính tiếp theo mới đọc `product` và dependency được thêm vào.
+Dòng gán chỉ thay đổi dữ liệu trong bộ nhớ. Trình duyệt không hề biết field `message` liên quan đến thẻ `<p>` nào. Angular phải chủ động quay lại template để đọc `message` lần nữa.
+
+### Một lượt change detection làm những gì?
+
+Khi Angular quyết định kiểm tra `StatusComponent`, nó thực hiện gần đúng các bước sau:
+
+1. Đánh giá expression trong template, ở đây là `message`.
+2. So sánh giá trị mới với giá trị lần kiểm tra trước.
+3. Chỉ ghi vào DOM nếu giá trị khác.
 
 ```text
-showDetails ───────────────► label (computed) ─────► template
-                                  ▲
-                                  │ chỉ khi showDetails = true
-product ──────────────────────────┘
+Giá trị lần trước: "Đang chờ"
+Giá trị hiện tại:  "Đã tải xong"
+                       │
+                       ▼
+            Angular đổi text của <p>
 ```
 
-Khi `product.set(...)` hoặc `product.update(...)` thay đổi giá trị, Angular đánh dấu các consumer phụ thuộc là cần tính lại. `computed` không nhất thiết chạy ngay; nó sẽ tính lại khi có consumer đọc. Cơ chế này giảm công việc thừa nhưng không biến mọi phép tính thành miễn phí: một `computed` nặng vẫn nên có input nhỏ và dễ dự đoán.
+Vì vậy, change detection **không phải** “render lại toàn bộ trang”. Angular kiểm tra các view được chọn, rồi chỉ sửa những binding có giá trị khác. Nhưng Angular vẫn cần một lý do để bắt đầu lượt kiểm tra; nó không chạy liên tục sau mọi dòng JavaScript.
 
-### Zone.js vá API trình duyệt như thế nào
+<Callout type="idea" title="Câu hỏi đúng khi debug">
+  Đừng hỏi “Angular có detect thay đổi không?”. Hãy hỏi: **sau khi state đổi, điều gì đã thông báo cho Angular kiểm tra view này?**
+</Callout>
 
-Khi Zone.js được nạp, nó bọc callback mà ứng dụng truyền vào một số API. Khái niệm hóa, thay vì trình duyệt gọi trực tiếp callback của bạn, Zone.js lấy lại quyền điều khiển trước và sau callback để theo dõi microtask và macrotask.
+## Trước Signals: Zone.js đánh thức Angular
 
-```text
-Promise / timer / event
-        │
-        ▼
-Zone.js wrapper gọi callback của ứng dụng
-        │
-        ▼
-State JavaScript có thể thay đổi
-        │
-        ▼
-Angular zone ổn định ───► Angular lên lịch change detection
-```
+Trước Angular v16, Angular chưa có Signals tích hợp sẵn. Ứng dụng vẫn cập nhật UI bằng template binding và change detection. Trong cấu hình Angular truyền thống, Zone.js là cách phổ biến để báo Angular sau nhiều việc bất đồng bộ.
 
-- **Microtask** là công việc chạy trước khi event loop nhận task tiếp theo, ví dụ callback của `Promise.then`.
-- **Macrotask** là task độc lập như callback của `setTimeout` hoặc nhiều event từ trình duyệt.
+### Zone.js làm được gì?
 
-Chi tiết lịch và khả năng patch thay đổi theo API, môi trường và cấu hình. Kết luận thực hành không đổi: đừng coi Zone.js là công cụ quản lý state; nó là một lớp thông báo để Angular có cơ hội kiểm tra giao diện.
+Zone.js bọc (patch) callback của nhiều API bất đồng bộ quen thuộc, chẳng hạn event listener, `setTimeout` và `Promise`. Khi callback chạy bên trong Angular zone, Zone.js có thể báo cho Angular rằng công việc async đã hoàn tất. Angular từ đó lên lịch change detection.
 
-### Khi nào một component được kiểm tra
-
-Chiến lược mặc định kiểm tra rộng hơn `OnPush`. Với `ChangeDetectionStrategy.OnPush`, Angular có thể bỏ qua subtree không cần thiết. Một component `OnPush` được đánh thức khi, ví dụ:
-
-- Angular gán một input mới cho component.
-- Một event listener trong template của component hoặc subtree của nó chạy.
-- Code gọi `ChangeDetectorRef.markForCheck()`.
-- `AsyncPipe` nhận một giá trị mới.
-- Một signal mà template component đã đọc thay đổi.
-
-Đọc signal trong template là điểm tích hợp quan trọng. Angular biết view đã đọc signal đó; khi signal đổi, view phù hợp được đánh dấu để kiểm tra ở lượt tiếp theo. Nhờ vậy, Signals hoạt động tốt với `OnPush` mà không yêu cầu gọi `markForCheck()` cho từng lần `set()`.
-
-## Flow cập nhật giao diện
-
-### Flow dùng Signal
-
-Giả sử người dùng nhấn nút tăng số lượng. Event handler ghi một signal, và template đã đọc signal đó.
-
-```text
-[click +1]
-    │
-    ▼
-component.increment()
-    │
-    ▼
-quantity.update(v => v + 1)
-    │
-    ▼
-Signal invalidates computed / đánh dấu template consumer
-    │
-    ▼
-Angular chạy lượt đồng bộ phù hợp
-    │
-    ▼
-{{ quantity() }} và {{ total() }} được đánh giá lại
-    │
-    ▼
-Chỉ DOM binding có giá trị khác được cập nhật
-```
-
-Ở flow này, signal là nguồn thông tin chính xác về thay đổi state. Ứng dụng vẫn có thể đang dùng Zone.js, nhưng không cần dựa vào việc Zone.js suy đoán callback đã đổi dữ liệu gì.
-
-### Flow dựa vào Zone.js
-
-Giả sử thư viện cũ gọi callback sau một timer và callback chỉ gán vào field thường.
+Ví dụ sau thường tự đổi UI trong ứng dụng có Zone.js:
 
 ```ts
-status = 'Đang đồng bộ';
+@Component({
+  selector: 'app-status',
+  template: `<p>{{ message }}</p>`,
+})
+export class StatusComponent implements OnInit {
+  message = 'Đang chờ';
 
-startLegacyJob() {
-  legacyLibrary.run((result: string) => {
-    this.status = result;
-  });
+  ngOnInit(): void {
+    setTimeout(() => {
+      this.message = 'Đã tải xong';
+    }, 1_000);
+  }
 }
 ```
 
-Nếu callback chạy trong Angular zone, Zone.js báo công việc hoàn tất. Angular chạy change detection; template đọc `status` thì DOM có thể đổi. Flow này vẫn hữu ích cho code cũ, nhưng tính chính xác của phạm vi kiểm tra thấp hơn flow có Signal.
+```text
+setTimeout hoàn tất
+        │
+        ▼
+Zone.js thấy callback vừa chạy
+        │
+        ▼
+Angular chạy change detection
+        │
+        ▼
+Đọc lại {{ message }} và đổi text trong <p>
+```
 
-<Callout type="warn" title="Đừng suy luận sai về Zone.js">
-  Zone.js không làm field `status` reactive. Nó chỉ tạo một dịp để Angular kiểm tra template. Nếu callback chạy ngoài Angular zone hoặc ứng dụng chạy zoneless mà không có notification khác, phép gán field thường có thể không hiện lên ngay.
-</Callout>
+Đây là giá trị lớn nhất của Zone.js: bạn không phải tự gọi API cập nhật giao diện sau mỗi timer, Promise, HTTP response hay event phổ biến.
 
-## Ví dụ: bộ đếm không cần quản lý subscription
+### Zone.js không làm gì?
 
-Ví dụ dưới đây dùng standalone component, `OnPush`, writable signal và `computed`. Đây là lựa chọn tự nhiên cho state cục bộ của UI.
+Zone.js không phải state manager và không biến `message` thành dữ liệu reactive.
 
-### Đọc, ghi và suy diễn giá trị
+Nó **không biết**:
+
+- Callback vừa chạy có thật sự đổi state không.
+- Field nào đã đổi.
+- Template hoặc component nào đang đọc field đó.
+- DOM node nào cần cập nhật.
+
+Zone.js chỉ truyền một thông điệp tổng quát: **“một việc async vừa xong; Angular nên kiểm tra.”** Change detection mới đọc template và quyết định có cần sửa DOM hay không.
+
+### Vì sao cách này có giới hạn?
+
+Hãy xem callback chỉ ghi log:
 
 ```ts
-import { DecimalPipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+setTimeout(() => {
+  console.log('Không thay đổi dữ liệu hiển thị');
+}, 1_000);
+```
+
+Zone.js không thể biết trước callback này không thay đổi UI. Nó vẫn chỉ có thể đánh thức Angular để kiểm tra. Trong ứng dụng lớn có nhiều callback, việc dựa vào tín hiệu rộng như vậy tạo công việc không cần thiết và làm thời điểm cập nhật khó suy luận hơn.
+
+Một giới hạn khác: không phải callback nào cũng ở trong Angular zone. Ví dụ code dùng `NgZone.runOutsideAngular()`, Web Worker hoặc một thư viện bên thứ ba có thể gọi callback mà Zone.js không tạo notification như bạn kỳ vọng. Khi đó field đã đổi nhưng UI chưa chắc được kiểm tra.
+
+`OnPush` giúp Angular bỏ qua nhiều subtree không cần thiết, nhưng không thay đổi thông tin ban đầu mà Zone.js cung cấp: Angular vẫn bắt đầu từ phỏng đoán “có lẽ có gì đó đã đổi”.
+
+## Signals giải quyết phần nào?
+
+Signals xuất hiện dưới dạng developer preview ở Angular v16. Mục tiêu không phải thay thế DOM renderer hay xóa change detection. Mục tiêu là để state có thể thông báo trực tiếp: **“tôi vừa đổi, và đây là các consumer đã đọc tôi.”**
+
+### Signal tạo liên kết từ state đến view
+
+Đổi field thường thành signal:
+
+```ts
+import { Component, signal } from '@angular/core';
 
 @Component({
-  selector: 'app-cart-counter',
-  standalone: true,
-  imports: [DecimalPipe],
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <p>Số lượng: {{ quantity() }}</p>
-    <p>Tạm tính: {{ subtotal() | number }} đ</p>
-
-    <button type="button" (click)="decrease()" [disabled]="quantity() === 0">
-      -
-    </button>
-    <button type="button" (click)="increase()">+</button>
-  `,
+  selector: 'app-status',
+  template: `<p>{{ message() }}</p>`,
 })
-export class CartCounterComponent {
-  readonly quantity = signal(1);
-  readonly unitPrice = signal(120_000);
-  readonly subtotal = computed(() => this.quantity() * this.unitPrice());
+export class StatusComponent {
+  readonly message = signal('Đang chờ');
 
-  increase(): void {
-    this.quantity.update((value) => value + 1);
-  }
-
-  decrease(): void {
-    this.quantity.update((value) => Math.max(0, value - 1));
+  finish(): void {
+    this.message.set('Đã tải xong');
   }
 }
 ```
 
-Khi template gọi `quantity()` và `subtotal()`, Angular đăng ký component là consumer. `increase()` đổi `quantity`; `subtotal` bị invalid và component được đánh dấu. Lần đồng bộ kế tiếp tính lại `subtotal` rồi cập nhật hai text binding và trạng thái `disabled` nếu cần.
+Khi Angular render `{{ message() }}`, nó ghi nhận: template của `StatusComponent` đã đọc signal `message`. Khi `message.set(...)` chạy, Angular đã có mối liên kết cần thiết để đánh dấu view đó.
 
-> `DecimalPipe` xuất hiện trong `imports` vì đây là standalone component. Phần pipe không liên quan đến cơ chế Signals; có thể bỏ nó nếu chỉ cần theo dõi ví dụ state.
+```text
+Lần render đầu
+{{ message() }} được đọc
+        │
+        ▼
+Angular ghi nhớ: StatusComponent dùng message
 
-### Tác dụng phụ với effect
-
-Dùng `effect` cho việc xảy ra *bên ngoài* mô hình state/render, chẳng hạn ghi log, lưu draft vào `localStorage`, hoặc gọi API phân tích. Angular theo dõi các signal được đọc trong thân effect.
-
-```ts
-import { effect, signal } from '@angular/core';
-
-const theme = signal<'light' | 'dark'>('light');
-
-effect(() => {
-  localStorage.setItem('theme', theme());
-});
-
-theme.set('dark');
+Lần cập nhật
+message.set('Đã tải xong')
+        │
+        ▼
+Angular đánh dấu StatusComponent cần kiểm tra
+        │
+        ▼
+Change detection đọc lại {{ message() }} rồi cập nhật DOM
 ```
 
-Không dùng `effect` để giữ hai signal đồng bộ theo kiểu `effect(() => b.set(a()))`. Điều đó tạo thêm lịch chạy và dễ dẫn đến vòng lặp hoặc `ExpressionChangedAfterItHasBeenChecked`. Nếu `b` hoàn toàn được suy ra từ `a`, hãy viết `const b = computed(() => transform(a()))`.
+Signal tạo ra notification dựa trên **dữ liệu thực sự đổi**, không dựa trên việc một timer hay Promise tình cờ vừa kết thúc. Đây là lý do Signals hợp với state đồng bộ của UI, như tab đang chọn, trạng thái tải hoặc danh sách đang hiển thị.
 
-## OnPush, Signals và hiệu năng
+### Signal không thay thế change detection
 
-`OnPush` không có nghĩa là component chỉ render đúng một lần. Nó là lời hứa rằng Angular có thể bỏ qua component cho đến khi có một notification hợp lệ. Signals cung cấp một notification như vậy khi template đã đọc signal thay đổi.
+Đây là điểm dễ nhầm nhất:
 
-| Tình huống | Lựa chọn nên dùng | Lý do |
-| --- | --- | --- |
-| Cờ mở/đóng modal, tab đang chọn, bộ đếm | `signal` | State cục bộ, đồng bộ và có một giá trị hiện tại |
-| Tổng tiền hoặc danh sách đã lọc | `computed` | Kết quả dẫn xuất từ các signal khác |
-| Cập nhật `document.title` hoặc storage | `effect` | Tác dụng phụ ngoài template |
-| Luồng HTTP, WebSocket, hủy/ghép luồng | RxJS, rồi chuyển sang signal ở ranh giới UI nếu cần | Observable mô hình hóa chuỗi giá trị theo thời gian tốt hơn |
+- `message.set(...)` không tự viết text vào thẻ `<p>`.
+- Signal không tự biết HTML của bạn trông như thế nào.
+- Signal báo/đánh dấu consumer phụ thuộc.
+- **Change detection** vẫn là bước đọc `{{ message() }}` và cập nhật DOM nếu giá trị khác.
 
-Không phải cứ đổi toàn bộ state sang signal là ứng dụng nhanh hơn. Lợi ích đến từ dependency rõ ràng, `OnPush` ở nơi phù hợp, template tránh hàm tính toán đắt tiền, và dữ liệu được cập nhật theo tham chiếu mới khi cần.
+Có thể nhớ flow đầy đủ như sau:
 
-## Zoneless: Angular không phụ thuộc Zone.js
-
-Zoneless là chế độ Angular không dùng Zone.js để phát hiện mọi async task. Thay vào đó, ứng dụng thông báo rõ các thay đổi có thể tác động đến view. Signals là một nguồn notification quan trọng, nhưng zoneless không bắt buộc mọi state phải là signal.
-
-Lợi ích chính là giảm patching toàn cục, giảm chi phí/độ khó debug của Zone.js và làm thời điểm cập nhật UI minh bạch hơn. Đổi lại, code hoặc thư viện từng vô tình dựa vào Zone.js để làm mới view phải được chỉnh cho đúng notification.
-
-### Kích hoạt và điều kiện tương thích
-
-Ở các phiên bản Angular hỗ trợ API này, đăng ký provider khi bootstrap:
-
-```ts
-import { provideZonelessChangeDetection } from '@angular/core';
-import { bootstrapApplication } from '@angular/platform-browser';
-import { AppComponent } from './app/app.component';
-
-bootstrapApplication(AppComponent, {
-  providers: [provideZonelessChangeDetection()],
-});
+```text
+Người dùng click
+        │
+        ▼
+message.set('Đã lưu')
+        │
+        ▼
+Signal thông báo view đã đọc message()
+        │
+        ▼
+Angular chạy change detection cho view phù hợp
+        │
+        ▼
+DOM hiển thị “Đã lưu”
 ```
 
-Đồng thời, không nạp `zone.js` từ cấu hình build/polyfills. Cách cấu hình chính xác phụ thuộc Angular CLI, phiên bản Angular và cách bootstrap của dự án. Hãy xem tài liệu của đúng phiên bản đang chạy trước khi gỡ dependency: trạng thái hỗ trợ và migration có thể thay đổi giữa các bản phát hành.
+Ngoài template, `computed` theo dõi signal nguồn để tạo giá trị dẫn xuất; `effect` chạy side effect như lưu `localStorage`. Chúng là consumer của signal, không phải cơ chế thay thế render.
 
-<Callout type="warn" title="Không bật zoneless chỉ bằng cách xóa zone.js">
-  Gỡ `zone.js` nhưng không cung cấp cơ chế zoneless hợp lệ có thể khiến UI không được lên lịch cập nhật. Hãy bật provider, kiểm tra thư viện bên thứ ba và chạy các luồng tương tác/async quan trọng.
+### Signals không thay thế RxJS
+
+Signal biểu diễn **giá trị hiện tại**: “bây giờ danh sách là gì?”, “tab nào đang được chọn?”. RxJS Observable biểu diễn **dòng giá trị theo thời gian**: debounce input, hủy request cũ, retry HTTP hoặc WebSocket.
+
+Một ứng dụng có thể nhận dữ liệu bằng RxJS rồi ghi kết quả mới nhất vào signal để template đọc. Đừng thay pipeline `debounceTime` và `switchMap` bằng nhiều `effect`; hai công cụ giải quyết hai bài toán khác nhau.
+
+## So sánh ba khái niệm
+
+| Khái niệm | Câu hỏi nó trả lời | Ví dụ | Không làm gì |
+| --- | --- | --- | --- |
+| **Zone.js** | “Có async work vừa xong không?” | timer, Promise, event callback | Không biết state/view cụ thể nào đổi |
+| **Signal** | “State nào đổi, ai đã đọc nó?” | `message.set('Xong')` | Không trực tiếp ghi DOM |
+| **Change detection** | “Binding trong view có giá trị mới không?” | kiểm tra `{{ message() }}` | Không tự biết khi nào phải bắt đầu nếu không có notification |
+
+<Callout type="idea" title="Một câu để nhớ">
+  Zone.js quan sát **công việc**. Signals quan sát **dữ liệu**. Change detection đồng bộ **template với DOM**.
 </Callout>
 
-### Các tín hiệu đánh thức Angular trong zoneless
+## OnPush thay đổi điều gì?
 
-Trong zoneless, Angular có thể lên lịch kiểm tra khi nhận các notification tường minh, gồm những trường hợp phổ biến sau:
+`ChangeDetectionStrategy.OnPush` cho phép Angular bỏ qua component khi không có lý do hợp lệ để kiểm tra nó. Một lý do hợp lệ thường là input mới, event trong template, `AsyncPipe` phát giá trị, `markForCheck()` hoặc signal đã được template đọc thay đổi.
 
-- Template của component đã đọc một signal và signal đó được cập nhật.
-- `ChangeDetectorRef.markForCheck()` được gọi.
-- Angular đặt input qua `ComponentRef.setInput()`.
-- Một bound listener trong template chạy.
-- View được attach/detach hoặc được đánh dấu dirty bởi API Angular.
+Signals phối hợp rất tự nhiên với `OnPush`:
 
-Vì vậy, migration thực tế thường bắt đầu bằng cách dùng Signals cho state UI, dùng `AsyncPipe`/cơ chế Angular cho Observable hiển thị trong template, và gọi `markForCheck()` tại ranh giới callback của thư viện không do Angular quản lý.
+```ts
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-counter',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <p>{{ count() }}</p>
+    <button type="button" (click)="increase()">+1</button>
+  `,
+})
+export class CounterComponent {
+  readonly count = signal(0);
+
+  increase(): void {
+    this.count.update((value) => value + 1);
+  }
+}
+```
+
+Template đã đọc `count()`. Vì vậy, mỗi lần `count.update(...)` chạy, Angular đánh dấu đúng component này để kiểm tra. Bạn không cần gọi `ChangeDetectorRef.markForCheck()` chỉ vì đã cập nhật signal.
+
+`OnPush` không bắt buộc để dùng Signals và Signals không tự động làm mọi ứng dụng nhanh hơn. Lợi ích đến từ state rõ ràng, dependency rõ ràng và template tránh tính toán nặng không cần thiết.
+
+## Zoneless: khi Angular không dùng Zone.js
+
+Angular có thể chạy **zoneless**, tức không dùng Zone.js để quan sát mọi async task. Trong Angular v21 trở lên, zoneless là mặc định cho ứng dụng mới. Với Angular v20, ứng dụng có thể bật nó bằng `provideZonelessChangeDetection()`; ở dự án cũ, hãy kiểm tra đúng phiên bản trước khi đổi cấu hình.
+
+Điểm chính không phải “bỏ Zone.js để dùng Signals”. Điểm chính là thay notification ngầm từ việc patch toàn cục bằng các notification tường minh mà Angular hiểu.
+
+### Angular nhận notification bằng cách nào?
+
+Khi zoneless, các notification phổ biến gồm:
+
+- Cập nhật signal đã được template đọc.
+- Callback của event listener được bind trong template, ví dụ `(click)`.
+- `AsyncPipe` nhận giá trị mới.
+- Gọi `ChangeDetectorRef.markForCheck()`.
+- Angular gán input mới bằng API của framework.
+
+Ví dụ callback của thư viện bên ngoài cập nhật một field thường. Trong zoneless, hãy báo Angular rõ ràng:
 
 ```ts
 import { ChangeDetectorRef, Component, inject } from '@angular/core';
 
 @Component({
   selector: 'app-upload-status',
-  template: `{{ status }}`,
+  template: `<p>{{ status }}</p>`,
 })
 export class UploadStatusComponent {
   private readonly cdr = inject(ChangeDetectorRef);
   status = 'Chưa tải lên';
 
-  connectLegacyUploader(uploader: { onDone(callback: (name: string) => void): void }): void {
+  connect(uploader: { onDone(callback: (fileName: string) => void): void }): void {
     uploader.onDone((fileName) => {
       this.status = `Đã tải: ${fileName}`;
       this.cdr.markForCheck();
@@ -359,83 +320,31 @@ export class UploadStatusComponent {
 }
 ```
 
-Một hướng khác là giữ `status` là signal và gọi `this.status.set(...)`. Chọn cách nào phụ thuộc state đó có cần được chia sẻ, suy diễn, hoặc đọc ở nhiều nơi hay không. Nói ngắn gọn: trong zoneless, hãy biến điểm cập nhật thành notification có chủ đích thay vì hy vọng timer hoặc Promise tự đánh thức Angular.
+Nếu `status` là signal được template đọc, `this.status.set(...)` đã là notification rõ ràng và thường dễ đọc hơn cho state UI.
 
-## Trade-off và các lỗi thường gặp
+### Kiểm tra dự án cũ trước khi gỡ Zone.js
 
-### Mutate object bên trong Signal
+Không chỉ xóa `zone.js` khỏi `polyfills` rồi hy vọng mọi thứ vẫn chạy. Hãy kiểm tra các callback từ thư viện bên thứ ba, reactive forms, test và SSR. Những nơi trước đây vô tình dựa vào Zone.js phải dùng notification hợp lệ, chẳng hạn signal, `AsyncPipe` hoặc `markForCheck()`.
 
-Signal so sánh theo identity của giá trị. Nếu mutate object/array đang giữ rồi gọi `set` lại chính tham chiếu ấy, consumer có thể không nhận một thay đổi mới như mong đợi.
-
-```ts
-const user = signal({ name: 'An', tags: ['angular'] });
-
-// Không nên: thay đổi object tại chỗ.
-user().tags.push('signals');
-user.set(user());
-
-// Nên: tạo tham chiếu mới cho phần dữ liệu đổi.
-user.update((current) => ({
-  ...current,
-  tags: [...current.tags, 'signals'],
-}));
-```
-
-Cập nhật bất biến làm thay đổi rõ ràng, dễ debug và tương thích với `OnPush`. Không cần clone sâu mọi object; chỉ tạo mới các nhánh đã thay đổi.
-
-### Dùng effect để lan truyền state
-
-`effect` thích hợp cho I/O hoặc đồng bộ với thế giới bên ngoài. Nó không phải công cụ gán state dây chuyền.
-
-```ts
-const firstName = signal('An');
-const lastName = signal('Nguyễn');
-
-// Đúng: fullName luôn được tính từ hai nguồn.
-const fullName = computed(() => `${firstName()} ${lastName()}`);
-```
-
-Nếu dùng effect để set `fullName`, bạn tạo một state trùng lặp. State trùng lặp có thể bị cũ trong một thời điểm hoặc bị ghi bởi nhiều nơi. Hãy ưu tiên một nguồn dữ liệu và `computed` cho quan hệ dẫn xuất.
-
-### Callback chạy ngoài Angular
-
-Một số thư viện, Web Worker, API tự vá, hoặc đoạn code cố ý chạy với `NgZone.runOutsideAngular()` có thể gọi callback ngoài Angular zone. Trong ứng dụng dựa Zone.js, mutation ở đó có thể không tự làm mới view; trong zoneless, vấn đề này càng rõ vì không có Zone.js để dựa vào.
-
-Giải pháp theo thứ tự ưu tiên:
-
-1. Cập nhật một signal mà template đang đọc.
-2. Gọi `markForCheck()` sau khi đổi field được template đọc.
-3. Với code cần quay lại Angular zone trong ứng dụng còn dùng Zone.js, dùng `NgZone.run(() => { ... })`.
-
-Tránh gọi `detectChanges()` như phản xạ đầu tiên. Nó chạy kiểm tra đồng bộ cho view hiện tại và có thể che giấu vấn đề về ranh giới cập nhật. Chỉ dùng khi bạn hiểu rõ vòng đời view và thực sự cần thời điểm đồng bộ đó.
-
-### Nhầm Signals với công cụ thay thế RxJS
-
-Signals giữ **giá trị hiện tại** và dependency graph. RxJS Observable biểu diễn **luồng sự kiện/giá trị theo thời gian**, gồm hủy subscription, retry, debounce, merge và xử lý lỗi của stream. Hai công cụ bổ sung cho nhau.
-
-Ví dụ, một HTTP request đơn không cần signal để tồn tại; `HttpClient` vẫn trả Observable. Khi kết quả cần hiển thị như state hiện tại của component, có thể chuyển Observable sang signal tại biên UI. Ngược lại, không nên thay một pipeline tìm kiếm có `debounceTime`, `switchMap` và retry bằng nhiều `effect` rời rạc.
-
-## Quy trình chẩn đoán UI không cập nhật
-
-Khi state trong DevTools đã đổi nhưng màn hình không đổi, đi theo câu hỏi từ cụ thể đến tổng quát:
-
-1. **Template có thực sự đọc state đó không?** Với signal, phải có lời gọi như `user()`; viết `{{ user }}` chỉ in tham chiếu hàm.
-2. **Bạn có ghi qua API đúng không?** Dùng `set`/`update` và tránh mutate object tại chỗ.
-3. **Component có `OnPush` không?** Nếu có, xác định notification hợp lệ: signal template đã đọc, input mới, event, `AsyncPipe` hoặc `markForCheck`.
-4. **Callback có nằm ngoài Angular không?** Kiểm tra thư viện bên thứ ba, `runOutsideAngular`, Worker và cấu hình zoneless.
-5. **Có dùng `effect` để cập nhật state khác không?** Chuyển quan hệ dẫn xuất thành `computed` để loại bỏ độ trễ và vòng lặp.
-6. **Có lỗi runtime không?** Mở console; exception trong callback có thể ngăn đoạn cập nhật chạy đến notification.
-
-<Callout type="idea" title="Mẹo debug">
-  Đặt breakpoint ngay trước `signal.set()` hoặc `markForCheck()`, rồi xác nhận template có đọc đúng signal/field. Thường vấn đề nằm ở điểm nối giữa nguồn callback và view, không phải ở DOM.
+<Callout type="warn" title="Đừng dùng detectChanges như phản xạ">
+  `detectChanges()` ép kiểm tra view ngay lúc đó. Nó có thể cần trong trường hợp đặc biệt, nhưng thường che mất câu hỏi gốc: state đổi rồi, notification nào đã thiếu? Với callback thông thường, ưu tiên signal hoặc `markForCheck()`.
 </Callout>
+
+## Khi UI không cập nhật: kiểm tra theo thứ tự này
+
+1. **Template có đọc đúng state không?** Với signal, phải viết `{{ message() }}`, không phải `{{ message }}`.
+2. **State có thực sự đổi qua API đúng không?** Dùng `set` hoặc `update`; không mutate object/array rồi mong signal tự nhận ra.
+3. **Sau thay đổi có notification không?** Signal template đã đọc, event template, `AsyncPipe` hoặc `markForCheck()` là các cách phổ biến.
+4. **Callback đến từ đâu?** Kiểm tra `runOutsideAngular`, Web Worker và thư viện bên thứ ba, nhất là ở ứng dụng zoneless.
+5. **View có bị hủy hoặc bị tách khỏi cây render không?** Kiểm tra điều kiện `@if`, route và lifecycle trước khi nghi ngờ change detection.
+6. **Có lỗi runtime không?** Một exception trước `set()` hoặc `markForCheck()` có thể khiến cập nhật chưa bao giờ xảy ra.
 
 ## Tóm tắt
 
-- Signals là state reactive có dependency được Angular theo dõi. Dùng `signal` cho state nguồn, `computed` cho state dẫn xuất và `effect` cho tác dụng phụ.
-- Zone.js là lớp theo dõi tác vụ async để Angular có thể lên lịch kiểm tra. Nó hữu ích, nhưng không biết chính xác state nào đã đổi.
-- Change detection là bước đánh giá binding và đồng bộ DOM; nó cần một notification để biết khi nào chạy.
-- `OnPush` và Signals phối hợp tốt: signal đọc trong template đổi sẽ đánh dấu view liên quan.
-- Zoneless thay notification ngầm từ Zone.js bằng notification tường minh. Hãy migration có kiểm thử, đặc biệt ở callback của thư viện bên thứ ba.
+- Change detection là lượt Angular đọc binding trong template, so sánh giá trị và chỉ sửa DOM khi cần.
+- Zone.js từng là cơ chế mặc định để báo Angular sau nhiều async callback. Nó biết *công việc* vừa xong, không biết state hay view cụ thể nào đổi.
+- Signals thêm một dependency graph cho state: template đọc signal sẽ được ghi nhận, signal đổi sẽ thông báo đúng consumer.
+- Signals không thay change detection và không thay RxJS. Signals phù hợp với giá trị state hiện tại; RxJS phù hợp với stream theo thời gian.
+- Với Angular hiện đại, nhất là zoneless, hãy làm điểm cập nhật thành notification có chủ đích thay vì chỉ dựa vào timer hoặc Promise.
 
-Nắm rõ ranh giới này giúp bạn chọn đúng công cụ: Signal cho state giao diện, RxJS cho stream phức tạp, và `markForCheck` hoặc Angular API tại những ranh giới async mà framework không tự quan sát.
+Tiếp theo, xem [Signals](/docs/reactivity-state/signals) để học cách tạo, đọc và cập nhật state UI bằng `signal`, `set` và `update`.
