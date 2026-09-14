@@ -14,6 +14,7 @@ description: Hiểu Zone.js bọc async API ra sao, Angular dùng nó để đá
   - [Angular zone là gì?](#angular-zone-là-gì)
   - [Một app có chỉ một Angular zone không?](#một-app-có-chỉ-một-angular-zone-không)
   - [Zone là ngữ cảnh chạy của callback](#zone-là-ngữ-cảnh-chạy-của-callback)
+  - [Vì sao wrapper phải nhớ zone?](#vì-sao-wrapper-phải-nhớ-zone)
   - [Patch API nghĩa là gì?](#patch-api-nghĩa-là-gì)
   - [Task, microtask và macrotask](#task-microtask-và-macrotask)
 - [Angular dùng Zone.js để chạy change detection](#angular-dùng-zonejs-để-chạy-change-detection)
@@ -29,6 +30,7 @@ description: Hiểu Zone.js bọc async API ra sao, Angular dùng nó để đá
   - [Signal trong ứng dụng còn dùng Zone.js](#signal-trong-ứng-dụng-còn-dùng-zonejs)
 - [Giới hạn và chi phí của Zone.js](#giới-hạn-và-chi-phí-của-zonejs)
 - [Zone.js và zoneless](#zonejs-và-zoneless)
+  - [Zone.js chưa bị bỏ](#zonejs-chưa-bị-bỏ)
 - [Checklist chẩn đoán](#checklist-chẩn-đoán)
 - [Tóm tắt](#tóm-tắt)
 
@@ -92,14 +94,14 @@ Nói ngắn gọn: **một app Angular truyền thống thường có một Angu
 
 ### Zone là ngữ cảnh chạy của callback
 
-Cụm “ngữ cảnh chạy” giờ có thể hiểu cụ thể hơn: **lúc bạn đăng ký callback, Zone.js nhớ callback được đăng ký khi `Zone.current` là zone nào; lúc callback chạy sau đó, Zone.js chạy lại nó trong đúng zone đã nhớ.** Cần tách **hai thời điểm**; Zone.js không sửa source code component mỗi lần bạn gọi timer.
+Cụm “ngữ cảnh chạy” có thể hiểu bằng luồng callback cụ thể. Zone.js không sửa source code component mỗi lần bạn gọi timer.
 
 1. **Khi nạp polyfills, trước khi app chạy:** `zone.js` patch API global một lần. Nó giữ `setTimeout` gốc rồi cài một hàm bọc vào `window.setTimeout`.
 2. **Khi Angular bootstrap:** Angular tạo `NgZone` rồi chạy phần khởi tạo ứng dụng qua `ngZone.run(...)`. Vì vậy, trong lifecycle hook của component, `Zone.current` là Angular zone.
-3. **Mỗi lần đăng ký callback:** hàm `setTimeout` đã bị patch chạy. Nó đọc `Zone.current`, lưu reference tới zone đó cùng callback, rồi đưa callback đã bọc cho timer gốc.
-4. **Khi timer hoàn tất:** wrapper chạy callback bên trong zone đã lưu. Angular nhận được hook trước/sau công việc trong Angular zone.
+3. **Khi component gọi `setTimeout(callback, 1000)`:** wrapper của Zone.js chạy trước. Nó lấy `Zone.current` (Angular zone), tạo một task chứa callback của bạn và nhớ zone sở hữu task đó. Sau đó nó đưa *wrapper callback* cho timer gốc của trình duyệt.
+4. **Khi timer hoàn tất:** trình duyệt gọi wrapper callback. Wrapper dùng zone đã nhớ để chạy callback của bạn. Các hook của Angular zone vì thế biết task này bắt đầu/kết thúc.
 
-Vì thế, câu “Zone.js lưu lại” chỉ nói về bước 3: nó lưu reference tới *zone hiện tại* cho callback cụ thể đó. Còn Zone.js “đổi code” là cách nói không chính xác; nó **đổi hàm API global lúc polyfills được nạp**, chứ không sửa file TypeScript hay thân callback của bạn.
+Vì thế, Zone.js làm hai việc khác nhau: nó **patch API global lúc polyfills được nạp**, và nó **lưu zone sở hữu cho từng callback lúc callback được đăng ký**. Nó không sửa file TypeScript hay thân callback của bạn.
 
 ```text
 Lúc nạp app (một lần)       Lúc gọi setTimeout (mỗi lần)       Khi timer xong
@@ -123,6 +125,33 @@ function patchedSetTimeout(callback: () => void, delay: number) {
 ```
 
 `Zone.current` và `.run()` trong ví dụ là API/ý tưởng của Zone.js. Mã thật phức tạp hơn, nhưng nguyên lý là vậy. Zone **không** là thread mới, không là biến global chứa state và không giữ dữ liệu component. Nó là “môi trường thực thi” để Zone.js biết callback này thuộc về ai và hook nào cần chạy trước/sau callback.
+
+### Vì sao wrapper phải nhớ zone?
+
+Bạn hình dung đúng một phần: Zone.js **bọc callback**. Trong một ứng dụng đơn giản, ta có thể tưởng tượng wrapper làm việc này:
+
+```ts
+nativeSetTimeout(() => {
+  callbackCủaBạn();
+  báoAngularKiểmTraUI();
+}, 1_000);
+```
+
+Nhưng Zone.js không thể luôn gọi `báoAngularKiểmTraUI()` như vậy. `setTimeout` là API global: cùng một hàm bị dùng bởi code Angular, code trong `runOutsideAngular()`, thư viện bên thứ ba, thậm chí zone con khác. Wrapper cần biết **callback này thuộc zone nào** để chỉ gọi hook của zone đó.
+
+Reference được lưu chỉ là reference tới **object zone** — không phải reference tới component, state hay DOM. Object Angular zone chứa các hook Angular dùng để theo dõi task. Khi browser gọi wrapper sau một giây, browser không tự nhớ callback này trước đây được đăng ký ở Angular zone hay ngoài Angular zone; reference đó là thông tin Zone.js cần để khôi phục đúng ngữ cảnh.
+
+```text
+Cùng một patched setTimeout
+        │
+        ├── callback đăng ký trong Angular zone
+        │       └── wrapper nhớ Angular zone → Angular có thể được báo
+        │
+        └── callback đăng ký trong runOutsideAngular()
+                └── wrapper nhớ outer zone → không báo Angular theo Zone.js
+```
+
+Ngay cả khi app thường chỉ có một Angular zone chính, reference vẫn cần thiết vì một callback có thể được đăng ký **ngoài** zone đó. Nó cũng giúp callback con được đăng ký bên trong callback cha tiếp tục kế thừa đúng ngữ cảnh.
 
 ### Patch API nghĩa là gì?
 
@@ -359,7 +388,25 @@ Các trade-off này không có nghĩa Zone.js “xấu” hoặc dự án đang 
 
 ## Zone.js và zoneless
 
-Zoneless là chế độ Angular không nạp Zone.js để theo dõi mọi async task. Angular v21+ dùng zoneless làm mặc định cho ứng dụng mới. Angular vẫn cần notification để chạy change detection, nhưng notification đến từ các API Angular rõ ràng hơn:
+### Zone.js chưa bị bỏ
+
+Zoneless là mặc định cho **ứng dụng mới từ Angular v21 trở lên**, nhưng Zone.js không bị loại khỏi Angular. Dự án cũ đang nạp `zone.js` vẫn có thể tiếp tục hoạt động theo cơ chế zone-based; bạn không buộc phải migration chỉ vì nâng version Angular.
+
+Nếu ứng dụng Angular v21+ cần chủ động dùng lại zone-based change detection, đăng ký provider sau và bảo đảm `zone.js` vẫn được nạp từ polyfills/cấu hình build:
+
+```ts
+import { provideZoneChangeDetection } from '@angular/core';
+import { bootstrapApplication } from '@angular/platform-browser';
+import { AppComponent } from './app/app.component';
+
+bootstrapApplication(AppComponent, {
+  providers: [provideZoneChangeDetection()],
+});
+```
+
+Vì vậy, “zoneless là mặc định” chỉ có nghĩa Angular chọn notification tường minh cho app mới. Nó không có nghĩa `NgZone`, Zone.js hay các ứng dụng dựa trên Zone.js bị bỏ ngay lập tức.
+
+Zoneless là chế độ Angular không nạp Zone.js để theo dõi mọi async task. Angular vẫn cần notification để chạy change detection, nhưng notification đến từ các API Angular rõ ràng hơn:
 
 - cập nhật signal mà template đã đọc;
 - event listener được bind trong template;
@@ -390,6 +437,7 @@ Khi field đã đổi nhưng UI không đổi trong dự án dùng Zone.js, ki�
 - Angular truyền thống dùng thông tin đó để biết khi nào *có thể* chạy change detection.
 - Zone.js không biết field, signal, component hoặc DOM node cụ thể nào đã đổi.
 - `NgZone.runOutsideAngular()` giảm notification thừa; `NgZone.run()` đưa callback về Angular zone khi field thường cần làm mới UI.
+- Zone.js vẫn được Angular hỗ trợ; zoneless là mặc định cho ứng dụng mới từ Angular v21, không phải việc loại bỏ Zone.js khỏi dự án cũ.
 - Signals cung cấp dependency theo state rõ ràng hơn; zoneless thay dần việc dựa vào patching toàn cục bằng notification tường minh.
 
 Quay lại [Signals, Zone.js và Change Detection](/docs/nen-tang/signals-va-zonejs) để đặt Zone.js vào bức tranh đầy đủ từ state đến DOM.
