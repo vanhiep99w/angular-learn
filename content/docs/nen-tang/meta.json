@@ -6,6 +6,7 @@
     "kien-truc-angular",
     "typescript-can-thiet",
     "dom-va-template",
-    "signals-va-zonejs"
+    "signals-va-zonejs",
+    "zonejs-chi-tiet"
   ]
 }

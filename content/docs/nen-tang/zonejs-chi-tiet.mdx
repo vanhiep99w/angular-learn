@@ -1,0 +1,352 @@
+---
+title: Zone.js chi tiết
+description: Hiểu Zone.js bọc async API ra sao, Angular dùng nó để đánh thức change detection như thế nào và cách làm việc với NgZone.
+---
+
+<Callout type="info" title="Phạm vi bài này">
+  Bài này giải thích cơ chế Zone.js trong các ứng dụng Angular truyền thống. Với Angular v21 trở lên, ứng dụng mới mặc định chạy zoneless; tuy vậy Zone.js vẫn rất quan trọng khi bạn bảo trì dự án Angular cũ hoặc thư viện còn phụ thuộc vào `NgZone`.
+</Callout>
+
+## Mục lục
+
+- [Zone.js sinh ra để giải quyết vấn đề gì?](#zonejs-sinh-ra-để-giải-quyết-vấn-đề-gì)
+- [Zone.js làm việc như thế nào?](#zonejs-làm-việc-như-thế-nào)
+  - [Zone là ngữ cảnh chạy của callback](#zone-là-ngữ-cảnh-chạy-của-callback)
+  - [Patch API nghĩa là gì?](#patch-api-nghĩa-là-gì)
+  - [Task, microtask và macrotask](#task-microtask-và-macrotask)
+- [Angular dùng Zone.js để chạy change detection](#angular-dùng-zonejs-để-chạy-change-detection)
+  - [Luồng với timer hoặc Promise](#luồng-với-timer-hoặc-promise)
+  - [Một event có render lại toàn bộ trang không?](#một-event-có-render-lại-toàn-bộ-trang-không)
+  - [Zone.js không biết state nào đã đổi](#zonejs-không-biết-state-nào-đã-đổi)
+- [NgZone: ranh giới giữa Angular và code bên ngoài](#ngzone-ranh-giới-giữa-angular-và-code-bên-ngoài)
+  - [runOutsideAngular: tránh đánh thức Angular cho việc không liên quan UI](#runoutsideangular-tránh-đánh-thức-angular-cho-việc-không-liên-quan-ui)
+  - [run: quay lại Angular khi field thường cần cập nhật UI](#run-quay-lại-angular-khi-field-thường-cần-cập-nhật-ui)
+- [Các tình huống thường gặp](#các-tình-huống-thường-gặp)
+  - [Thư viện gọi callback ngoài Angular zone](#thư-viện-gọi-callback-ngoài-angular-zone)
+  - [Sự kiện tần suất cao](#sự-kiện-tần-suất-cao)
+  - [Signal trong ứng dụng còn dùng Zone.js](#signal-trong-ứng-dụng-còn-dùng-zonejs)
+- [Giới hạn và chi phí của Zone.js](#giới-hạn-và-chi-phí-của-zonejs)
+- [Zone.js và zoneless](#zonejs-và-zoneless)
+- [Checklist chẩn đoán](#checklist-chẩn-đoán)
+- [Tóm tắt](#tóm-tắt)
+
+## Zone.js sinh ra để giải quyết vấn đề gì?
+
+JavaScript chạy bất đồng bộ qua nhiều API: click của người dùng, `setTimeout`, Promise, HTTP response hoặc callback của thư viện. Sau khi một callback đổi state, framework cần biết lúc nào phải đồng bộ state đó ra DOM.
+
+Nếu không có cơ chế hỗ trợ, mỗi callback phải tự báo framework:
+
+```ts
+setTimeout(() => {
+  this.message = 'Đã tải xong';
+  // Framework cần được báo để kiểm tra lại template.
+}, 1_000);
+```
+
+Điều này vừa lặp lại vừa dễ quên. Zone.js cung cấp một lớp quan sát chung quanh nhiều API async. Angular truyền thống dùng lớp này để nhận một thông báo đại ý: **“một callback của ứng dụng vừa hoàn thành; có thể cần kiểm tra giao diện.”**
+
+<Callout type="idea" title="Đừng nhầm vai trò">
+  Zone.js không quản lý state, không thay đổi HTML và không hiểu binding Angular. Nó chỉ giúp Angular biết thời điểm async work có thể làm state thay đổi.
+</Callout>
+
+## Zone.js làm việc như thế nào?
+
+### Zone là ngữ cảnh chạy của callback
+
+Cụm “ngữ cảnh chạy” dễ gây mơ hồ. Hãy hiểu nó bằng một quy tắc cụ thể: **lúc bạn đăng ký callback, Zone.js nhớ callback được đăng ký từ zone nào; lúc callback chạy sau đó, Zone.js chạy lại nó trong đúng zone đã nhớ.**
+
+Angular bootstrap code của ứng dụng bên trong Angular zone. Vì vậy, khi component gọi `setTimeout`, Zone.js lưu lại: “timer này được đăng ký trong Angular zone.” Một giây sau, trình duyệt không gọi thẳng callback của bạn; Zone.js lấy callback đó, chạy nó trong Angular zone rồi mới gọi code của bạn.
+
+```text
+Ngay bây giờ                         Một giây sau
+──────────────────────              ─────────────────────────────
+Component gọi setTimeout(callback)  Trình duyệt báo timer xong
+        │                                      │
+        ▼                                      ▼
+Zone.js nhớ: callback thuộc          Zone.js chạy callback trong
+Angular zone                         Angular zone → callback của bạn
+```
+
+Có thể hình dung gần đúng bằng mã giả sau:
+
+```ts
+// Lúc đăng ký timer
+const zoneLúcĐăngKý = Zone.current; // ở đây là Angular zone
+
+nativeSetTimeout(() => {
+  // Lúc timer hoàn tất: phục hồi ngữ cảnh đã nhớ rồi mới gọi callback.
+  zoneLúcĐăngKý.run(callback);
+}, 1_000);
+```
+
+`Zone.current` và `.run()` trong ví dụ là API/ý tưởng của Zone.js. Mã thật phức tạp hơn, nhưng nguyên lý là vậy. Zone **không** là thread mới, không là biến global chứa state và không giữ dữ liệu component. Nó là “môi trường thực thi” để Zone.js biết callback này thuộc về ai và hook nào cần chạy trước/sau callback.
+
+### Patch API nghĩa là gì?
+
+Zone.js được nạp **trước code ứng dụng** — trong Angular truyền thống, thường qua `zone.js` ở polyfills. Ngay khi được nạp, nó giữ lại `setTimeout` gốc của trình duyệt rồi thay `window.setTimeout` bằng hàm bọc của nó. Tên API vẫn là `setTimeout`, nên component của bạn không cần gọi API đặc biệt nào.
+
+Vì vậy Angular không cần “đoán người dùng vừa gọi `setTimeout`”. Khi code chạy:
+
+```ts
+setTimeout(callback, 1_000);
+```
+
+thì hàm được gọi thực tế đã là hàm do Zone.js bọc. Hàm bọc chụp `Zone.current`, thay callback bằng callback đãbọc, sau đó  mới gọi `setTimeout` gốc của trình duyệt:
+
+```ts
+// Mô hình đơn giản hóa — không phải mã nguồn Zone.js thật.
+const nativeSetTimeout = window.setTimeout;
+
+window.setTimeout = (callback, delay) => {
+  const zoneLúcĐăngKý = Zone.current;
+
+  return nativeSetTimeout(() => {
+    zoneLúcĐăngKý.run(callback);
+  }, delay);
+};
+```
+
+Cùng ý tưởng này áp dụng cho API như `addEventListener` và Promise: Zone.js bọc **lúc đăng ký** callback, nên nó có quyền quan sát **lúc callback chạy**. Nó không đọc source code của bạn, cũng không biết mọi API trên đời; API nào không được patch hoặc callback nào được đăng ký ngoài Angular zone sẽ không tạo cùng notification.
+
+### Task, microtask và macrotask
+
+Zone.js theo dõi các loại công việc mà event loop thực thi. Bạn chỉ cần phân biệt ba khái niệm sau để hiểu thời điểm Angular được báo:
+
+| Loại | Ví dụ | Trực giác |
+| --- | --- | --- |
+| **Event task** | `click`, `input` | Trình duyệt gọi khi người dùng hoặc hệ thống tạo event. |
+| **Macrotask** | `setTimeout`, `setInterval` | Một công việc độc lập ở lượt event loop sau. |
+| **Microtask** | `Promise.then`, phần tiếp theo của `await` | Chạy ngay sau code hiện tại, trước macrotask tiếp theo. |
+
+Ví dụ Promise tạo microtask:
+
+```ts
+Promise.resolve('Đã tải xong').then((message) => {
+  this.message = message;
+});
+```
+
+Sau callback, Zone.js theo dõi việc queue task của Angular zone có trở nên ổn định hay chưa. Khi phù hợp, Angular có thể lên lịch một lượt change detection. Bạn không cần tự đoán chính xác thứ tự microtask/macrotask khi viết component thông thường; điều cần nhớ là Zone.js có thể thấy các callback đã patch chạy xong.
+
+## Angular dùng Zone.js để chạy change detection
+
+### Luồng với timer hoặc Promise
+
+Một component dùng field thường và `setTimeout`:
+
+```ts
+@Component({
+  selector: 'app-status',
+  template: `<p>{{ message }}</p>`,
+})
+export class StatusComponent implements OnInit {
+  message = 'Đang chờ';
+
+  ngOnInit(): void {
+    setTimeout(() => {
+      this.message = 'Đã tải xong';
+    }, 1_000);
+  }
+}
+```
+
+Trong ứng dụng có Zone.js, luồng khái niệm là:
+
+```text
+1. Angular render <p>Đang chờ</p>
+                │
+2. Timer kết thúc, callback chạy trong Angular zone
+                │
+3. Zone.js báo Angular: async work vừa hoàn thành
+                │
+4. Angular chạy change detection cho các view phù hợp
+                │
+5. {{ message }} có giá trị mới → DOM thành <p>Đã tải xong</p>
+```
+
+Change detection mới là bước đọc `{{ message }}` và sửa DOM. Zone.js chỉ tạo điều kiện để bước đó được chạy. Vì vậy, nói “Zone.js cập nhật UI” là cách nói tắt, không hoàn toàn chính xác.
+
+### Một event có render lại toàn bộ trang không?
+
+**Không.** Với một `(click)` hoặc `setTimeout`, Zone.js có thể khiến Angular bắt đầu một lượt change detection; nó không xóa rồi dựng lại toàn bộ HTML, không tạo lại mọi component và không tự viết lại mọi DOM node.
+
+Ở chiến lược mặc định (`Default`), Angular thường đi kiểm tra rộng từ root của ứng dụng để đánh giá các binding. Điều này có nghĩa nhiều expression template **có thể được chạy lại**. Nhưng ở mỗi binding, Angular so sánh giá trị cũ và mới; DOM chỉ được ghi khi giá trị thật sự khác. Nếu `{{ user.name }}` vẫn là `An`, text node tương ứng không bị ghi lại.
+
+`OnPush` giúp thu hẹp lượt kiểm tra hơn nữa: Angular bỏ qua các component `OnPush` sạch, trừ khi chúng nhận input mới, có event trong subtree, `AsyncPipe` phát giá trị, được gọi `markForCheck()` hoặc signal mà template đã đọc thay đổi.
+
+```text
+Người dùng click
+        │
+        ▼
+Zone.js / Angular tạo cơ hội chạy change detection
+        │
+        ▼
+Angular kiểm tra view cần thiết (Default rộng hơn, OnPush hẹp hơn)
+        │
+        ▼
+Chỉ binding khác giá trị mới ghi vào DOM
+```
+
+Vì thế, nên phân biệt: **“Angular kiểm tra nhiều view”** không đồng nghĩa với **“trang bị render lại toàn bộ.”** Signals cải thiện thêm việc biết view nào phụ thuộc vào state nào.
+
+### Zone.js không biết state nào đã đổi
+
+Zone.js nhìn vào **callback**, không nhìn vào dependency của template. Hai callback sau đều có thể khiến Angular được đánh thức:
+
+```ts
+setTimeout(() => {
+  this.message = 'Đã tải xong'; // Có thay đổi UI.
+}, 1_000);
+
+setTimeout(() => {
+  console.log('Chỉ ghi log'); // Không thay đổi UI.
+}, 1_000);
+```
+
+Zone.js không biết callback thứ hai không đụng đến UI. Nó chỉ biết “timer callback đã xong”. Angular dùng change detection và chiến lược như `OnPush` để giới hạn phần cần kiểm tra, nhưng notification ban đầu vẫn khá rộng.
+
+Đó là một trong các động lực để Angular thêm Signals: signal cho framework biết **state nào** đổi và **view nào** đã đọc state đó. Xem [Signals, Zone.js và Change Detection](/docs/nen-tang/signals-va-zonejs) để học flow này từ góc nhìn state.
+
+## NgZone: ranh giới giữa Angular và code bên ngoài
+
+`NgZone` là service Angular cung cấp để bạn chủ động chạy code trong hoặc ngoài Angular zone. Hầu hết component không cần dùng nó. Nó hữu ích khi bạn tích hợp thư viện có callback tần suất cao hoặc callback nằm ngoài Angular.
+
+```ts
+import { Component, NgZone, inject } from '@angular/core';
+
+@Component({
+  selector: 'app-example',
+  template: `...`,
+})
+export class ExampleComponent {
+  private readonly zone = inject(NgZone);
+}
+```
+
+### runOutsideAngular: tránh đánh thức Angular cho việc không liên quan UI
+
+Dùng `runOutsideAngular()` cho công việc nhiều lần nhưng không làm thay đổi dữ liệu đang hiển thị: đo animation, xử lý dữ liệu tạm, hoặc lắng nghe event tần suất cao để tính toán nội bộ.
+
+```ts
+startAnimation(): void {
+  this.zone.runOutsideAngular(() => {
+    const frame = () => {
+      updateCanvasDirectly();
+      requestAnimationFrame(frame);
+    };
+
+    requestAnimationFrame(frame);
+  });
+}
+```
+
+Vì callback được đăng ký ngoài Angular zone, Angular không bị đánh thức sau từng frame chỉ vì animation canvas chạy. Đây là tối ưu có chủ đích; đừng đưa code ra ngoài zone nếu nó phải thay đổi template ở mọi callback.
+
+### run: quay lại Angular khi field thường cần cập nhật UI
+
+Nếu callback đang ở ngoài Angular zone và bạn đổi **field thường** được template đọc, quay lại Angular bằng `run()`:
+
+```ts
+status = 'Đang tải';
+
+connect(uploader: { onDone(callback: (fileName: string) => void): void }): void {
+  this.zone.runOutsideAngular(() => {
+    uploader.onDone((fileName) => {
+      this.zone.run(() => {
+        this.status = `Đã tải: ${fileName}`;
+      });
+    });
+  });
+}
+```
+
+`run()` đưa callback trở lại Angular zone. Khi callback hoàn tất, Angular có cơ hội chạy change detection để `{{ status }}` cập nhật.
+
+Với state UI hiện đại, một lựa chọn thường rõ ràng hơn là để `status` là signal và gọi `status.set(...)`. Signal đã tạo notification cho template consumer; bạn không cần dùng `NgZone.run()` chỉ để làm signal update render được.
+
+## Các tình huống thường gặp
+
+### Thư viện gọi callback ngoài Angular zone
+
+Dấu hiệu: log cho thấy field đã đổi, nhưng template không đổi. Điều này thường xảy ra khi thư viện khởi tạo callback ngoài Angular zone hoặc ứng dụng chạy zoneless.
+
+Chọn một trong hai cách rõ ràng:
+
+```ts
+// Cách 1: Ứng dụng còn dùng Zone.js, field thường.
+this.zone.run(() => {
+  this.status = result;
+});
+```
+
+```ts
+// Cách 2: State UI là signal mà template đã đọc.
+this.status.set(result);
+```
+
+Trong ứng dụng zoneless, ưu tiên cách thứ hai hoặc gọi `ChangeDetectorRef.markForCheck()` sau khi đổi field thường. Đừng kỳ vọng `NgZone.run()` một mình cung cấp semantics Zone.js khi Zone.js đã bị gỡ khỏi ứng dụng.
+
+### Sự kiện tần suất cao
+
+`scroll`, `mousemove`, `resize` hoặc animation frame có thể chạy rất nhiều lần. Nếu mỗi callback đều khiến Angular kiểm tra giao diện, hiệu năng có thể giảm.
+
+Trước khi dùng `runOutsideAngular()`, hãy xác định UI thật sự cần cập nhật bao nhiêu lần. Có thể throttle event, chỉ cập nhật signal khi giá trị hiển thị thực sự thay đổi, hoặc dùng API browser trực tiếp cho canvas. Tối ưu đúng là giảm notification thừa, không phải mặc định chạy mọi thứ ngoài Angular.
+
+### Signal trong ứng dụng còn dùng Zone.js
+
+Signals không xung đột với Zone.js. Trong Angular v16–v20, nhiều ứng dụng dùng cả hai:
+
+- Zone.js tiếp tục hỗ trợ code cũ đổi field thường trong async callback.
+- Signal thông báo rõ ràng khi state được template đọc thay đổi.
+
+Thêm Signals không tự động xóa `zone.js` khỏi bundle. Việc chuyển zoneless là một migration riêng, cần kiểm tra thư viện, forms, SSR và test.
+
+## Giới hạn và chi phí của Zone.js
+
+Zone.js rất tiện cho mô hình Angular truyền thống, nhưng có các trade-off:
+
+| Trade-off | Vì sao xảy ra | Hệ quả thực tế |
+| --- | --- | --- |
+| Notification rộng | Zone.js thấy task hoàn tất, không thấy state dependency | Angular có thể bị đánh thức dù UI không đổi. |
+| Patching toàn cục | Nhiều browser API bị wrapper can thiệp | Stack trace và debugging có thể khó đọc hơn. |
+| Tương thích API | API mới hoặc thư viện đặc biệt không phải lúc nào cũng được patch như mong muốn | Có callback đổi state nhưng không tự cập nhật UI. |
+| Kích thước/khởi động | Zone.js là thêm một dependency runtime | Có thêm chi phí payload và startup. |
+
+Các trade-off này không có nghĩa Zone.js “xấu” hoặc dự án đang dùng nó là lỗi thời. Nó giải quyết tốt bài toán notification tổng quát. Angular hiện đại chuyển dần sang notification tường minh để việc cập nhật dễ dự đoán hơn.
+
+## Zone.js và zoneless
+
+Zoneless là chế độ Angular không nạp Zone.js để theo dõi mọi async task. Angular v21+ dùng zoneless làm mặc định cho ứng dụng mới. Angular vẫn cần notification để chạy change detection, nhưng notification đến từ các API Angular rõ ràng hơn:
+
+- cập nhật signal mà template đã đọc;
+- event listener được bind trong template;
+- `AsyncPipe` nhận giá trị mới;
+- `ChangeDetectorRef.markForCheck()`;
+- Angular gán input qua framework API.
+
+Với Angular v20, có thể bật zoneless bằng `provideZonelessChangeDetection()`. Với dự án cũ, không tự gỡ `zone.js` khỏi `polyfills` mà chưa kiểm thử toàn bộ luồng async. Đọc hướng dẫn chính thức về [zoneless](https://angular.dev/guide/zoneless) trước khi migration.
+
+<Callout type="warn" title="NgZone không phải lý do để giữ Zone.js">
+  `NgZone.run()` và `NgZone.runOutsideAngular()` vẫn có thể tồn tại trong code tương thích zoneless. Nhưng các observable ổn định như `onStable`, `onUnstable` hoặc `onMicrotaskEmpty` không còn là tín hiệu phù hợp để điều khiển render ở ứng dụng zoneless.
+</Callout>
+
+## Checklist chẩn đoán
+
+Khi field đã đổi nhưng UI không đổi trong dự án dùng Zone.js, kiểm tra theo thứ tự:
+
+1. **Template có đọc đúng field/signal không?** Đặt log hoặc breakpoint tại callback và kiểm tra tên binding.
+2. **Callback có chạy trong Angular zone không?** Tìm `runOutsideAngular()`, Web Worker và thư viện bên thứ ba.
+3. **Component có `OnPush` không?** Xác định notification hợp lệ: input mới, event, `AsyncPipe`, signal hoặc `markForCheck()`.
+4. **Object có bị mutate tại chỗ không?** Với `OnPush` và signal, dùng reference mới khi cập nhật dữ liệu phức tạp.
+5. **Ứng dụng có phải zoneless không?** Nếu có, không dựa vào timer/Promise để tự đánh thức Angular; dùng notification tường minh.
+6. **Có exception trước khi cập nhật không?** Một lỗi runtime có thể khiến dòng gán hoặc `set()` không chạy.
+
+## Tóm tắt
+
+- Zone.js bọc nhiều API async để theo dõi callback và ngữ cảnh chạy của chúng.
+- Angular truyền thống dùng thông tin đó để biết khi nào *có thể* chạy change detection.
+- Zone.js không biết field, signal, component hoặc DOM node cụ thể nào đã đổi.
+- `NgZone.runOutsideAngular()` giảm notification thừa; `NgZone.run()` đưa callback về Angular zone khi field thường cần làm mới UI.
+- Signals cung cấp dependency theo state rõ ràng hơn; zoneless thay dần việc dựa vào patching toàn cục bằng notification tường minh.
+
+Quay lại [Signals, Zone.js và Change Detection](/docs/nen-tang/signals-va-zonejs) để đặt Zone.js vào bức tranh đầy đủ từ state đến DOM.

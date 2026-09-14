@@ -78,9 +78,9 @@ Tiếp tục với **[TypeScript cần thiết](/docs/nen-tang/typescript-can-th
 
 ### Chặng 5: Nắm mô hình phản ứng
 
-Kết thúc bằng **[Signals và Zone.js](/docs/nen-tang/signals-va-zonejs)**. Signals biểu diễn trạng thái có thể theo dõi trực tiếp. Zone.js hỗ trợ Angular nhận biết nhiều tác vụ bất đồng bộ để kiểm tra giao diện cần cập nhật. Hiểu hai cơ chế này ở mức nền tảng trước khi học quản lý state sâu hơn.
+Bắt đầu với **[Signals và Zone.js](/docs/nen-tang/signals-va-zonejs)** để hiểu đường đi từ state đến DOM. Sau đó, đọc **[Zone.js chi tiết](/docs/nen-tang/zonejs-chi-tiet)** nếu bạn muốn hiểu cơ chế patch async API, `NgZone` hoặc đang bảo trì dự án Angular truyền thống. Signals biểu diễn trạng thái có thể theo dõi trực tiếp; Zone.js hỗ trợ Angular nhận biết nhiều tác vụ bất đồng bộ để kiểm tra giao diện cần cập nhật.
 
-**Hoàn thành khi:** bạn phân biệt được “dữ liệu thay đổi” với “Angular quyết định cập nhật giao diện”, và biết Signals là hướng tiếp cận quan trọng trong Angular hiện đại.
+**Hoàn thành khi:** bạn phân biệt được “dữ liệu thay đổi” với “Angular quyết định cập nhật giao diện”, biết Signals là hướng tiếp cận quan trọng trong Angular hiện đại, và biết lúc nào cần kiểm tra `NgZone` trong dự án cũ.
 
 ## Cách học để nhớ lâu
 
@@ -105,4 +105,5 @@ Sau khi hoàn thành năm chặng, bạn đã sẵn sàng thiết lập môi tr�
   <Card title="3. Kiến trúc Angular" href="/docs/nen-tang/kien-truc-angular" description="Nhìn tổng thể các khối tạo nên một ứng dụng Angular." />
   <Card title="4. DOM và template" href="/docs/nen-tang/dom-va-template" description="Theo dõi cách Angular biến dữ liệu thành giao diện." />
   <Card title="5. Signals và Zone.js" href="/docs/nen-tang/signals-va-zonejs" description="Hiểu nền tảng reactivity và change detection hiện đại." />
+  <Card title="6. Zone.js chi tiết" href="/docs/nen-tang/zonejs-chi-tiet" description="Đi sâu vào patch async API, NgZone và zoneless." />
 </Cards>
