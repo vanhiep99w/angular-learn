@@ -333,6 +333,18 @@ export class ProductCardComponent {
 
 Event binding có dạng `(tênSựKiện)="statement"`. Angular đăng ký listener cho sự kiện DOM hoặc output của component/directive. Khi sự kiện xảy ra, statement được chạy trong ngữ cảnh component.
 
+<Callout type="idea" title="Vì sao `save()` không chạy ngay?">
+  `(click)` là cú pháp Angular đánh dấu event binding. Trong `(click)="save()"`, Angular tạo listener cho `click` và chỉ đánh giá biểu thức `save()` khi sự kiện `click` xảy ra. Dấu `()` ở đây là lời gọi trong handler, không phải lời gọi khi Angular render template.
+</Callout>
+
+Cú pháp React JSX có điểm khác quan trọng: biểu thức trong `{...}` được đánh giá khi React render. Vì vậy `onClick={save}` truyền function `save` làm handler; `onClick={() => save()}` truyền một callback chỉ gọi `save()` khi click. Ngược lại, `onClick={save()}` gọi `save()` ngay trong lúc render rồi truyền giá trị trả về làm `onClick` — đây thường là lỗi.
+
+```tsx
+<button onClick={save}>Lưu</button>
+<button onClick={() => save()}>Lưu</button>
+<button onClick={save()}>Lưu</button>
+```
+
 ```html
 <button type="button" (click)="archive()">Lưu trữ</button>
 <input (input)="onSearchInput($event)" />
