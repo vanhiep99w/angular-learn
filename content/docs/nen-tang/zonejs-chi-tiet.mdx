@@ -11,6 +11,8 @@ description: Hiểu Zone.js bọc async API ra sao, Angular dùng nó để đá
 
 - [Zone.js sinh ra để giải quyết vấn đề gì?](#zonejs-sinh-ra-để-giải-quyết-vấn-đề-gì)
 - [Zone.js làm việc như thế nào?](#zonejs-làm-việc-như-thế-nào)
+  - [Angular zone là gì?](#angular-zone-là-gì)
+  - [Một app có chỉ một Angular zone không?](#một-app-có-chỉ-một-angular-zone-không)
   - [Zone là ngữ cảnh chạy của callback](#zone-là-ngữ-cảnh-chạy-của-callback)
   - [Patch API nghĩa là gì?](#patch-api-nghĩa-là-gì)
   - [Task, microtask và macrotask](#task-microtask-và-macrotask)
@@ -51,32 +53,73 @@ setTimeout(() => {
 
 ## Zone.js làm việc như thế nào?
 
+### Angular zone là gì?
+
+Trong ứng dụng **còn dùng Zone.js**, Angular tạo một zone con riêng và theo dõi zone đó. Zone con này được gọi ngắn gọn là **Angular zone**. `NgZone` là service Angular dùng để tạo và làm việc với nó.
+
+Khi Angular khởi động ứng dụng, nó chạy phần tạo component đầu tiên, render đầu tiên và lifecycle hook bên trong Angular zone. Hãy hình dung gần đúng như sau; đây **không phải mã nguồn Angular thật**:
+
+```ts
+const ngZone = new NgZone();
+
+ngZone.run(() => {
+  // Angular tạo và khởi động ứng dụng ở đây.
+  // Component, template và ngOnInit() bắt đầu từ đây.
+  startAngularApplication();
+});
+```
+
+`ngZone.run(...)` không tạo thread mới, không tạo một JavaScript runtime khác và không bọc từng dòng TypeScript của bạn. Nó chỉ đặt `Zone.current` thành Angular zone **trong lúc hàm bên trong đang chạy**. Callback async được đăng ký trong lúc đó sẽ được Zone.js ghi nhớ là callback thuộc Angular zone.
+
+Nói đơn giản: **Angular zone là “khu vực callback mà Angular muốn nghe ngóng”.** Nếu callback chạy trong khu vực này và hoàn tất, Angular có thể biết để lên lịch change detection. Callback chạy ngoài khu vực này thì Angular không nhận notification theo cơ chế Zone.js.
+
+<Callout type="info" title="Chỉ áp dụng cho ứng dụng dùng Zone.js">
+  Ở ứng dụng zoneless, không có Angular zone theo nghĩa Zone.js này để đánh thức change detection. Angular dựa vào signal, `AsyncPipe`, event template hoặc `markForCheck()` thay vì theo dõi async task qua zone.
+</Callout>
+
+### Một app có chỉ một Angular zone không?
+
+Với **một ứng dụng Angular thông thường được bootstrap một lần**, có thể hình dung nó có **một `NgZone` chính**, tức một Angular zone chính để Angular theo dõi. Phần lớn code component chạy trong zone này, nên phần lớn timer, Promise và event callback mà code đó đăng ký cũng được gắn với nó.
+
+Nhưng đừng kết luận “cả app chỉ có đúng một zone” hoặc “mọi callback async chắc chắn thuộc Angular zone”. Zone.js còn có root zone và có thể có các zone con khác. Quan trọng hơn, các trường hợp sau nằm ngoài Angular zone hoặc không được theo dõi theo cách đó:
+
+- Code được đăng ký trong `ngZone.runOutsideAngular()`.
+- Callback do thư viện khởi tạo ngoài Angular zone.
+- API không được Zone.js patch như bạn mong đợi.
+- Ứng dụng chạy zoneless.
+
+Nói ngắn gọn: **một app Angular truyền thống thường có một Angular zone chính; callback được đăng ký khi đang ở trong zone đó sẽ kế thừa zone đó.** Đây là lý do đa số `setTimeout` trong component tự làm mới UI, nhưng không phải quy luật đúng cho mọi callback.
+
 ### Zone là ngữ cảnh chạy của callback
 
-Cụm “ngữ cảnh chạy” dễ gây mơ hồ. Hãy hiểu nó bằng một quy tắc cụ thể: **lúc bạn đăng ký callback, Zone.js nhớ callback được đăng ký từ zone nào; lúc callback chạy sau đó, Zone.js chạy lại nó trong đúng zone đã nhớ.**
+Cụm “ngữ cảnh chạy” giờ có thể hiểu cụ thể hơn: **lúc bạn đăng ký callback, Zone.js nhớ callback được đăng ký khi `Zone.current` là zone nào; lúc callback chạy sau đó, Zone.js chạy lại nó trong đúng zone đã nhớ.** Cần tách **hai thời điểm**; Zone.js không sửa source code component mỗi lần bạn gọi timer.
 
-Angular bootstrap code của ứng dụng bên trong Angular zone. Vì vậy, khi component gọi `setTimeout`, Zone.js lưu lại: “timer này được đăng ký trong Angular zone.” Một giây sau, trình duyệt không gọi thẳng callback của bạn; Zone.js lấy callback đó, chạy nó trong Angular zone rồi mới gọi code của bạn.
+1. **Khi nạp polyfills, trước khi app chạy:** `zone.js` patch API global một lần. Nó giữ `setTimeout` gốc rồi cài một hàm bọc vào `window.setTimeout`.
+2. **Khi Angular bootstrap:** Angular tạo `NgZone` rồi chạy phần khởi tạo ứng dụng qua `ngZone.run(...)`. Vì vậy, trong lifecycle hook của component, `Zone.current` là Angular zone.
+3. **Mỗi lần đăng ký callback:** hàm `setTimeout` đã bị patch chạy. Nó đọc `Zone.current`, lưu reference tới zone đó cùng callback, rồi đưa callback đã bọc cho timer gốc.
+4. **Khi timer hoàn tất:** wrapper chạy callback bên trong zone đã lưu. Angular nhận được hook trước/sau công việc trong Angular zone.
+
+Vì thế, câu “Zone.js lưu lại” chỉ nói về bước 3: nó lưu reference tới *zone hiện tại* cho callback cụ thể đó. Còn Zone.js “đổi code” là cách nói không chính xác; nó **đổi hàm API global lúc polyfills được nạp**, chứ không sửa file TypeScript hay thân callback của bạn.
 
 ```text
-Ngay bây giờ                         Một giây sau
-──────────────────────              ─────────────────────────────
-Component gọi setTimeout(callback)  Trình duyệt báo timer xong
-        │                                      │
-        ▼                                      ▼
-Zone.js nhớ: callback thuộc          Zone.js chạy callback trong
-Angular zone                         Angular zone → callback của bạn
+Lúc nạp app (một lần)       Lúc gọi setTimeout (mỗi lần)       Khi timer xong
+─────────────────────       ────────────────────────────       ──────────────
+Zone.js thay API global  →  Wrapper nhớ Angular zone + callback → Wrapper chạy callback
+setTimeout bằng wrapper     rồi gọi timer gốc                   trong Angular zone
 ```
 
 Có thể hình dung gần đúng bằng mã giả sau:
 
 ```ts
-// Lúc đăng ký timer
-const zoneLúcĐăngKý = Zone.current; // ở đây là Angular zone
+// Đây là hàm Zone.js đã cài vào window.setTimeout lúc nạp polyfills.
+function patchedSetTimeout(callback: () => void, delay: number) {
+  const zoneLúcĐăngKý = Zone.current; // Khi component chạy: Angular zone.
 
-nativeSetTimeout(() => {
-  // Lúc timer hoàn tất: phục hồi ngữ cảnh đã nhớ rồi mới gọi callback.
-  zoneLúcĐăngKý.run(callback);
-}, 1_000);
+  return nativeSetTimeout(() => {
+    // Lúc timer xong: phục hồi ngữ cảnh đã nhớ rồi mới gọi callback.
+    zoneLúcĐăngKý.run(callback);
+  }, delay);
+}
 ```
 
 `Zone.current` và `.run()` trong ví dụ là API/ý tưởng của Zone.js. Mã thật phức tạp hơn, nhưng nguyên lý là vậy. Zone **không** là thread mới, không là biến global chứa state và không giữ dữ liệu component. Nó là “môi trường thực thi” để Zone.js biết callback này thuộc về ai và hook nào cần chạy trước/sau callback.
@@ -91,7 +134,7 @@ Vì vậy Angular không cần “đoán người dùng vừa gọi `setTimeout`
 setTimeout(callback, 1_000);
 ```
 
-thì hàm được gọi thực tế đã là hàm do Zone.js bọc. Hàm bọc chụp `Zone.current`, thay callback bằng callback đãbọc, sau đó  mới gọi `setTimeout` gốc của trình duyệt:
+thì lời gọi đã đi vào wrapper cài từ trước. Wrapper chụp `Zone.current`, thay callback bằng callback đã bọc, sau đó mới gọi `setTimeout` gốc của trình duyệt:
 
 ```ts
 // Mô hình đơn giản hóa — không phải mã nguồn Zone.js thật.
