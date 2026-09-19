@@ -1,0 +1,486 @@
+---
+title: Selector và Host Element
+description: Hiểu selector tạo component như thế nào, host element tồn tại ra sao trong DOM và khi nào nó ảnh hưởng layout hoặc semantic HTML.
+---
+
+<Callout type="info" title="Câu hỏi trang này trả lời">
+  Khi viết <code>&lt;app-header /&gt;</code>, vì sao thẻ <code>app-header</code> vẫn tồn tại trong DOM? Nó có phải node thừa không? Trang này giải thích selector, host element và template bằng một cây DOM cụ thể.
+</Callout>
+
+## Mục lục
+
+- [Ba khái niệm cần tách riêng](#ba-khái-niệm-cần-tách-riêng)
+  - [Selector](#selector)
+  - [Host element](#host-element)
+  - [Template](#template)
+- [Angular tạo component từ selector như thế nào](#angular-tạo-component-từ-selector-như-thế-nào)
+  - [Ví dụ app-header](#ví-dụ-app-header)
+  - [Ví dụ app-root khi bootstrap](#ví-dụ-app-root-khi-bootstrap)
+- [Vì sao host element cần tồn tại](#vì-sao-host-element-cần-tồn-tại)
+  - [Điểm neo của component trong cây DOM](#điểm-neo-của-component-trong-cây-dom)
+  - [Host binding và host listener](#host-binding-và-host-listener)
+  - [Style với :host](#style-với-host)
+  - [Lifecycle, DI và content projection](#lifecycle-di-và-content-projection)
+- [app-header có phải Web Component không](#app-header-có-phải-web-component-không)
+- [Host element và semantic HTML](#host-element-và-semantic-html)
+  - [Component host và phần tử ngữ nghĩa khác nhau](#component-host-và-phần-tử-ngữ-nghĩa-khác-nhau)
+  - [Layout và display block](#layout-và-display-block)
+  - [Ngữ cảnh HTML bị giới hạn](#ngữ-cảnh-html-bị-giới-hạn)
+- [Host element có tạo vấn đề performance không](#host-element-có-tạo-vấn-đề-performance-không)
+- [Cách kiểm tra host element bằng DevTools](#cách-kiểm-tra-host-element-bằng-devtools)
+- [Checklist khi tạo component](#checklist-khi-tạo-component)
+- [Tóm tắt](#tóm-tắt)
+- [Đi tiếp](#đi-tiếp)
+
+## Ba khái niệm cần tách riêng
+
+Một Angular component thường có ba khái niệm liên quan nhưng không giống nhau: **selector**, **host element** và **template**.
+
+### Selector
+
+Selector là chuỗi trong metadata giúp Angular nhận ra nơi cần tạo component.
+
+```ts
+@Component({
+  selector: 'app-header',
+  templateUrl: './header.html',
+})
+export class Header {}
+```
+
+Trong ví dụ này, selector là:
+
+```text
+app-header
+```
+
+Khi Angular gặp thẻ `<app-header>` trong template của component cha, Angular biết thẻ đó tương ứng với class `Header`.
+
+### Host element
+
+**Host element** là phần tử DOM mà component được gắn vào. Với element selector `app-header`, host element chính là:
+
+```html
+<app-header></app-header>
+```
+
+Đây là một node DOM thật. Angular không xóa nó sau khi render.
+
+### Template
+
+Template là HTML mà component tạo **bên trong host element**.
+
+```html
+<!-- header.html -->
+<header>
+  <img src="investment-calculator-logo.png" alt="" />
+  <h1>Investment Calculator</h1>
+</header>
+```
+
+Tóm tắt quan hệ:
+
+```text
+selector:     app-header
+host element: <app-header>
+template:     <header> ... </header>
+```
+
+<Callout type="idea" title="Một câu để nhớ">
+  Selector giúp Angular nhận ra component. Host element là nơi component sống trong DOM. Template là nội dung Angular render bên trong host element.
+</Callout>
+
+## Angular tạo component từ selector như thế nào
+
+### Ví dụ app-header
+
+Parent template có:
+
+```html
+<app-header />
+```
+
+Angular kiểm tra `imports` của component cha. Nếu `Header` đã được import và selector khớp, Angular tạo instance `Header`, rồi render template của nó vào host element.
+
+```text
+Template của App
+        │
+        │ gặp <app-header>
+        ▼
+Selector "app-header" khớp Header
+        │
+        ▼
+Angular tạo Header instance
+        │
+        ▼
+Angular render header.html vào host
+```
+
+DOM kết quả gần đúng là:
+
+```html
+<app-header>
+  <header>
+    <img src="investment-calculator-logo.png" alt="" />
+    <h1>Investment Calculator</h1>
+  </header>
+</app-header>
+```
+
+Cây DOM tương ứng:
+
+```text
+app-header                    ← host element của Header
+└── header                    ← node đầu tiên trong template
+    ├── img
+    └── h1
+        └── #text: "Investment Calculator"
+```
+
+`<app-header>` không phải nội dung do `header.html` tạo. Nó đã là vị trí trong template của component cha. Angular gắn component `Header` vào vị trí đó.
+
+### Ví dụ app-root khi bootstrap
+
+Root component hoạt động theo cùng nguyên tắc, nhưng host element có sẵn trong `src/index.html`.
+
+```html
+<body>
+  <app-root></app-root>
+</body>
+```
+
+`main.ts` khởi động ứng dụng:
+
+```ts
+bootstrapApplication(AppComponent);
+```
+
+Nếu root component có selector `app-root`, Angular dùng phần tử đã có đó làm host element của `AppComponent`.
+
+```text
+index.html có <app-root>
+        │
+        ▼
+bootstrapApplication(AppComponent)
+        │
+        ▼
+Angular gắn AppComponent vào <app-root>
+        │
+        ▼
+Template của AppComponent trở thành children của <app-root>
+```
+
+Vì vậy `app-root`, `app-header` và `app-user-input` đều là host element. Khác biệt là `app-root` được viết sẵn trong HTML khởi đầu, còn host của component con thường được tạo khi Angular render template cha.
+
+## Vì sao host element cần tồn tại
+
+Host element không chỉ là một wrapper ngẫu nhiên. Nó là ranh giới Angular dùng để gắn component vào cây DOM và gắn những hành vi thuộc về component.
+
+### Điểm neo của component trong cây DOM
+
+Mỗi component cần một vị trí ổn định trong cây view để Angular có thể tạo, cập nhật và hủy nó.
+
+```text
+<app-root>
+  ├── <app-header>                 ← Header component sống tại đây
+  ├── <app-user-input>             ← UserInput component sống tại đây
+  └── <app-investment-results>     ← InvestmentResults component sống tại đây
+</app-root>
+```
+
+Nếu một điều kiện loại component khỏi template:
+
+```html
+@if (isHeaderVisible()) {
+  <app-header />
+}
+```
+
+Angular có một đơn vị rõ ràng để tạo hoặc hủy: host element cùng view của `Header`. Component class, template nodes, event listener và resource gắn với view đó đi theo cùng lifecycle.
+
+### Host binding và host listener
+
+Có những binding áp dụng cho **phần tử chứa component**, không phải element bên trong template. Angular gọi chúng là host binding và host listener.
+
+```ts
+@Component({
+  selector: 'app-header',
+  host: {
+    class: 'page-header',
+    '[attr.data-status]': 'status()',
+    '(click)': 'select()',
+  },
+  template: `<header><h1>Investment Calculator</h1></header>`,
+})
+export class Header {
+  readonly status = signal('ready');
+
+  select(): void {
+    console.log('Click trên host app-header');
+  }
+}
+```
+
+Kết quả gần đúng:
+
+```html
+<app-header class="page-header" data-status="ready">
+  <header>
+    <h1>Investment Calculator</h1>
+  </header>
+</app-header>
+```
+
+Click vào một node bên trong header sẽ bubble lên `<app-header>`, nên host listener có thể nhận event theo quy tắc DOM thông thường.
+
+### Style với :host
+
+CSS component có pseudo-class `:host`. Nó nhắm chính host element.
+
+```css
+:host {
+  display: block;
+  border-bottom: 1px solid #d1d5db;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+```
+
+Trong ví dụ này:
+
+```text
+:host   → <app-header>
+header  → <header> nằm bên trong template
+```
+
+`ViewEncapsulation` quyết định Angular cô lập style như thế nào. Với chế độ mặc định `Emulated`, DevTools thường hiển thị các attribute do Angular thêm để scope CSS. Dù cơ chế style chi tiết thay đổi theo cấu hình, `:host` vẫn là cách diễn tả rõ “style áp dụng lên phần tử mang component này”.
+
+### Lifecycle, DI và content projection
+
+Host element là ranh giới hữu ích cho các cơ chế khác của Angular:
+
+- **Lifecycle:** Angular tạo instance khi host/view xuất hiện và hủy instance khi host/view bị gỡ.
+- **Dependency injection:** provider đặt trong `@Component({ providers: [...] })` có scope cho component và cây con bên dưới host đó.
+- **Queries:** `ElementRef` của component tham chiếu tới host native element; `ViewContainerRef` cho phép làm việc với view quanh vị trí đó.
+- **Content projection:** nội dung đặt giữa thẻ mở/đóng được đưa qua `<ng-content>`, nhưng component vẫn có host riêng để làm ranh giới của nó.
+
+Ví dụ content projection:
+
+```html
+<app-panel>
+  <p>Nội dung do parent cung cấp.</p>
+</app-panel>
+```
+
+`<app-panel>` là host của `Panel`. Thẻ `<p>` là projected content mà `Panel` có thể đặt tại vị trí `<ng-content />` trong template của mình.
+
+## app-header có phải Web Component không
+
+Không tự động.
+
+`app-header` có dấu gạch ngang nên browser chấp nhận nó như một custom-tag name. Angular dùng thẻ đó như host selector. Nhưng một Angular component bình thường không tự đăng ký với Custom Elements Registry.
+
+```ts
+customElements.define('app-header', SomeElementClass);
+```
+
+Angular không tự chạy dòng trên chỉ vì bạn viết `selector: 'app-header'`.
+
+| Khái niệm | Angular component thường | Web Component thật |
+| --- | --- | --- |
+| Cách nhận diện | Angular compiler khớp selector trong template | Browser khớp tên đã đăng ký trong `customElements` |
+| Đăng ký bằng `customElements.define()` | Không | Có |
+| Cần Angular runtime để hoạt động | Có | Không nhất thiết |
+| Có thể dùng ngoài Angular | Không trực tiếp | Có |
+
+Angular Elements có thể đóng gói một Angular component thành Web Component thật. Đây là tính năng riêng, không phải hành vi mặc định của selector.
+
+## Host element và semantic HTML
+
+### Component host và phần tử ngữ nghĩa khác nhau
+
+Trong component header, hai thẻ có trách nhiệm khác nhau:
+
+```html
+<app-header>
+  <header>
+    <h1>Investment Calculator</h1>
+  </header>
+</app-header>
+```
+
+- `<app-header>` là ranh giới kỹ thuật của Angular component.
+- `<header>` mang ngữ nghĩa HTML: phần đầu của trang hoặc section.
+
+Không nên xem `<app-header>` thay thế cho `<header>`. Khi nội dung là header thật, vẫn giữ semantic element trong template để browser, CSS và công cụ hỗ trợ tiếp cận hiểu cấu trúc trang.
+
+### Layout và display block
+
+Host element là một element trong DOM, nên nó tham gia layout. Custom tag không tự mang mọi quy tắc layout mà bạn mong đợi từ `<div>` hoặc `<header>`.
+
+Nếu host đóng vai trò một khối độc lập, khai báo rõ:
+
+```css
+:host {
+  display: block;
+}
+```
+
+Đây là lý do Angular CLI có option:
+
+```bash
+ng generate component header --display-block
+```
+
+Trong flex hoặc grid, host có thể là flex/grid item. Đó thường là điều mong muốn:
+
+```html
+<main class="dashboard">
+  <app-filter-panel />
+  <app-investment-results />
+</main>
+```
+
+```css
+.dashboard {
+  display: grid;
+  grid-template-columns: 18rem 1fr;
+}
+```
+
+Ở đây hai host element là hai grid item. Chỉ dùng `display: contents` để cố làm host “biến mất” khi bạn hiểu rõ trade-off accessibility, selector CSS và layout; đây không phải mặc định tốt.
+
+### Ngữ cảnh HTML bị giới hạn
+
+Một số element HTML chỉ cho phép các child nhất định. Ví dụ `<table>` thường chứa `thead`, `tbody`, `tr` và các phần tử table hợp lệ; `<ul>` thường chứa `li`; `<select>` có quy tắc riêng cho `option`/`optgroup`.
+
+Không nên tạo cấu trúc như:
+
+```html
+<!-- Tránh: app-result-row nằm trực tiếp trong table. -->
+<table>
+  <app-result-row />
+</table>
+```
+
+Nếu template của `app-result-row` tạo `<tr>`, browser có thể tự sửa hoặc di chuyển DOM để đáp ứng quy tắc HTML. Điều này dễ gây layout, accessibility, hydration hoặc test khó đoán.
+
+Giữ cấu trúc hợp lệ:
+
+```html
+<table>
+  <tbody>
+    @for (item of results(); track item.year) {
+      <tr>
+        <td>{{ item.year }}</td>
+        <td>{{ item.valueEndOfYear }}</td>
+      </tr>
+    }
+  </tbody>
+</table>
+```
+
+Nếu cần tái sử dụng hành vi cho row, một attribute directive gắn trên `<tr>` thường phù hợp hơn một custom component host chen giữa `table` và `tr`.
+
+```ts
+@Directive({
+  selector: 'tr[appInvestmentResultRow]',
+})
+export class InvestmentResultRow {}
+```
+
+<Callout type="warn" title="Đừng bỏ semantic HTML để né host element">
+  Host element không phải lý do để thay mọi <code>&lt;header&gt;</code>, <code>&lt;nav&gt;</code> hay <code>&lt;button&gt;</code> thành custom tag. Giữ HTML semantic trong template; chỉ thiết kế lại component khi host làm markup không hợp lệ trong một ngữ cảnh bị giới hạn.
+</Callout>
+
+## Host element có tạo vấn đề performance không
+
+Có thêm một host element nghĩa là có thêm một DOM node. Với UI bình thường:
+
+```html
+<app-header />
+<app-user-input />
+<app-investment-results />
+```
+
+chi phí này không đáng kể. Lợi ích về ranh giới component, lifecycle và CSS lớn hơn nhiều.
+
+Chỉ đáng điều tra khi một list tạo hàng nghìn component nhỏ:
+
+```html
+@for (item of items(); track item.id) {
+  <app-small-cell [item]="item" />
+}
+```
+
+Khi đó có thể có hàng nghìn host element cộng với node bên trong từng component. Nút thắt thường là tổng số DOM node, style calculation, layout và paint — không chỉ riêng host element.
+
+Hướng xử lý theo thứ tự:
+
+1. Dùng `track item.id` để tái sử dụng DOM đúng cách.
+2. Tránh template/hàm tính toán nặng cho từng item.
+3. Dùng pagination hoặc Angular CDK Virtual Scroll nếu số item nhìn thấy quá lớn.
+4. Đo bằng Chrome DevTools trước khi cố bỏ wrapper hoặc tách/gộp component chỉ vì performance.
+
+## Cách kiểm tra host element bằng DevTools
+
+<Steps>
+<Step>
+
+### Mở trang Angular và Inspect component
+
+Mở Chrome DevTools, chọn tab **Elements**, rồi click vào phần UI do component tạo. Với Header, bạn sẽ thấy `<app-header>` bao quanh `<header>` và các node bên trong.
+
+</Step>
+<Step>
+
+### Phân biệt host với template node
+
+Chọn `<app-header>` trong Elements. Đây là host. Chọn `<header>` lồng bên trong. Đây là node do template `Header` tạo.
+
+</Step>
+<Step>
+
+### Kiểm tra CSS của host
+
+Ở panel Styles, tìm rule dùng `:host` đã được Angular biến đổi hoặc kiểm tra computed style. Xem `display`, class và attribute thực tế có đang nằm trên `<app-header>` không.
+
+</Step>
+<Step>
+
+### Kiểm tra layout trước khi sửa CSS
+
+Nếu host là flex/grid item, chọn chính `<app-header>` rồi xem Layout/Computed. Đừng chỉ inspect `<header>` con, vì kích thước hoặc position của host mới có thể quyết định layout trong container cha.
+
+</Step>
+</Steps>
+
+## Checklist khi tạo component
+
+- [ ] Selector có prefix dự án và dùng kebab-case, ví dụ `app-user-input`.
+- [ ] Template giữ semantic HTML phù hợp, ví dụ `<header>`, `<main>`, `<nav>`, `<button>` hoặc `<article>`.
+- [ ] Nếu host phải là block, CSS có `:host { display: block; }` hoặc layout parent đã xác định rõ cách host hoạt động.
+- [ ] Component không được đặt vào cấu trúc HTML bị giới hạn theo cách tạo markup không hợp lệ, đặc biệt là `table`, `select`, `ul` và `p`.
+- [ ] Host binding/listener chỉ dùng khi hành vi thực sự thuộc toàn component, không dùng để thay state hoặc binding trong template.
+- [ ] Với list lớn, đo tổng DOM/render cost trước khi tối ưu host element.
+
+## Tóm tắt
+
+- Selector là tên Angular dùng để khớp component trong template.
+- Host element là element DOM thật mà component được gắn vào. Với selector `app-header`, host là `<app-header>`.
+- Template được render bên trong host; `<header>` trong template và `<app-header>` host có vai trò khác nhau.
+- Host là ranh giới cho lifecycle, host binding/listener, `:host` CSS, DI scope, queries và content projection.
+- Một vài host element không gây vấn đề performance. Chỉ điều tra khi tổng số DOM node lớn hoặc host tạo markup không hợp lệ trong ngữ cảnh HTML đặc biệt.
+
+## Đi tiếp
+
+<Cards>
+  <Card title="Standalone component" href="/docs/component-template/component-standalone" description="Hiểu metadata, imports, providers và cách component tham gia vào ứng dụng." />
+  <Card title="DOM và template" href="/docs/nen-tang/dom-va-template" description="Theo dõi đường đi từ state qua template đến DOM thật trong trình duyệt." />
+  <Card title="Styling component" href="/docs/component-template/styling-component" description="Tìm hiểu view encapsulation, CSS cục bộ và styling host/component." />
+  <Card title="Content projection" href="/docs/component-template/content-projection" description="Đưa nội dung từ parent vào ng-content mà vẫn giữ ranh giới component." />
+</Cards>
