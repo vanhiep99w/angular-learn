@@ -1,0 +1,638 @@
+---
+title: Rendering Angular và React Re-render
+description: Phân biệt change detection, cập nhật DOM và React re-render để đánh giá performance Angular đúng cách.
+---
+
+<Callout type="info" title="Phạm vi bài này">
+  Bài này trả lời câu hỏi: Angular có gặp vấn đề “rerender” nghiêm trọng như React không? Trọng tâm là mô hình render phía client. Các chủ đề về SSR, hydration và đo trace được trình bày ở các bài liên quan cuối trang.
+</Callout>
+
+## Mục lục
+
+- [Kết luận trước](#kết-luận-trước)
+- [Ba khái niệm không được trộn lẫn](#ba-khái-niệm-không-được-trộn-lẫn)
+  - [Kiểm tra view](#kiểm-tra-view)
+  - [Cập nhật DOM thật](#cập-nhật-dom-thật)
+  - [Component instance](#component-instance)
+- [Angular làm mới giao diện như thế nào](#angular-làm-mới-giao-diện-như-thế-nào)
+  - [Luồng với một field thông thường](#luồng-với-một-field-thông-thường)
+  - [Signal thay đổi điều gì](#signal-thay-đổi-điều-gì)
+  - [OnPush thu hẹp phạm vi kiểm tra](#onpush-thu-hẹp-phạm-vi-kiểm-tra)
+- [React re-render khác gì Angular change detection](#react-re-render-khác-gì-angular-change-detection)
+- [Vì sao Signal Input không tự tạo bước nhảy performance lớn](#vì-sao-signal-input-không-tự-tạo-bước-nhảy-performance-lớn)
+- [Khi nào change detection trở thành nút thắt](#khi-nào-change-detection-trở-thành-nút-thắt)
+  - [Những dấu hiệu thực tế](#những-dấu-hiệu-thực-tế)
+  - [Những việc Signal không giải quyết](#những-việc-signal-không-giải-quyết)
+- [Cách viết component ít công việc dư thừa](#cách-viết-component-ít-công-việc-dư-thừa)
+  - [Dùng computed cho dữ liệu dẫn xuất](#dùng-computed-cho-dữ-liệu-dẫn-xuất)
+  - [Giữ identity ổn định cho danh sách](#giữ-identity-ổn-định-cho-danh-sách)
+  - [Chọn đúng vị trí cho state](#chọn-đúng-vị-trí-cho-state)
+- [Các kỹ thuật giảm unnecessary change detection checks](#các-kỹ-thuật-giảm-unnecessary-change-detection-checks)
+  - [Bản đồ React và Angular](#bản-đồ-react-và-angular)
+  - [OnPush và immutable update](#onpush-và-immutable-update)
+  - [Tách ranh giới component và state](#tách-ranh-giới-component-và-state)
+  - [Giảm tần suất update dày đặc](#giảm-tần-suất-update-dày-đặc)
+  - [Danh sách lớn và zoneless](#danh-sách-lớn-và-zoneless)
+- [Cách đo thay vì đoán](#cách-đo-thay-vì-đoán)
+- [Câu hỏi thường gặp](#câu-hỏi-thường-gặp)
+- [Tóm tắt](#tóm-tắt)
+- [Đi tiếp](#đi-tiếp)
+
+## Kết luận trước
+
+Angular có thể bị chậm vì quá nhiều lượt **change detection** — quá trình Angular kiểm tra binding trong template — nhưng đây không hoàn toàn giống React re-render.
+
+Thuật ngữ chính xác hơn trong Angular là:
+
+```text
+unnecessary change detection checks
+```
+
+Nó có nghĩa Angular đang kiểm tra những view hoặc binding không tạo ra thay đổi giao diện hữu ích. Đây là chi phí JavaScript có thể tránh được; nó không mặc định có nghĩa browser đã dựng lại toàn bộ DOM.
+
+- React thường chạy lại function component để tạo cây React element mới, sau đó đối chiếu cây mới với cây cũ.
+- Angular giữ nguyên instance của component class. Khi một view cần đồng bộ, Angular đánh giá binding đã được compile và chỉ ghi lại DOM nếu giá trị binding khác.
+- Signal không làm giảm số component trong ứng dụng. Nó cho Angular biết view nào đã đọc state nào, để Angular có thể lên lịch kiểm tra đúng nơi hơn.
+- Đổi mọi `@Input()` thành `input()` không phải là phép tối ưu mặc định. Lợi ích mạnh nhất của Signal Input là dependency rõ ràng, `computed()` và khả năng tương thích tốt với Angular zoneless.
+
+<Callout type="idea" title="Quy tắc thực hành">
+  Đừng tối ưu theo số lần gọi là “render”. Hãy đo thời gian từ thao tác người dùng đến paint kế tiếp, rồi xác định chi phí nằm ở JavaScript, change detection, số DOM node hay layout/paint của trình duyệt.
+</Callout>
+
+## Ba khái niệm không được trộn lẫn
+
+Cụm từ “rerender” thường làm cuộc nói chuyện về performance thiếu chính xác. Trước khi so Angular và React, hãy tách ba việc sau.
+
+### Kiểm tra view
+
+**Kiểm tra view** là lúc Angular đánh giá các expression trong template để biết giá trị hiện tại là gì.
+
+```html
+<p>{{ title }}</p>
+<p>{{ results().length }}</p>
+```
+
+Trong một lượt kiểm tra, Angular đọc `title` và `results().length`. Việc đọc này có chi phí JavaScript, nhất là khi template gọi hàm hoặc tạo mảng lớn.
+
+### Cập nhật DOM thật
+
+Sau khi có giá trị mới, Angular so sánh nó với giá trị ở lượt trước. Angular chỉ ghi DOM khi khác nhau.
+
+```text
+Binding trước: title = "Kết quả đầu tư"
+Binding mới:   title = "Kết quả đầu tư"
+
+→ Không ghi lại text node trong DOM.
+```
+
+Vì vậy, **một lượt change detection không có nghĩa toàn bộ giao diện bị vẽ lại**. Browser chỉ cần style, layout hoặc paint khi DOM/CSS thực sự thay đổi.
+
+### Component instance
+
+Angular component là một class instance. Khi state đổi, Angular không tạo lại object component và không chạy lại constructor hay `ngOnInit()`.
+
+```ts
+@Component({
+  selector: 'app-counter',
+  template: `<p>{{ count() }}</p>`,
+})
+export class CounterComponent {
+  readonly count = signal(0);
+
+  constructor() {
+    console.log('Chạy một lần khi component được tạo');
+  }
+}
+```
+
+Gọi `count.set(1)` không làm constructor chạy lại. Angular chỉ đồng bộ view đang hiển thị `count()`.
+
+<Callout type="info" title="Một mô hình ngắn để nhớ">
+  Change detection kiểm tra expression. DOM update chỉ xảy ra nếu kết quả expression đổi. Component instance không bị tạo lại chỉ vì state đổi.
+</Callout>
+
+## Angular làm mới giao diện như thế nào
+
+Angular dùng template đã compile. Có thể hiểu gần đúng rằng template được chuyển thành các lệnh JavaScript để tạo và cập nhật view, thay vì mỗi lần update phải tạo toàn bộ Virtual DOM mới.
+
+### Luồng với một field thông thường
+
+Ví dụ sau dùng field JavaScript bình thường:
+
+```ts
+@Component({
+  selector: 'app-status',
+  template: `<p>{{ message }}</p>`,
+})
+export class StatusComponent {
+  message = 'Đang chờ';
+
+  finish(): void {
+    this.message = 'Đã tải xong';
+  }
+}
+```
+
+Ở ứng dụng Angular dùng Zone.js theo kiểu truyền thống, một event trong template như `(click)` là notification để Angular chạy change detection.
+
+```text
+Người dùng click
+      │
+      ▼
+finish() gán message mới
+      │
+      ▼
+Angular kiểm tra view có {{ message }}
+      │
+      ▼
+"Đang chờ" khác "Đã tải xong"
+      │
+      ▼
+Angular đổi text node trong DOM
+```
+
+Nếu `message` không đổi, Angular vẫn có thể kiểm tra binding ở lượt đó, nhưng không ghi lại text node.
+
+### Signal thay đổi điều gì
+
+Với Signal, template tạo một dependency rõ ràng.
+
+```ts
+@Component({
+  selector: 'app-status',
+  template: `<p>{{ message() }}</p>`,
+})
+export class StatusComponent {
+  readonly message = signal('Đang chờ');
+
+  finish(): void {
+    this.message.set('Đã tải xong');
+  }
+}
+```
+
+Khi template gọi `message()`, Angular ghi nhận view này là consumer của `message`.
+
+```text
+Lần render đầu
+StatusComponent template đọc message()
+      │
+      ▼
+Angular ghi nhận dependency
+      │
+      ▼
+message.set('Đã tải xong')
+      │
+      ▼
+Angular đánh dấu StatusComponent view cần đồng bộ
+      │
+      ▼
+Angular kiểm tra binding rồi chỉ đổi DOM khác biệt
+```
+
+Signal không trực tiếp tìm một text node và sửa nó. Signal thông báo state đổi; Angular vẫn thực hiện bước đồng bộ view với DOM.
+
+### OnPush thu hẹp phạm vi kiểm tra
+
+`ChangeDetectionStrategy.OnPush` cho phép Angular bỏ qua nhiều component không có lý do phải kiểm tra.
+
+```ts
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-counter',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <p>{{ count() }}</p>
+    <button type="button" (click)="increase()">+1</button>
+  `,
+})
+export class CounterComponent {
+  readonly count = signal(0);
+
+  increase(): void {
+    this.count.update((value) => value + 1);
+  }
+}
+```
+
+Một component `OnPush` thường được kiểm tra khi có một notification hợp lệ, chẳng hạn:
+
+- Parent cấp một input mới.
+- Event trong template hoặc subtree của component chạy.
+- `AsyncPipe` nhận giá trị mới.
+- Signal đã được template đọc thay đổi.
+- Code gọi `markForCheck()`.
+
+Ví dụ có một cây UI như sau:
+
+```text
+AppComponent
+├── HeaderComponent
+├── SidebarComponent
+└── InvestmentResultsComponent  ← đọc investmentService.results()
+```
+
+Khi `results` đổi, `InvestmentResultsComponent` là view liên quan trực tiếp. `HeaderComponent` và `SidebarComponent` không tự nhiên cần xử lý bảng kết quả. Signal và `OnPush` giúp Angular tránh nhiều công việc không liên quan, nhưng Angular vẫn phải đi qua đường cần thiết trong cây view để đến view đã được đánh dấu.
+
+## React re-render khác gì Angular change detection
+
+Với React function component, một state update thường làm React gọi lại function component để tạo ra React element tree mới.
+
+```tsx
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}
+```
+
+Sau đó React reconciler đối chiếu tree mới với tree trước đó và chỉ commit thay đổi cần thiết vào DOM.
+
+Angular dùng một mô hình khác:
+
+```ts
+@Component({
+  selector: 'app-counter',
+  template: `<button (click)="increase()">{{ count() }}</button>`,
+})
+export class CounterComponent {
+  readonly count = signal(0);
+
+  increase(): void {
+    this.count.update((value) => value + 1);
+  }
+}
+```
+
+Angular không gọi lại class `CounterComponent` như gọi lại function React. Nó kiểm tra lệnh update của template đã compile, rồi so sánh binding `count()` với giá trị trước đó.
+
+| Câu hỏi | React function component | Angular component |
+| --- | --- | --- |
+| Đơn vị thường chạy lại khi state đổi | Function component tạo React element tree mới | Template update của view cần đồng bộ |
+| Instance có bị tạo lại không | Function body chạy lại; React giữ hook state theo vị trí | Class instance giữ nguyên |
+| DOM được thay đổi ra sao | Reconcile tree rồi commit thay đổi | So sánh binding đã compile rồi ghi khác biệt |
+| Tối ưu phổ biến | `memo`, `useMemo`, `useCallback` khi có bằng chứng | `OnPush`, Signal, `computed`, `track` khi có bằng chứng |
+
+Không framework nào “tự chậm” chỉ vì có khái niệm render. Vấn đề xuất hiện khi công việc mỗi lần update quá lớn hoặc diễn ra quá thường xuyên.
+
+## Vì sao Signal Input không tự tạo bước nhảy performance lớn
+
+Hai component dưới đây có cùng contract từ góc nhìn parent.
+
+```html
+<app-investment-results [results]="investmentService.results()" />
+```
+
+Component dùng input cổ điển:
+
+```ts
+@Input({ required: true }) results!: InvestmentResults[];
+```
+
+Component dùng Signal Input:
+
+```ts
+results = input.required<InvestmentResults[]>();
+```
+
+Khi parent cấp một reference mảng mới, Angular đã biết input của child đổi. Với `OnPush`, input mới là một lý do hợp lệ để child được kiểm tra. Vì thế chỉ đổi API từ `@Input()` sang `input()` thường không biến một view vốn đã được kiểm tra đúng cách thành view nhanh hơn nhiều.
+
+Signal Input có giá trị rõ hơn khi child cần dữ liệu **dẫn xuất** từ input.
+
+```ts
+results = input.required<InvestmentResults[]>();
+
+readonly totalInterest = computed(() =>
+  this.results().reduce((sum, item) => sum + item.interest, 0),
+);
+```
+
+```html
+<p>Total interest: {{ totalInterest() | currency }}</p>
+```
+
+Ở đây `computed()` cache kết quả cho đến khi `results()` thay đổi. Nó thay thế nhu cầu tự đồng bộ một field trong `ngOnChanges()` hoặc gọi một phép tính nặng trực tiếp trong template.
+
+<Callout type="warn" title="Không truyền Signal object vô tình">
+  Với one-way component binding thông thường, parent truyền giá trị hiện tại: `[results]="results()"`. Child dùng `input()` để nhận một `InputSignal`. Parent không cần và thường không nên truyền `[results]="results"` chỉ vì child dùng Signal Input. `model()` với two-way binding là trường hợp khác.
+</Callout>
+
+## Khi nào change detection trở thành nút thắt
+
+Change detection đáng quan tâm khi nó xuất hiện trong một interaction nóng: người dùng gõ liên tục, cuộn, kéo thả, đổi filter hoặc nhận dữ liệu realtime. Một lượt kiểm tra rất ngắn thường không thành vấn đề. Hàng trăm lượt kiểm tra có template nặng mới đáng điều tra.
+
+### Những dấu hiệu thực tế
+
+Hãy nghi ngờ rendering/change detection khi có một hoặc nhiều dấu hiệu sau:
+
+- Gõ vào ô tìm kiếm làm ký tự xuất hiện chậm hoặc bị giật.
+- Dashboard cập nhật liên tục làm CPU cao hoặc quạt máy chạy mạnh.
+- Click một control nhỏ nhưng trace cho thấy nhiều component được kiểm tra.
+- Danh sách vài nghìn item tạo long task hoặc cuộn không giữ được frame mượt.
+- Một thay đổi state nhỏ kéo theo filter, sort hoặc map collection lớn trong template.
+
+Những dấu hiệu này chỉ là giả thuyết. Trace trong Chrome DevTools và Angular DevTools mới cho biết chi phí thật nằm ở đâu.
+
+### Những việc Signal không giải quyết
+
+Signal giúp notification và dependency rõ hơn. Nó không tự giải quyết các chi phí sau:
+
+| Nút thắt | Ví dụ | Hướng xử lý phù hợp |
+| --- | --- | --- |
+| JavaScript tính toán nặng | Sort 50.000 sản phẩm trong mỗi lần gõ | Cải thiện thuật toán, debounce phù hợp, chia nhỏ work hoặc dùng Web Worker |
+| Quá nhiều DOM node | Render 10.000 `<tr>` cùng lúc | Pagination hoặc virtual scrolling |
+| Layout/paint nặng | Shadow/blur lớn, thay đổi kích thước nhiều node | Đọc Chrome Performance, giảm layout/paint và tối ưu CSS |
+| Network/backend chậm | API mất 2 giây mới trả dữ liệu | Cache, API design, CDN hoặc backend |
+| Bundle lớn | Trang vào đầu tải quá nhiều JavaScript | Lazy loading, bundle analysis và budgets |
+
+Nói ngắn gọn: Signal có thể giảm phần công việc framework cần làm. Nó không làm phép tính CPU, mạng hay browser rendering tự nhiên nhanh hơn.
+
+## Cách viết component ít công việc dư thừa
+
+### Dùng computed cho dữ liệu dẫn xuất
+
+Không gọi hàm có phép tính trong template.
+
+```ts
+// Tránh nếu results có thể lớn.
+getTotalInterest(): number {
+  return this.results().reduce((sum, item) => sum + item.interest, 0);
+}
+```
+
+```html
+<!-- Hàm có thể bị gọi ở mọi lượt kiểm tra view. -->
+<p>{{ getTotalInterest() }}</p>
+```
+
+Thay bằng `computed()`:
+
+```ts
+readonly totalInterest = computed(() =>
+  this.results().reduce((sum, item) => sum + item.interest, 0),
+);
+```
+
+```html
+<p>{{ totalInterest() }}</p>
+```
+
+`computed()` được tính lười: chưa ai đọc thì chưa tính. Sau lần đọc đầu, kết quả được cache cho đến khi một dependency như `results()` đổi.
+
+### Giữ identity ổn định cho danh sách
+
+Khi render list, dùng khóa ổn định của domain model.
+
+```html
+<!-- Không phù hợp khi list có chèn, xóa hoặc sắp xếp. -->
+@for (item of results(); track $index) {
+  <tr>...</tr>
+}
+```
+
+```html
+<!-- year là khóa ổn định trong InvestmentResults của project mẫu. -->
+@for (item of results(); track item.year) {
+  <tr>...</tr>
+}
+```
+
+`track item.year` không làm vòng lặp tính lãi nhanh hơn. Nó giúp Angular biết row nào vẫn là cùng row khi array mới xuất hiện, nhờ đó tái sử dụng DOM node và state của row tốt hơn.
+
+### Chọn đúng vị trí cho state
+
+Giữ state cục bộ trong component khi chỉ component đó cần nó:
+
+```ts
+readonly isAdvancedOptionsOpen = signal(false);
+```
+
+Đặt state vào service khi nhiều component xa nhau cần chung một nguồn dữ liệu:
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class InvestmentService {
+  private readonly _results = signal<InvestmentResults[] | undefined>(undefined);
+  readonly results = this._results.asReadonly();
+}
+```
+
+Đưa mọi state vào service không tự tạo performance tốt hơn. Nó chỉ thay đổi ownership và data flow. Nếu mọi component đều phụ thuộc ngầm vào một global service, component khó tái sử dụng và khó test hơn.
+
+## Các kỹ thuật giảm unnecessary change detection checks
+
+Không có một API Angular nào tương đương tuyệt đối với “chống rerender” trong React. Mỗi kỹ thuật xử lý một nguồn chi phí khác nhau: view bị kiểm tra quá rộng, phép tính lặp lại, DOM list bị tạo lại, hoặc event tạo update quá dày.
+
+### Bản đồ React và Angular
+
+| Mục tiêu | React thường dùng | Angular thường dùng | Vấn đề thực sự được xử lý |
+| --- | --- | --- | --- |
+| Bỏ qua component không liên quan | `React.memo` | `ChangeDetectionStrategy.OnPush` | Giảm view check khi không có notification hợp lệ |
+| Cache tính toán dẫn xuất | `useMemo` | `computed()` hoặc pure pipe | Tránh filter, sort, reduce lặp lại |
+| Giữ identity của list | `key={item.id}` | `track item.id` | Tái sử dụng đúng DOM node/item view |
+| Giữ state gần nơi sử dụng | local `useState` | Signal cục bộ | Thu hẹp số consumer phụ thuộc state |
+| Chia sẻ state có chọn lọc | selector trong store | Service Signal + `computed()` | Consumer chỉ đọc dữ liệu cần thiết |
+| Giảm update từ input/event dày | debounce/throttle | RxJS `debounceTime`, `auditTime`, `throttleTime` | Giảm số lần xử lý và render cần thiết |
+| Chỉ hiển thị item đang thấy | virtualization library | Angular CDK Virtual Scroll | Giảm số DOM node, layout và paint |
+
+Bảng này là bản đồ tư duy, không phải checklist phải bật hết. Ví dụ `OnPush` không sửa được một bảng 10.000 row; virtual scroll không giảm chi phí `sort()` 50.000 item; `computed()` không làm API nhanh hơn.
+
+### OnPush và immutable update
+
+`OnPush` là công cụ gần nhất với `React.memo`. Nó cho Angular một ranh giới để bỏ qua component khi không có input mới, event, Signal notification, `AsyncPipe` emission hoặc lời gọi `markForCheck()`.
+
+```ts
+@Component({
+  selector: 'app-investment-results',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  templateUrl: './investment-results.component.html',
+})
+export class InvestmentResultsComponent {
+  results = input<InvestmentResults[] | undefined>();
+}
+```
+
+Để `OnPush` nhận ra thay đổi input, hãy thay reference thay vì mutate dữ liệu tại chỗ.
+
+```ts
+// Không tốt: mảng cũ vẫn giữ cùng reference.
+results.push(newResult);
+
+// Tốt: tạo một mảng mới.
+results = [...results, newResult];
+```
+
+Với Signal, cập nhật bất biến cũng rõ ràng hơn:
+
+```ts
+this._results.update((current) => [
+  ...(current ?? []),
+  newResult,
+]);
+```
+
+<Callout type="warn" title="OnPush không phải công tắc tăng tốc miễn phí">
+  Nếu code cũ mutate object/array, hoặc callback từ thư viện ngoài Angular thay đổi field thường, chuyển cả app sang `OnPush` có thể làm UI không cập nhật như mong đợi. Chuyển từng subtree, chạy test tương tác rồi đo lại.
+</Callout>
+
+### Tách ranh giới component và state
+
+Một component page rất lớn phải kiểm tra nhiều binding cùng lúc khi bất kỳ state liên quan nào của nó tạo notification. Nếu các vùng UI độc lập, tách chúng thành component có ranh giới rõ ràng sẽ giúp Angular bỏ qua vùng không liên quan.
+
+```text
+DashboardPageComponent
+├── DashboardFiltersComponent     (OnPush)
+├── DashboardTableComponent       (OnPush)
+├── DashboardChartComponent       (OnPush)
+├── NotificationPanelComponent    (OnPush)
+└── UserProfileComponent          (OnPush)
+```
+
+Không tách component chỉ để tăng số file. Tách khi các phần có state, input hoặc nhịp cập nhật khác nhau. Ví dụ filter thay đổi thường xuyên không cần làm profile người dùng phải xử lý bảng dữ liệu.
+
+State cũng nên đặt ở phạm vi nhỏ nhất đáp ứng nhu cầu:
+
+```ts
+// Chỉ FilterDropdownComponent cần biết.
+readonly isOpen = signal(false);
+```
+
+```ts
+// Header và CartPage cùng cần biết.
+@Injectable({ providedIn: 'root' })
+export class CartService {
+  private readonly _items = signal<CartItem[]>([]);
+
+  readonly itemCount = computed(() =>
+    this._items().reduce((count, item) => count + item.quantity, 0),
+  );
+}
+```
+
+Header nên đọc `itemCount()` thay vì nhận toàn bộ cart array rồi tự tính lại. Đây tương tự selector trong state store: consumer chỉ phụ thuộc mảnh state nó cần.
+
+### Giảm tần suất update dày đặc
+
+Signal giúp Angular biết chính xác state nào đổi, nhưng không thay đổi việc một state bị ghi 100 lần mỗi giây vẫn có thể yêu cầu UI cập nhật rất nhiều lần.
+
+Các nguồn update thường gặp:
+
+- `input` khi người dùng gõ liên tục;
+- `mousemove`, `scroll`, `resize`;
+- WebSocket/realtime dashboard;
+- animation hoặc chart library.
+
+Nếu cần gọi API tìm kiếm, dùng RxJS để giảm số request và thay đổi state hiển thị:
+
+```ts
+this.searchControl.valueChanges.pipe(
+  debounceTime(300),
+  distinctUntilChanged(),
+  switchMap((query) => this.productsApi.search(query)),
+).subscribe((results) => this.results.set(results));
+```
+
+Với event tần suất cao nhưng không cần cập nhật Angular ở mỗi event, có thể đăng ký callback ngoài Angular zone:
+
+```ts
+this.ngZone.runOutsideAngular(() => {
+  window.addEventListener('scroll', this.handleScroll);
+});
+```
+
+Khi đến thời điểm thật sự cần phản ánh UI, quay lại Angular hoặc cập nhật một Signal ở nhịp đã được throttle:
+
+```ts
+this.ngZone.run(() => {
+  this.scrollPosition.set(window.scrollY);
+});
+```
+
+`runOutsideAngular()` là tối ưu nâng cao. Dùng sai sẽ tạo state đổi nhưng UI không cập nhật. Hãy dùng nó sau khi trace chứng minh event đang tạo quá nhiều change detection.
+
+### Danh sách lớn và zoneless
+
+`track item.id` giúp Angular tái sử dụng DOM node. Nó không làm số node hiển thị ít đi. Nếu giao diện giữ hàng nghìn row cùng lúc, browser vẫn phải tính style, layout và paint cho hàng nghìn node đó.
+
+Khi trace cho thấy chi phí DOM/render của list lớn, dùng Angular CDK Virtual Scroll để chỉ render vùng đang nhìn thấy và một buffer nhỏ. Đây thường có tác động lớn hơn việc đổi `@Input()` sang Signal Input.
+
+Zoneless xử lý một lớp chi phí khác. Ở ứng dụng dùng Zone.js, nhiều async task có thể đánh thức Angular chỉ vì *có thể* state đã đổi. Zoneless dựa vào notification rõ ràng như Signal update, input binding, template listener, `AsyncPipe` hoặc `markForCheck()`.
+
+Project Angular 18 đang học vẫn dùng `zone.js`. Không nên gỡ nó chỉ để benchmark. Hãy hiểu các callback async, reactive forms, thư viện bên thứ ba và test trước. Với project Angular mới, zoneless là hướng kiến trúc hiện đại; với project cũ, migration cần được làm từng bước và có số đo.
+
+## Cách đo thay vì đoán
+
+Đừng kết luận từ việc một component “render nhiều lần”. Hãy đo một hành trình cụ thể.
+
+<Steps>
+<Step>
+
+### Viết kịch bản tái lập
+
+Ví dụ: mở danh sách 2.000 sản phẩm fixture, gõ `angular`, rồi kết thúc khi text số kết quả đã xuất hiện.
+
+</Step>
+<Step>
+
+### Ghi baseline
+
+Dùng production build nếu có thể. Ghi trình duyệt, CPU throttling, cache và số item. Lấy ba đến năm lần chạy thay vì chọn một lượt đẹp nhất.
+
+</Step>
+<Step>
+
+### Đọc trace
+
+Dùng Chrome DevTools Performance để xem phần lớn thời gian thuộc JavaScript, style/layout hay paint. Dùng Angular DevTools Profiler khi cần biết component/view nào tham gia nhiều.
+
+</Step>
+<Step>
+
+### Đổi một nguyên nhân rồi đo lại
+
+Ví dụ, chuyển phép tính dẫn xuất sang `computed()`, đổi `track $index` thành `track item.id`, hoặc virtualize list. Chạy lại cùng kịch bản và giữ thay đổi chỉ khi UX hoặc metric tốt hơn.
+
+</Step>
+</Steps>
+
+<Callout type="warn" title="Không profile development build để kết luận cuối">
+  Development mode và tooling có thêm overhead. Dùng chúng để hiểu quan hệ nhân quả, sau đó xác nhận số đo cuối bằng production build trong cùng điều kiện.
+</Callout>
+
+## Câu hỏi thường gặp
+
+### Angular có “rerender toàn bộ app” khi một Signal đổi không?
+
+Không theo nghĩa tạo lại toàn bộ DOM hoặc component instance. Signal đánh dấu view đã đọc nó. Angular vẫn cần đi qua phần cây view cần thiết, kiểm tra binding của view đó và chỉ ghi DOM binding có giá trị khác.
+
+### Có nên bọc mọi component bằng OnPush?
+
+Không nên làm hàng loạt chỉ vì một quy tắc. `OnPush` rất phù hợp với component có input immutable, state Signal và notification rõ ràng. Nhưng migration lớn có thể làm lộ mutation tại chỗ hoặc callback của thư viện bên thứ ba vốn đang dựa vào Zone.js. Hãy chuyển theo subtree, kiểm thử tương tác và đo lại.
+
+### Có nên thay tất cả @Input thành input()?
+
+Với code mới, `input()` là API Angular khuyến nghị và thường là lựa chọn tốt. Với code cũ ổn định, không cần migration chỉ để kỳ vọng performance tăng. Ưu tiên nơi `input()` giúp bỏ `ngOnChanges`, tạo `computed()` hoặc làm contract required rõ hơn.
+
+### Signals có thay RxJS không?
+
+Không. Signal phù hợp cho giá trị hiện tại của UI. RxJS phù hợp cho stream theo thời gian, đặc biệt khi cần debounce, cancellation, retry hoặc phối hợp nhiều nguồn async. Hai công cụ có thể cùng tồn tại.
+
+## Tóm tắt
+
+- Angular change detection kiểm tra binding trong view; nó không đồng nghĩa dựng lại toàn bộ DOM hay tạo lại component class.
+- React re-render và Angular view check là hai mô hình khác nhau, nhưng cả hai chỉ cố cập nhật DOM khi có khác biệt.
+- Signal giúp Angular biết view nào phụ thuộc state nào. Signal không làm giảm số component và không xử lý mọi loại bottleneck.
+- `@Input()` và `input()` đều truyền dữ liệu cha → con. Signal Input đặc biệt hữu ích khi cần `computed()`, required typing hoặc kiến trúc reactive/zoneless.
+- Các công cụ chính để giảm unnecessary checks là `OnPush` kết hợp immutable update, `computed()`/pure pipe, `track item.id`, state có phạm vi nhỏ, debounce/throttle, virtual scroll và — khi phù hợp — zoneless.
+- Tối ưu đáng tin cậy bắt đầu từ số đo: interaction → paint, long task, chi phí JavaScript, số DOM node và layout/paint.
+
+## Đi tiếp
+
+<Cards>
+  <Card title="Signals, Zone.js và Change Detection" href="/docs/nen-tang/signals-va-zonejs" description="Hiểu notification, OnPush và zoneless trước khi tối ưu view." />
+  <Card title="Signals" href="/docs/reactivity-state/signals" description="Học signal, dependency tracking, immutable update và state ownership." />
+  <Card title="Computed và effect" href="/docs/reactivity-state/computed-effect" description="Tạo dữ liệu dẫn xuất mà không tự đồng bộ state dư thừa." />
+  <Card title="Profiling hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="Dùng Chrome và Angular DevTools để tìm nút thắt bằng evidence." />
+</Cards>

@@ -108,9 +108,10 @@ Một kiểm thử tốt nêu rõ hành vi quan sát được và nguyên nhân 
 2. **[Component testing](/docs/testing-performance-deploy/component-testing)** — kiểm tra template, binding, event và trạng thái giao diện trên nền logic đã được cô lập.
 3. **[E2E testing](/docs/testing-performance-deploy/e2e-testing)** — chỉ giữ các hành trình có rủi ro cao mà component test không thể chứng minh, chẳng hạn router và tích hợp trình duyệt.
 4. **[Profiling hiệu năng](/docs/testing-performance-deploy/profiling-performance)** — thiết lập baseline cho render, change detection, tải trang và các thao tác quan trọng trước khi thay đổi kiến trúc.
-5. **[SSR và hydration](/docs/testing-performance-deploy/ssr-hydration)** — áp dụng khi cần cải thiện lần hiển thị đầu hoặc SEO; đồng thời kiểm tra code có phụ thuộc API chỉ tồn tại trong trình duyệt hay không.
-6. **[Build và tối ưu bundle](/docs/testing-performance-deploy/build-optimization)** — kiểm soát artefact production bằng build configuration, lazy loading và budgets sau khi đã có số đo.
-7. **[Docker và Cloudflare](/docs/testing-performance-deploy/deployment)** — đóng gói, cấu hình biến môi trường, deploy và xác minh bản phát hành cuối cùng.
+5. **[Rendering Angular và React re-render](/docs/testing-performance-deploy/rendering-angular-va-react)** — phân biệt kiểm tra view, DOM update và component re-render để chọn Signal, `OnPush` hay tối ưu DOM đúng chỗ.
+6. **[SSR và hydration](/docs/testing-performance-deploy/ssr-hydration)** — áp dụng khi cần cải thiện lần hiển thị đầu hoặc SEO; đồng thời kiểm tra code có phụ thuộc API chỉ tồn tại trong trình duyệt hay không.
+7. **[Build và tối ưu bundle](/docs/testing-performance-deploy/build-optimization)** — kiểm soát artefact production bằng build configuration, lazy loading và budgets sau khi đã có số đo.
+8. **[Docker và Cloudflare](/docs/testing-performance-deploy/deployment)** — đóng gói, cấu hình biến môi trường, deploy và xác minh bản phát hành cuối cùng.
 
 <Callout type="warn" title="Đừng đảo ngược vòng lặp">
   Không nên thêm SSR, nén bundle hoặc thay đổi chiến lược change detection để rồi mới đi tìm số liệu. Hãy ghi lại baseline trước, thay đổi một giả thuyết tại một thời điểm và so sánh cùng điều kiện đo.
@@ -179,6 +180,7 @@ Dùng checklist này như cổng review, không phải thay cho hiểu biết v�
   <Card title="Kiểm tra UI bằng component test" href="/docs/testing-performance-deploy/component-testing" description="Xác minh template và tương tác mà người dùng thực sự nhìn thấy." />
   <Card title="Bảo vệ hành trình E2E" href="/docs/testing-performance-deploy/e2e-testing" description="Chọn các luồng nghiệp vụ quan trọng để kiểm thử trên trình duyệt." />
   <Card title="Đo và tối ưu hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="Tìm nút thắt bằng số liệu thay vì tối ưu theo cảm giác." />
+  <Card title="Angular render và React re-render" href="/docs/testing-performance-deploy/rendering-angular-va-react" description="Phân biệt change detection, DOM update, Signals và OnPush." />
   <Card title="Hiểu SSR và hydration" href="/docs/testing-performance-deploy/ssr-hydration" description="Chuẩn bị ứng dụng cho render đa môi trường." />
   <Card title="Kiểm soát production build" href="/docs/testing-performance-deploy/build-optimization" description="Giảm bundle và bảo vệ giới hạn kích thước bằng budgets." />
   <Card title="Đóng gói và triển khai" href="/docs/testing-performance-deploy/deployment" description="Đưa artefact đã kiểm tra lên Docker và Cloudflare." />
