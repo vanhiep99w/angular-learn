@@ -1,0 +1,583 @@
+---
+title: Cú pháp template và template compiler
+description: Hiểu Angular biên dịch các cú pháp binding, đặc biệt [(...)] banana-in-a-box, thành input và output như thế nào.
+---
+
+<Callout type="info" title="Mục tiêu của bài này">
+  Sau bài này, bạn có thể tự mở rộng `[(appModel)]="user.email"` thành `[appModel]` và `(appModelChange)`, biết vì sao tên output phải có hậu tố `Change`, và phân biệt event DOM với output của Angular.
+</Callout>
+
+## Mục lục
+
+- [Template không chạy trực tiếp trong browser](#template-không-chạy-trực-tiếp-trong-browser)
+- [Bốn dạng binding nền tảng](#bốn-dạng-binding-nền-tảng)
+  - [Interpolation: `{{ }}`](#interpolation-)
+  - [Property binding: `[]`](#property-binding-)
+  - [Event binding: `()`](#event-binding-)
+  - [Two-way binding: `[()]`](#two-way-binding-)
+- [Cơ chế banana-in-a-box](#cơ-chế-banana-in-a-box)
+  - [Quy tắc mở rộng](#quy-tắc-mở-rộng)
+  - [Luồng chạy lúc runtime](#luồng-chạy-lúc-runtime)
+  - [Vì sao vế phải phải gán được](#vì-sao-vế-phải-phải-gán-được)
+- [Tự tạo `[(appModel)]`](#tự-tạo-appmodel)
+  - [Directive đơn giản](#directive-đơn-giản)
+  - [Nhiều field vẫn là nhiều binding độc lập](#nhiều-field-vẫn-là-nhiều-binding-độc-lập)
+  - [Đổi tên output có được không](#đổi-tên-output-có-được-không)
+- [`ngModel`, `(input)` và `(change)`](#ngmodel-input-và-change)
+- [Các cú pháp compiler đáng nhớ khác](#các-cú-pháp-compiler-đáng-nhớ-khác)
+  - [Structural directive `*`](#structural-directive-)
+  - [Control flow `@if` và `@for`](#control-flow-if-và-for)
+  - [Template reference `#`](#template-reference-)
+  - [Attribute, class và style binding](#attribute-class-và-style-binding)
+- [Cách tự debug binding](#cách-tự-debug-binding)
+- [Tóm tắt](#tóm-tắt)
+
+## Template không chạy trực tiếp trong browser
+
+Browser chỉ hiểu HTML, CSS và JavaScript. Nó **không biết** `[(ngModel)]`, `[disabled]`, `(click)` hay `@if` là gì.
+
+Angular đọc template khi build ứng dụng. Template compiler kiểm tra cú pháp, xác định directive/component nào khớp với từng element, rồi sinh mã JavaScript để Angular tạo và cập nhật DOM khi ứng dụng chạy.
+
+Ví dụ browser không thể tự hiểu dòng này:
+
+```html
+<input [(appModel)]="user.email" />
+```
+
+Angular compiler hiểu đây là một quy ước two-way binding. Về mặt ý nghĩa, nó tách dòng trên thành:
+
+```html
+<input
+  [appModel]="user.email"
+  (appModelChange)="user.email = $event"
+/>
+```
+
+<Callout type="idea" title="Cách đọc template">
+  Hãy luôn đọc dấu ngoặc trước: `[]` đưa dữ liệu ra UI, `()` đưa event vào component, còn `[()]` ghép hai chiều theo một quy ước đặt tên.
+</Callout>
+
+## Bốn dạng binding nền tảng
+
+### Interpolation: `{{ }}`
+
+```html
+<p>Xin chào {{ user.name }}</p>
+```
+
+Angular đọc `user.name` từ component và cập nhật text khi giá trị thay đổi. Interpolation phù hợp với nội dung text.
+
+```html
+<p>Tổng cộng: {{ total }} đ</p>
+```
+
+### Property binding: `[]`
+
+```html
+<button [disabled]="isSaving">Lưu</button>
+<img [src]="user.avatarUrl" [alt]="user.name" />
+```
+
+Dấu `[]` cho biết phần bên phải là expression TypeScript/template. Angular lấy kết quả rồi ghi nó vào property của DOM element, hoặc vào input của directive/component phù hợp.
+
+```html
+<app-user-card [user]="selectedUser" />
+```
+
+Nếu `UserCardComponent` có `@Input() user`, Angular sẽ gán `selectedUser` vào input đó.
+
+### Event binding: `()`
+
+```html
+<button (click)="save()">Lưu</button>
+<input (input)="onNameInput($event)" />
+```
+
+Với DOM event, Angular đăng ký listener gần giống:
+
+```ts
+button.addEventListener('click', () => component.save());
+```
+
+`$event` là event object của browser trong ví dụ `(input)`:
+
+```ts
+onNameInput(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  console.log(input.value);
+}
+```
+
+`()` cũng dùng để lắng nghe `@Output()` của directive/component. Khi đó `$event` là dữ liệu mà output phát ra, không nhất thiết là DOM `Event`.
+
+### Two-way binding: `[()]`
+
+```html
+<input [(ngModel)]="name" />
+```
+
+`[()]` có tên chính thức là **two-way binding syntax**. Tên gọi vui, rất phổ biến trong cộng đồng Angular, là **banana-in-a-box**:
+
+```text
+[(ngModel)]
+^^        ^^  dấu []: box
+  ^^    ^^    dấu (): banana
+```
+
+Đây không phải cơ chế thứ năm độc lập. Nó là cách viết ngắn cho một property binding và một event/output binding.
+
+## Cơ chế banana-in-a-box
+
+### Quy tắc mở rộng
+
+Angular áp dụng quy tắc sau:
+
+```html
+[(X)]="Y"
+```
+
+được hiểu là:
+
+```html
+[X]="Y"
+(XChange)="Y = $event"
+```
+
+Ví dụ:
+
+```html
+<input [(appModel)]="user.email" />
+```
+
+được hiểu là:
+
+```html
+<input
+  [appModel]="user.email"
+  (appModelChange)="user.email = $event"
+/>
+```
+
+Trong quy tắc này:
+
+| Phần | Giá trị trong ví dụ | Ý nghĩa |
+| --- | --- | --- |
+| `X` | `appModel` | Public input mà directive/component nhận từ bên ngoài. |
+| `XChange` | `appModelChange` | Public output báo giá trị mới ra ngoài. |
+| `Y` | `user.email` | Biến hoặc property thuộc component cha cần đồng bộ. |
+| `$event` | Ví dụ `'an@example.com'` | Giá trị do output phát ra. |
+
+Tên `appModelChange` không phải tên tùy hứng: Angular nối hậu tố `Change` vào tên `appModel` để tìm output tương ứng.
+
+### Luồng chạy lúc runtime
+
+Giả sử component có state:
+
+```ts
+user = {
+  email: 'old@example.com',
+};
+```
+
+và template là:
+
+```html
+<input [(appModel)]="user.email" />
+```
+
+Hãy hình dung Angular thực hiện logic gần như sau. Đây là **pseudo-code**, không phải code Angular generate nguyên văn:
+
+```ts
+const directive = new AppModelDirective();
+
+// Mỗi lần view được cập nhật, dữ liệu đi từ component ra directive.
+directive.appModel = component.user.email;
+
+// Angular cài listener cho output một lần khi tạo view.
+directive.appModelChange.subscribe((nextValue) => {
+  component.user.email = nextValue;
+});
+```
+
+Luồng khi người dùng gõ một email mới:
+
+```text
+Người dùng gõ "new@example.com"
+             │
+             ▼
+Native event input của browser
+             │
+             ▼
+AppModelDirective đọc input.value
+             │
+             ▼
+appModelChange.emit("new@example.com")
+             │
+             ▼
+(user.email = $event) do Angular tạo từ [()]
+             │
+             ▼
+component.user.email có giá trị mới
+             │
+             ▼
+Angular cập nhật những binding đang đọc user.email
+```
+
+Điểm quan trọng: `[()]` không tự đọc DOM và không tự tạo state. Directive/component phía trong phải có code nhận thao tác UI rồi phát output. `[()]` chỉ nối **input đi vào** với **output đi ra**.
+
+### Vì sao vế phải phải gán được
+
+Angular cần sinh lệnh gán ở nửa event binding:
+
+```html
+(XChange)="Y = $event"
+```
+
+Vì vậy `Y` phải là nơi có thể nhận phép gán.
+
+✅ Hợp lệ:
+
+```html
+<input [(appModel)]="name" />
+<input [(appModel)]="user.email" />
+<input [(appModel)]="users[0].email" />
+```
+
+❌ Không hợp lệ:
+
+```html
+<input [(appModel)]="user.email.toLowerCase()" />
+```
+
+Dòng sai sẽ đòi Angular tạo JavaScript không hợp lệ:
+
+```ts
+user.email.toLowerCase() = $event;
+```
+
+Nếu cần chuẩn hóa dữ liệu, tách binding ra và gọi một handler rõ ràng:
+
+```html
+<input
+  [appModel]="user.email"
+  (appModelChange)="updateEmail($event)"
+/>
+```
+
+```ts
+updateEmail(value: string): void {
+  this.user.email = value.trim().toLowerCase();
+}
+```
+
+## Tự tạo `[(appModel)]`
+
+Để dùng `[(appModel)]`, custom directive cần có public API theo cặp:
+
+```ts
+@Input() appModel: string;
+@Output() appModelChange: EventEmitter<string>;
+```
+
+`@Input()` là chiều component → directive. `@Output()` là chiều directive → component.
+
+### Directive đơn giản
+
+Ví dụ sau chỉ minh họa text input. `ngModel` thật của Angular xử lý nhiều trường hợp hơn như checkbox, select, validation, disabled state và đăng ký vào form.
+
+```ts
+import {
+  Directive,
+  EventEmitter,
+  Input,
+  Output,
+} from '@angular/core';
+
+@Directive({
+  selector: 'input[appModel]',
+  standalone: true,
+  host: {
+    '[value]': 'appModel',
+    '(input)': 'onInput($event)',
+  },
+})
+export class AppModelDirective {
+  @Input() appModel = '';
+
+  @Output() readonly appModelChange = new EventEmitter<string>();
+
+  onInput(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.appModelChange.emit(input.value);
+  }
+}
+```
+
+Dùng directive trong standalone component:
+
+```ts
+import { Component } from '@angular/core';
+import { AppModelDirective } from './app-model.directive';
+
+@Component({
+  selector: 'app-profile-editor',
+  imports: [AppModelDirective],
+  template: `
+    <input [(appModel)]="user.email" placeholder="Email" />
+    <p>Email hiện tại: {{ user.email }}</p>
+  `,
+})
+export class ProfileEditorComponent {
+  user = { email: '' };
+}
+```
+
+Directive này nhận `appModel` để ghi vào native property `input.value`. Khi browser phát `(input)`, nó lấy `input.value` và phát qua `appModelChange`. Two-way binding do Angular compiler tạo sẽ gán giá trị output đó vào `user.email`.
+
+### Nhiều field vẫn là nhiều binding độc lập
+
+```ts
+user = {
+  fullName: '',
+  email: '',
+  phone: '',
+};
+```
+
+```html
+<input [(appModel)]="user.fullName" placeholder="Họ tên" />
+<input [(appModel)]="user.email" placeholder="Email" />
+<input [(appModel)]="user.phone" placeholder="Số điện thoại" />
+```
+
+Angular hiểu từng dòng riêng biệt:
+
+```html
+<input [appModel]="user.fullName" (appModelChange)="user.fullName = $event" />
+<input [appModel]="user.email" (appModelChange)="user.email = $event" />
+<input [appModel]="user.phone" (appModelChange)="user.phone = $event" />
+```
+
+Mỗi `<input>` khớp selector sẽ có một instance `AppModelDirective` riêng. Không có một biến `appModel` dùng chung cho cả form; mỗi directive instance nhận một giá trị riêng và phát output riêng.
+
+### Đổi tên output có được không
+
+Nếu muốn dùng chính xác syntax này:
+
+```html
+<input [(appModel)]="user.email" />
+```
+
+thì template phải nhìn thấy output public tên là `appModelChange`.
+
+Nếu output có tên khác, ví dụ:
+
+```ts
+@Input() appModel = '';
+@Output() readonly emailChanged = new EventEmitter<string>();
+```
+
+thì không còn shorthand `[(appModel)]`. Bạn phải viết rõ hai binding:
+
+```html
+<input
+  [appModel]="user.email"
+  (emailChanged)="user.email = $event"
+/>
+```
+
+Bạn vẫn có thể dùng alias để tên property TypeScript khác nhưng tên public trong template vẫn đúng quy ước:
+
+```ts
+@Input() appModel = '';
+
+@Output('appModelChange')
+readonly changed = new EventEmitter<string>();
+```
+
+Khi đó directive gọi:
+
+```ts
+this.changed.emit(value);
+```
+
+và template vẫn dùng được:
+
+```html
+<input [(appModel)]="user.email" />
+```
+
+<Callout type="warn" title="Không đặt custom directive là ngModel">
+  Không tự tạo một directive khác có API/selector `ngModel` trong scope đã import `FormsModule`. Nó có thể xung đột với `NgModel` của Angular. Dùng tên riêng như `appModel`, hoặc dùng `ControlValueAccessor` khi muốn custom control tích hợp chuẩn với Angular Forms.
+</Callout>
+
+## `ngModel`, `(input)` và `(change)`
+
+Với text input, ba cách dưới đây đều liên quan đến thay đổi giá trị nhưng chúng không giống nhau.
+
+```html
+<input [(ngModel)]="name" />
+
+<input [value]="name" (input)="updateName($event)" />
+
+<input (change)="onChange($event)" />
+```
+
+| Cú pháp | Loại event | `$event` nhận được | Khi thường chạy |
+| --- | --- | --- | --- |
+| `(input)` | Native DOM event | `Event` của browser | Mỗi lần giá trị input thay đổi khi đang gõ. |
+| `(change)` | Native DOM event | `Event` của browser | Với text input, thường khi giá trị đã đổi và control mất focus. |
+| `(ngModelChange)` | Angular Forms output | Giá trị mới, ví dụ `string` | Khi `NgModel` nhận giá trị mới từ UI. |
+| `[(ngModel)]` | Two-way binding | Không nhận trực tiếp | Là `[ngModel]` kết hợp `(ngModelChange)`. |
+
+React `onChange` trên text input có hành vi gần với Angular `(input)` hoặc `(ngModelChange)`: nó phản hồi trong lúc người dùng gõ. Đừng nhầm nó với native Angular `(change)`.
+
+`[(ngModel)]="name"` có thể viết tường minh như sau, miễn component đã import `FormsModule`:
+
+```html
+<input
+  [ngModel]="name"
+  (ngModelChange)="name = $event"
+/>
+```
+
+`ngModel` làm nhiều hơn custom directive ở phần trước. Nó dùng các value accessor để làm việc đúng với text input, checkbox, radio, select và custom form control; đồng thời có thể kết nối control vào `NgForm`, validation và các trạng thái như `touched`, `dirty`, `valid`.
+
+## Các cú pháp compiler đáng nhớ khác
+
+### Structural directive `*`
+
+Dấu `*` là cú pháp rút gọn cho `ng-template` và structural directive.
+
+```html
+<div *ngIf="isLoggedIn">
+  Xin chào {{ user.name }}
+</div>
+```
+
+Về ý nghĩa, Angular mở rộng thành:
+
+```html
+<ng-template [ngIf]="isLoggedIn">
+  <div>
+    Xin chào {{ user.name }}
+  </div>
+</ng-template>
+```
+
+Tương tự, `*ngFor` có syntax ngắn để khai báo biến lặp và nguồn dữ liệu:
+
+```html
+<li *ngFor="let user of users; index as i">
+  {{ i + 1 }}. {{ user.name }}
+</li>
+```
+
+Điều này liên quan tới directive `NgFor`/`NgForOf` và template context. Cú pháp `*` giúp viết ngắn hơn, nhưng chỉ có một structural directive shorthand trên một element. Khi cần kết hợp, dùng phần tử bọc hoặc `ng-container`.
+
+### Control flow `@if` và `@for`
+
+Angular hiện đại có control flow do compiler hỗ trợ trực tiếp:
+
+```html
+@if (isLoggedIn) {
+  <p>Xin chào {{ user.name }}</p>
+} @else {
+  <a href="/login">Đăng nhập</a>
+}
+```
+
+```html
+@for (user of users; track user.id) {
+  <app-user-card [user]="user" />
+} @empty {
+  <p>Chưa có người dùng.</p>
+}
+```
+
+`@if` và `@for` không phải JavaScript chạy nguyên văn trong HTML. Angular compiler phân tích block này và sinh logic tạo, hủy hoặc cập nhật vùng DOM phù hợp.
+
+### Template reference `#`
+
+```html
+<input #emailInput />
+<button type="button" (click)="emailInput.focus()">Focus email</button>
+```
+
+`#emailInput` tạo template reference đến native input element.
+
+Một directive/component có thể công khai chính nó bằng `exportAs`. Ví dụ `NgModel` công khai tên `ngModel`, vì vậy:
+
+```html
+<input
+  name="email"
+  [(ngModel)]="email"
+  #emailControl="ngModel"
+  required
+/>
+
+@if (emailControl.invalid && emailControl.touched) {
+  <p>Email chưa hợp lệ.</p>
+}
+```
+
+`emailControl` ở đây là instance của `NgModel`, không phải DOM input.
+
+### Attribute, class và style binding
+
+Angular có các biến thể property binding cho tình huống DOM đặc biệt:
+
+```html
+<td [attr.colspan]="columnCount">Tổng</td>
+<button [attr.aria-label]="'Xóa ' + user.name">×</button>
+
+<input [class.has-error]="emailInvalid" />
+<div [style.width.px]="progress"></div>
+```
+
+- `[attr.name]` ghi HTML attribute. Dùng cho ARIA, SVG hoặc thuộc tính không có DOM property phù hợp.
+- `[class.name]` thêm/xóa class theo giá trị boolean.
+- `[style.name]` ghi CSS property; hậu tố `.px` tự thêm đơn vị `px` cho số.
+
+## Cách tự debug binding
+
+Khi một binding không hoạt động, tách nó về dạng rõ ràng nhất trước.
+
+1. **Xác định chiều dữ liệu.** Giá trị cần đi từ component ra UI dùng `[]`; thao tác UI đi vào component dùng `()`.
+2. **Mở rộng `[()]` bằng tay.** Ví dụ đổi `[(value)]="count"` thành `[value]="count"` và `(valueChange)="count = $event"`. Khi đó sẽ thấy thiếu input hay output ở đâu.
+3. **Kiểm tra public API.** Với custom component/directive, phải có `@Input() value` và `@Output() valueChange` nếu muốn dùng `[(value)]`.
+4. **In `$event` ra console.** DOM event thường là `Event`; output custom thường là value đã được component/directive phát ra.
+5. **Kiểm tra imports của standalone component.** Lỗi `Can't bind to 'ngModel'...` thường có nghĩa component chưa import `FormsModule`, hoặc directive không nằm trong `imports`.
+6. **Không trộn source of truth.** Một `<input>` không nên vừa dùng `[(ngModel)]` vừa dùng `formControlName`. Chọn Template-driven Forms hoặc Reactive Forms cho control đó.
+
+Ví dụ debug rõ ràng:
+
+```html
+<input
+  [appModel]="user.email"
+  (appModelChange)="logAndUpdateEmail($event)"
+/>
+```
+
+```ts
+logAndUpdateEmail(value: string): void {
+  console.log('appModelChange:', value);
+  this.user.email = value;
+}
+```
+
+Sau khi hiểu đúng luồng, bạn có thể đổi lại thành `[(appModel)]="user.email"` nếu không cần xử lý thêm.
+
+## Tóm tắt
+
+- Angular template compiler hiểu các dấu `{{ }}`, `[]`, `()`, `[()]`, `*`, `@if`, `@for` và biến chúng thành mã cập nhật DOM/listener khi build.
+- `[(X)]="Y"` là **two-way binding** hay **banana-in-a-box**. Nó tương đương về ý nghĩa với `[X]="Y"` và `(XChange)="Y = $event"`.
+- Muốn custom directive/component hỗ trợ `[(appModel)]`, public API phải có input `appModel` và output `appModelChange`; output phải thật sự `emit()` giá trị mới.
+- `(input)` và `(change)` là native browser event. `(ngModelChange)` là output của Angular Forms. Với text input, React `onChange` gần với Angular `(input)` hơn là native `(change)`.
+- Tách shorthand về property binding và event binding là cách nhanh nhất để hiểu và debug template Angular.
+
+<Cards>
+  <Card title="Data binding trong Angular" href="/docs/component-template/data-binding" description="Học đầy đủ interpolation, property binding, event binding và signals." />
+  <Card title="Giao tiếp component" href="/docs/component-template/giao-tiep-component" description="Thiết kế input, output và ranh giới state giữa component cha/con." />
+  <Card title="Reactive Forms" href="/docs/routing-forms/reactive-forms" description="Dùng FormControl, FormGroup và validation khi form có cấu trúc phức tạp." />
+</Cards>

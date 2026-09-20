@@ -4,6 +4,7 @@
     "index",
     "component-standalone",
     "data-binding",
+    "template-syntax-va-compiler",
     "control-flow",
     "giao-tiep-component",
     "lifecycle-hooks",
