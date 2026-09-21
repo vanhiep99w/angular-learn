@@ -4,7 +4,7 @@ description: Hiểu khi nào Angular tạo embedded view, cách truyền context
 ---
 
 <Callout type="info" title="Phạm vi bài này">
-  `<ng-template>` không tự tạo giao diện ngay khi Angular render component. Nó khai báo một khuôn UI để Angular hoặc mã của bạn có thể render sau. Bài này tập trung vào `TemplateRef`, `NgTemplateOutlet` và context của template; không dùng `<ng-template>` chỉ để thay thế mọi `@if` hoặc `<ng-content>`.
+  `<ng-template>` là một khuôn UI. Angular chỉ tạo giao diện từ khuôn đó khi một directive, outlet hoặc đoạn code yêu cầu. Bài này giải thích `TemplateRef`, `NgTemplateOutlet` và context của template.
 </Callout>
 
 ## Mục lục
@@ -12,6 +12,7 @@ description: Hiểu khi nào Angular tạo embedded view, cách truyền context
 - [ng-template là gì](#ng-template-là-gì)
   - [Không phải thẻ bọc DOM](#không-phải-thẻ-bọc-dom)
   - [TemplateRef và embedded view](#templateref-và-embedded-view)
+  - [Embedded view là gì](#embedded-view-là-gì)
 - [Ba cách gặp ng-template](#ba-cách-gặp-ng-template)
   - [Cú pháp rút gọn của structural directive](#cú-pháp-rút-gọn-của-structural-directive)
   - [Template có tên](#template-có-tên)
@@ -30,9 +31,9 @@ description: Hiểu khi nào Angular tạo embedded view, cách truyền context
 
 ## ng-template là gì
 
-`<ng-template>` là một **template declaration**: Angular biên dịch phần nội dung bên trong thành một khuôn có thể tạo thành **embedded view**. Embedded view là một nhóm node DOM có binding và lifecycle riêng, được Angular chèn vào một vị trí khi cần.
+Hãy coi `<ng-template>` là một mẫu chưa dùng ngay. Angular biên dịch phần HTML bên trong thành một khuôn. Khi cần hiển thị, Angular tạo một **embedded view**, tức một nhóm node DOM có binding và lifecycle riêng.
 
-Ví dụ dưới đây chỉ khai báo khuôn chào mừng. Nếu không có directive hoặc outlet nào sử dụng nó, dòng chữ sẽ không xuất hiện trên trang.
+Ví dụ này mới chỉ khai báo nội dung. Nó chưa hiện trên trang vì chưa có nơi nào yêu cầu Angular render template.
 
 ```html
 <ng-template>
@@ -40,15 +41,15 @@ Ví dụ dưới đây chỉ khai báo khuôn chào mừng. Nếu không có dir
 </ng-template>
 ```
 
-Có thể hình dung luồng như sau:
+Luồng hoạt động có thể hình dung như sau:
 
 ```text
 <ng-template>
   │ khai báo khuôn, chưa tạo node hiển thị
   ▼
 TemplateRef
-  │ được structural directive, NgTemplateOutlet
-  │ hoặc ViewContainerRef yêu cầu
+  │ structural directive, NgTemplateOutlet
+  │ hoặc ViewContainerRef yêu cầu render
   ▼
 Embedded view
   │ Angular tạo binding và chèn node vào một container
@@ -58,9 +59,9 @@ DOM đang hiển thị
 
 ### Không phải thẻ bọc DOM
 
-`<ng-template>` không giống một `div` vô hình. Nó không giữ các node con trong DOM theo kiểu wrapper rồi dùng CSS để ẩn chúng. Khi template chưa được instantiate, node con của nó chưa tồn tại trong DOM hiển thị.
+`<ng-template>` không hoạt động như một `div` ẩn bằng CSS. Khi Angular chưa tạo embedded view, các node bên trong template chưa có mặt trong DOM hiển thị.
 
-Ví dụ này không render một `section` nào nếu `isLoggedIn` là `false`:
+Trong ví dụ sau, `section` chỉ tồn tại khi `isLoggedIn` là `true`:
 
 ```html
 <ng-template [ngIf]="isLoggedIn">
@@ -68,11 +69,11 @@ Ví dụ này không render một `section` nào nếu `isLoggedIn` là `false`:
 </ng-template>
 ```
 
-Đừng nhầm Angular `ng-template` với native HTML `<template>`. Cả hai đều giữ nội dung chưa hiển thị ngay, nhưng Angular `ng-template` tham gia vào compiler, data binding, dependency injection và view lifecycle của Angular. Khi làm template Angular, hãy dùng API Angular như `TemplateRef` và `NgTemplateOutlet`.
+Angular `ng-template` cũng khác native HTML `<template>`. Angular compiler theo dõi binding, dependency injection và lifecycle của template. Khi làm việc trong ứng dụng Angular, bạn sẽ thường dùng `TemplateRef` và `NgTemplateOutlet`.
 
 ### TemplateRef và embedded view
 
-Khi đặt biến tham chiếu trên `ng-template`, biến đó đại diện cho `TemplateRef`, không phải một DOM element.
+Thêm biến tham chiếu vào `ng-template` sẽ cho bạn một `TemplateRef`.
 
 ```html
 <ng-template #emptyState>
@@ -80,19 +81,49 @@ Khi đặt biến tham chiếu trên `ng-template`, biến đó đại diện ch
 </ng-template>
 ```
 
-`emptyState` là một `TemplateRef`. Nó chứa thông tin để Angular tạo embedded view sau này. Embedded view mới vẫn thừa hưởng binding context và injection context từ nơi template được khai báo. Vì vậy một template do consumer viết vẫn có thể đọc state của consumer, kể cả khi component khác là nơi quyết định render nó.
+`emptyState` không trỏ đến một DOM element. Nó giữ khuôn mà Angular có thể dùng để tạo embedded view sau này.
+
+Template vẫn giữ binding context và injection context của nơi nó được khai báo. Chẳng hạn, một template do trang sản phẩm khai báo vẫn đọc được state và method của trang sản phẩm, kể cả khi một component list là nơi render nó.
+
+### Embedded view là gì
+
+Embedded view là phần giao diện Angular tạo từ một template tại thời điểm cần hiển thị. Nó gồm các node DOM thật, binding của chúng và các biến cục bộ mà template khai báo.
+
+Ví dụ, khi `isLoggedIn()` là `true`, Angular tạo embedded view cho phần bên trong `@if`:
+
+```html
+@if (isLoggedIn()) {
+  <p>Xin chào {{ user().name }}</p>
+}
+```
+
+Lúc đó DOM có một thẻ `p` với tên người dùng. Khi `isLoggedIn()` thành `false`, Angular hủy embedded view đó và thẻ `p` biến mất khỏi DOM.
+
+Với `ng-template`, luồng này hiện rõ hơn:
+
+```html
+<ng-template #emptyState>
+  <p>Chưa có sản phẩm.</p>
+</ng-template>
+
+<ng-container [ngTemplateOutlet]="emptyState" />
+```
+
+`emptyState` giữ khuôn. `NgTemplateOutlet` yêu cầu Angular tạo embedded view từ khuôn ấy tại vị trí của `ng-container`. Kết quả hiển thị là thẻ `p` thật trong DOM.
+
+Embedded view không tạo một component class mới. Nó là một phần view nhỏ mà Angular tạo và hủy cho các trường hợp như `@if`, `@for`, `*ngIf`, `*ngFor`, `NgTemplateOutlet` hoặc `ViewContainerRef.createEmbeddedView()`.
 
 ## Ba cách gặp ng-template
 
 ### Cú pháp rút gọn của structural directive
 
-Dấu `*` trong structural directive là cú pháp rút gọn. Angular mở rộng nó thành `ng-template` bao quanh host element.
+Dấu `*` là cú pháp ngắn cho một `ng-template` bao quanh element đang dùng directive.
 
 ```html
 <p *ngIf="isLoggedIn">Xin chào {{ user.name }}</p>
 ```
 
-Về ý nghĩa, Angular xử lý gần như sau:
+Angular hiểu đoạn trên gần như sau:
 
 ```html
 <ng-template [ngIf]="isLoggedIn">
@@ -100,7 +131,7 @@ Về ý nghĩa, Angular xử lý gần như sau:
 </ng-template>
 ```
 
-Bản dài giải thích vì sao một element chỉ dùng được một structural-directive shorthand. Hai dấu `*` sẽ cùng muốn biến đổi một host element thành template. Khi phải kết hợp, dùng `ng-container` để tạo thêm vị trí cấu trúc mà không thêm DOM wrapper.
+Cách mở rộng này giải thích giới hạn một dấu `*` trên một element. Mỗi microsyntax đều cần biến element đó thành template. Khi cần kết hợp điều kiện và vòng lặp, đặt một directive trên `ng-container`.
 
 ```html
 <ng-container *ngIf="isLoggedIn">
@@ -110,13 +141,13 @@ Bản dài giải thích vì sao một element chỉ dùng được một struct
 </ng-container>
 ```
 
-<Callout type="info" title="Ưu tiên Angular hiện đại">
-  Với điều kiện, lặp và rẽ nhánh thông thường, ưu tiên `@if`, `@for`, `@switch`. Bạn vẫn cần hiểu `ng-template` vì nó là nền của structural directive cũ, `NgTemplateOutlet`, template input và nhiều thư viện UI.
+<Callout type="info" title="Mã Angular mới">
+  Dùng `@if`, `@for` và `@switch` cho điều kiện, vòng lặp và rẽ nhánh thông thường. `ng-template` vẫn cần thiết khi làm việc với structural directive cũ, `NgTemplateOutlet`, template input hoặc thư viện UI.
 </Callout>
 
 ### Template có tên
 
-Trước built-in control flow, `NgIf` thường dùng `ng-template` có tên cho nhánh `else`.
+Mã Angular cũ thường dùng template có tên cho nhánh `else` của `NgIf`.
 
 ```html
 <div *ngIf="user; else loggedOut">
@@ -128,7 +159,7 @@ Trước built-in control flow, `NgIf` thường dùng `ng-template` có tên ch
 </ng-template>
 ```
 
-`loggedOut` là template để `NgIf` render khi `user` không có giá trị. Với mã mới, hai nhánh đặt cạnh nhau thường dễ đọc hơn:
+`loggedOut` là template `NgIf` sẽ render khi `user` không có giá trị. Với một nhánh chỉ dùng ở đây, `@if ... @else` đặt hai trường hợp cạnh nhau và dễ đọc hơn:
 
 ```html
 @if (user) {
@@ -138,13 +169,13 @@ Trước built-in control flow, `NgIf` thường dùng `ng-template` có tên ch
 }
 ```
 
-Không cần đổi mọi template có tên sang `@else`. Nếu template sẽ được render ở nhiều vị trí, được truyền vào component, hoặc nhận context động, `ng-template` vẫn đúng công cụ.
+Giữ `ng-template` khi bạn cần render cùng một khuôn ở nhiều vị trí, truyền khuôn vào component, hoặc truyền context khác nhau mỗi lần render.
 
 ### Template được render qua outlet
 
-`NgTemplateOutlet` nhận một `TemplateRef` và tạo embedded view tại vị trí của outlet. Đây là trường hợp `ng-template` mạnh nhất: định nghĩa UI một lần, rồi component chọn nơi và số lần dùng nó.
+`NgTemplateOutlet` nhận một `TemplateRef` rồi tạo embedded view tại vị trí của outlet. Đây là lựa chọn phù hợp khi bạn viết UI một lần và để component quyết định vị trí hoặc số lần hiển thị.
 
-Ví dụ, một trạng thái rỗng được khai báo ở cuối template nhưng render trong vùng nội dung chính:
+Ví dụ này đặt hai khuôn ở cuối template. Vùng `section` chọn một trong hai khuôn để render.
 
 ```html
 <section class="results">
@@ -164,13 +195,13 @@ Ví dụ, một trạng thái rỗng được khai báo ở cuối template như
 </ng-template>
 ```
 
-`ng-container` là vị trí chèn view và không tạo thêm element DOM. `resultList` và `emptyState` chỉ được tạo thành DOM khi outlet chọn chúng.
+`ng-container` là điểm Angular chèn view vào và không tạo thêm element DOM. `resultList` hoặc `emptyState` chỉ tạo node DOM khi outlet chọn chúng.
 
 ## Render một template bằng NgTemplateOutlet
 
 ### Import cần thiết cho standalone component
 
-`NgTemplateOutlet` là directive từ `@angular/common`. Standalone component dùng nó phải khai báo trong `imports`.
+`NgTemplateOutlet` là directive của `@angular/common`. Standalone component phải khai báo directive này trong `imports`.
 
 ```ts
 import { Component } from '@angular/core';
@@ -185,11 +216,11 @@ import { NgTemplateOutlet } from '@angular/common';
 export class OrderPageComponent {}
 ```
 
-Nếu component dùng `CommonModule` thì directive này đã nằm trong module đó. Tuy nhiên, import trực tiếp `NgTemplateOutlet` làm dependency của standalone component rõ ràng hơn.
+`CommonModule` cũng cung cấp `NgTemplateOutlet`. Import trực tiếp thường dễ theo dõi hơn khi component chỉ dùng directive này.
 
 ### Context và cú pháp let
 
-Một template chỉ hữu ích khi nó nhận đúng dữ liệu. `NgTemplateOutlet` truyền một object qua `[ngTemplateOutletContext]`; các key trong object được khai báo thành local variable bằng `let-...`.
+Một template có thể nhận dữ liệu mỗi lần outlet render nó. Bạn truyền một object vào `[ngTemplateOutletContext]`. Trong `ng-template`, `let-...` tạo local variable từ các key của object đó.
 
 ```html
 <ng-container
@@ -211,7 +242,7 @@ Một template chỉ hữu ích khi nó nhận đúng dữ liệu. `NgTemplateOu
 </ng-template>
 ```
 
-Ánh xạ trong ví dụ là:
+Bảng sau cho thấy từng local variable nhận giá trị nào:
 
 | Context được truyền | Khai báo trong template | Giá trị local |
 | --- | --- | --- |
@@ -219,15 +250,15 @@ Một template chỉ hữu ích khi nó nhận đúng dữ liệu. `NgTemplateOu
 | `index: selectedIndex()` | `let-position="index"` | `selectedIndex()` |
 | `canEdit: canEdit()` | `let-editable="canEdit"` | `canEdit()` |
 
-`let-user` không có tên key nên luôn đọc `$implicit`. Còn `let-position="index"` đọc key `index`. Tên local variable ở bên trái do tác giả template đặt; nó không cần trùng key context.
+`let-user` không chỉ rõ key nên Angular lấy `$implicit`. `let-position="index"` lấy key `index`. Tên local variable do người viết template đặt, vì vậy nó không cần trùng với key trong context.
 
 <Callout type="warn" title="Context phải là object">
-  `[ngTemplateOutletContext]="selectedUser()"` không cung cấp local variable theo quy ước của outlet. Hãy truyền object, ví dụ `{ $implicit: selectedUser() }`. Điều này cũng làm rõ dữ liệu nào là contract của template.
+  `[ngTemplateOutletContext]="selectedUser()"` không tạo local variable theo cách outlet mong đợi. Dùng `{ $implicit: selectedUser() }` nếu template cần nhận một giá trị chính. Object context cũng cho thấy rõ template được phép dùng dữ liệu nào.
 </Callout>
 
 ### Khai báo kiểu cho context
 
-Khi component nhận template qua input, hãy mô tả context bằng type để người viết component biết phải cung cấp key nào.
+Khi truyền template qua input, hãy tạo một type cho context. Type này là hợp đồng giữa component render template và nơi cung cấp template.
 
 ```ts
 import { Component, TemplateRef, input } from '@angular/core';
@@ -273,13 +304,13 @@ export class ProductListComponent {
 }
 ```
 
-`TemplateRef<ProductItemContext>` là contract giữa list và consumer. TypeScript giúp kiểm tra phía component cung cấp context, nhưng template type checking phụ thuộc cấu hình Angular và cách directive/component công bố context guard. Dù có type, vẫn giữ context nhỏ và có tên rõ nghĩa.
+`TemplateRef<ProductItemContext>` cho component biết phải cấp các key nào. Khả năng kiểm tra kiểu bên trong template còn phụ thuộc vào cấu hình Angular và context guard mà directive hoặc component công bố. Dù vậy, context vẫn nên nhỏ và dùng tên dễ hiểu.
 
 ## Truyền template vào component tái sử dụng
 
-Một list hoặc data table thường không biết markup chính xác của từng item. Nó chỉ biết dữ liệu, số lần lặp và nơi chèn item. Đây là lúc template input phù hợp hơn `ng-content`.
+Một list hoặc data table thường biết cách lặp dữ liệu, nhưng không nên ép mọi màn hình dùng cùng markup cho một item. Template input cho phép consumer đưa markup vào, còn list vẫn quản lý vị trí render và số lần lặp.
 
-Consumer định nghĩa template trong context của chính nó:
+Consumer khai báo template trong context của chính nó:
 
 ```html
 <ng-template #productItem let-product let-position="position" let-selected="selected">
@@ -299,17 +330,17 @@ Consumer định nghĩa template trong context của chính nó:
 />
 ```
 
-`productItem` vẫn đọc được `selectProduct()` và `selectedProductId()` của consumer, vì template được khai báo tại consumer. `ProductListComponent` không cần biết consumer chọn item như thế nào; nó chỉ cung cấp `product`, `position` và `selected` qua context.
+`productItem` vẫn gọi được `selectProduct()` và đọc `selectedProductId()` của consumer vì template được khai báo ở đó. `ProductListComponent` chỉ cấp `product`, `position` và `selected` qua context.
 
-Đây là ranh giới trách nhiệm tốt:
+Phân chia trách nhiệm trong ví dụ này:
 
-- Component list sở hữu vòng lặp, `track`, loading/empty state và vị trí render.
-- Consumer sở hữu markup của một item và event handler thuộc màn hình của nó.
-- Context là API công khai. Đổi tên hoặc bỏ một key là thay đổi có thể làm consumer hỏng.
+- Component list quản lý vòng lặp, `track`, trạng thái loading/empty và vị trí render.
+- Consumer quyết định markup của item và xử lý event thuộc màn hình.
+- Context là API công khai của list. Việc đổi tên hoặc bỏ một key có thể làm template consumer hỏng.
 
 ## So sánh với @if, ng-container và ng-content
 
-Các cú pháp này đều xuất hiện gần template, nhưng giải quyết vấn đề khác nhau.
+Các cú pháp này xuất hiện trong template Angular, nhưng mỗi cái phục vụ một việc riêng.
 
 | Công cụ | Có tạo DOM wrapper? | Ai quyết định khi nào render? | Trường hợp nên dùng |
 | --- | --- | --- | --- |
@@ -318,22 +349,22 @@ Các cú pháp này đều xuất hiện gần template, nhưng giải quyết v
 | `ng-template` | Không render cho đến khi được instantiate | Directive, outlet hoặc code gọi view container | Khai báo UI render trễ, render lại, hoặc render với context |
 | `ng-content` | Không phải wrapper | Consumer cung cấp node; component có slot cố định | Composition tĩnh như header, body, action của panel/modal |
 
-Quy tắc nhanh:
+Chọn theo nhu cầu:
 
-1. Chỉ cần một nhánh UI ở cùng template: dùng `@if` hoặc `@for`.
-2. Cần nhóm structural directive nhưng không muốn thêm thẻ DOM: dùng `ng-container`.
-3. Cần một khuôn UI để component hoặc thư viện render nhiều lần, ở chỗ khác, hay với context: dùng `ng-template` + `TemplateRef`.
-4. Chỉ cần consumer đặt nội dung một lần vào slot cố định: dùng `ng-content`.
+1. Với một nhánh UI ở cùng template, dùng `@if` hoặc `@for`.
+2. Khi cần thêm cấp cấu trúc mà không thêm thẻ DOM, dùng `ng-container`.
+3. Khi component cần render một khuôn ở vị trí khác, nhiều lần, hoặc với context riêng, dùng `ng-template` cùng `TemplateRef`.
+4. Khi consumer chỉ đặt nội dung một lần vào slot cố định, dùng `ng-content`.
 
-<Callout type="idea" title="Đừng dùng ng-template để làm wrapper vô hình">
-  Nếu mục tiêu chỉ là tránh một `div`, hãy chọn `ng-container`. `ng-template` thay đổi thời điểm view được tạo, nên nó có semantics khác và đòi hỏi một nơi instantiate template.
+<Callout type="idea" title="Không dùng ng-template làm wrapper vô hình">
+  Chọn `ng-container` nếu bạn chỉ muốn tránh thêm một `div`. `ng-template` thay đổi thời điểm Angular tạo view, nên cần một directive, outlet hoặc view container để render nội dung.
 </Callout>
 
 ## TemplateRef nâng cao với ViewContainerRef
 
-`NgTemplateOutlet` đủ cho đa số template declarative. Khi viết directive hoặc component hạ tầng, bạn có thể inject `TemplateRef` và `ViewContainerRef`, rồi tự tạo embedded view.
+`NgTemplateOutlet` đáp ứng phần lớn trường hợp khai báo trong HTML. Khi viết directive hoặc component hạ tầng, bạn có thể inject `TemplateRef` và `ViewContainerRef` để tự tạo embedded view.
 
-Ví dụ directive tối giản này chỉ render nội dung khi điều kiện đúng:
+Directive dưới đây chỉ render nội dung khi condition là `true`:
 
 ```ts
 import { Directive, Input, TemplateRef, ViewContainerRef } from '@angular/core';
@@ -365,7 +396,7 @@ Dùng directive bằng microsyntax:
 <button *appIfAllowed="canDelete()" type="button">Xóa</button>
 ```
 
-Angular cung cấp `TemplateRef` của phần được dấu `*` mở rộng và `ViewContainerRef` là vị trí để chèn embedded view. Directive thật cần xử lý thay đổi cẩn thận để tránh xóa/tạo view không cần thiết, có thể giữ `EmbeddedViewRef`, và cần test cả khi condition đổi nhiều lần. Nếu không có yêu cầu xây directive, dùng `@if` thay vì tự viết lại `NgIf`.
+Angular cấp `TemplateRef` của phần được dấu `*` mở rộng và `ViewContainerRef` là vị trí chèn view. Directive dùng trong production nên tránh xóa và tạo view không cần thiết, có thể giữ lại `EmbeddedViewRef`, và cần test khi condition đổi liên tục. Khi chỉ cần điều kiện trong một component, `@if` vẫn đơn giản hơn.
 
 ## Lỗi thường gặp
 
@@ -383,22 +414,22 @@ Angular cung cấp `TemplateRef` của phần được dấu `*` mở rộng và
 
 Trước khi thêm `ng-template`, kiểm tra:
 
-- [ ] UI này thực sự cần được render trễ, nhiều lần, tại vị trí khác hoặc với context khác.
-- [ ] `@if`, `@for` hoặc `@switch` không diễn tả đơn giản hơn.
-- [ ] Nếu dùng outlet, standalone component đã import `NgTemplateOutlet`.
-- [ ] Context là object nhỏ, có `$implicit` hoặc key được đặt tên rõ ràng.
-- [ ] `TemplateRef<Context>` mô tả contract khi template đi qua input hoặc API công khai.
-- [ ] Consumer biết template được gọi bao nhiêu lần và key context nào luôn có mặt.
-- [ ] Bạn dùng `ng-content` thay thế nếu nội dung chỉ được project một lần vào slot cố định.
+- [ ] UI cần render trễ, render nhiều lần, render ở vị trí khác hoặc nhận context riêng.
+- [ ] `@if`, `@for` hoặc `@switch` không đủ đơn giản cho trường hợp này.
+- [ ] Standalone component dùng outlet đã import `NgTemplateOutlet`.
+- [ ] Context là object nhỏ, dùng `$implicit` hoặc key có tên rõ ràng.
+- [ ] `TemplateRef<Context>` mô tả context khi template đi qua input hoặc API công khai.
+- [ ] Consumer biết template có thể được gọi bao nhiêu lần và nhận những key nào.
+- [ ] `ng-content` phù hợp hơn nếu nội dung chỉ project một lần vào slot cố định.
 - [ ] Bạn đã test empty state, context thiếu dữ liệu và event trong template consumer.
 
 ## Tóm tắt
 
-- `ng-template` là khuôn Angular chưa tạo DOM ngay; khi được instantiate, nó tạo embedded view.
-- `#templateName` trên `ng-template` cho bạn một `TemplateRef` để truyền, lưu hoặc render qua outlet.
-- `NgTemplateOutlet` render `TemplateRef` tại vị trí hiện tại. Context phải là object; `$implicit` ánh xạ vào `let-name` không có key.
-- `TemplateRef` giữ binding context từ nơi khai báo. Component render template nên cung cấp dữ liệu của mình qua context, thay vì giả định template đọc state của component đó.
-- Dùng control flow cho điều kiện/lặp thông thường, `ng-container` cho cấu trúc không wrapper, và `ng-content` cho composition tĩnh. Dùng `ng-template` khi cần một khuôn render linh hoạt.
+- `ng-template` giữ một khuôn Angular. Angular tạo embedded view khi directive, outlet hoặc view container yêu cầu.
+- `#templateName` trên `ng-template` tạo một `TemplateRef` để truyền, lưu hoặc render qua outlet.
+- `NgTemplateOutlet` render `TemplateRef` tại vị trí hiện tại. `$implicit` ánh xạ vào `let-name` không có key.
+- Template giữ binding context từ nơi khai báo. Component render template nên truyền dữ liệu của mình qua context.
+- Dùng control flow cho điều kiện và vòng lặp, `ng-container` cho cấu trúc không wrapper, `ng-content` cho composition tĩnh, và `ng-template` cho khuôn render linh hoạt.
 
 ## Đi tiếp
 
