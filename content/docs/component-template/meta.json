@@ -6,6 +6,7 @@
     "data-binding",
     "template-syntax-va-compiler",
     "control-flow",
+    "ng-template-va-template-ref",
     "giao-tiep-component",
     "lifecycle-hooks",
     "content-projection",

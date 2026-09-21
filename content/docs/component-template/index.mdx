@@ -103,9 +103,10 @@ Một thao tác quen thuộc, chẳng hạn người dùng bấm nút tăng số
 ### Chặng 3: tổ chức template theo trạng thái
 
 1. **[Control flow](/docs/component-template/control-flow)** — dùng `@if`, `@for` và `@switch` để biểu diễn các trạng thái giao diện một cách rõ ràng.
-2. Hiển thị danh sách sản phẩm. Bổ sung trạng thái không có kết quả và nhãn khác nhau theo tình trạng còn hàng.
+2. **[ng-template, TemplateRef và NgTemplateOutlet](/docs/component-template/ng-template-va-template-ref)** — hiểu khi nào một template cần được render trễ, render nhiều lần hoặc nhận context do component khác cung cấp.
+3. Hiển thị danh sách sản phẩm. Bổ sung trạng thái không có kết quả và nhãn khác nhau theo tình trạng còn hàng.
 
-**Mốc hoàn thành:** template không còn phụ thuộc vào việc sao chép HTML cho từng trường hợp. Bạn có thể nhìn vào trạng thái và dự đoán phần UI sẽ xuất hiện.
+**Mốc hoàn thành:** template không còn phụ thuộc vào việc sao chép HTML cho từng trường hợp. Bạn có thể nhìn vào trạng thái và dự đoán phần UI sẽ xuất hiện, đồng thời chọn được `ng-template` thay vì control flow hoặc projection khi thật sự cần.
 
 ### Chặng 4: ghép và tái sử dụng component
 
