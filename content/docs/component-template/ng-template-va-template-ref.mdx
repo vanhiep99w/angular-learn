@@ -11,6 +11,7 @@ description: Hiểu khi nào Angular tạo embedded view, cách truyền context
 
 - [ng-template là gì](#ng-template-là-gì)
   - [Không phải thẻ bọc DOM](#không-phải-thẻ-bọc-dom)
+  - [ng-container khác ng-template thế nào](#ng-container-khác-ng-template-thế-nào)
   - [TemplateRef và embedded view](#templateref-và-embedded-view)
   - [Embedded view là gì](#embedded-view-là-gì)
 - [Ba cách gặp ng-template](#ba-cách-gặp-ng-template)
@@ -70,6 +71,43 @@ Trong ví dụ sau, `section` chỉ tồn tại khi `isLoggedIn` là `true`:
 ```
 
 Angular `ng-template` cũng khác native HTML `<template>`. Angular compiler theo dõi binding, dependency injection và lifecycle của template. Khi làm việc trong ứng dụng Angular, bạn sẽ thường dùng `TemplateRef` và `NgTemplateOutlet`.
+
+### ng-container khác ng-template thế nào
+
+Cả `ng-container` và `ng-template` đều không tạo một thẻ HTML riêng trong DOM. Khác biệt nằm ở nội dung bên trong.
+
+`ng-container` chỉ nhóm các node con để Angular áp dụng một directive hoặc control flow chung. Khi điều kiện đúng, Angular render ngay các node bên trong.
+
+```html
+<ng-container *ngIf="isLoggedIn">
+  <h2>Tài khoản</h2>
+  <button type="button">Đăng xuất</button>
+</ng-container>
+```
+
+Nếu `isLoggedIn` là `true`, DOM có `h2` và `button`. Nếu là `false`, cả hai không được tạo. `ng-container` không còn lại như một wrapper trong DOM.
+
+`ng-template` giữ một khuôn để render sau. Viết template thôi chưa làm nội dung xuất hiện:
+
+```html
+<ng-template #emptyState>
+  <p>Chưa có dữ liệu.</p>
+</ng-template>
+```
+
+Để hiển thị nội dung đó, một directive hoặc code phải yêu cầu Angular tạo view, ví dụ:
+
+```html
+<ng-container [ngTemplateOutlet]="emptyState" />
+```
+
+| | `ng-container` | `ng-template` |
+| --- | --- | --- |
+| Nội dung bên trong | Render theo flow/directive bao quanh | Chờ Angular tạo embedded view |
+| Mục đích | Áp dụng logic chung cho nhiều node mà không thêm wrapper | Khai báo khuôn để render sau, render lại hoặc truyền vào component |
+| Ví dụ thường gặp | `*ngIf`, `*ngFor`, `NgTemplateOutlet` | `#emptyState`, `#itemTemplate`, template input |
+
+Dùng `ng-container` khi bạn chỉ cần một vị trí nhóm node. Dùng `ng-template` khi bạn cần giữ lại một khuôn UI để nơi khác render.
 
 ### TemplateRef và embedded view
 
@@ -131,7 +169,9 @@ Angular hiểu đoạn trên gần như sau:
 </ng-template>
 ```
 
-Cách mở rộng này giải thích giới hạn một dấu `*` trên một element. Mỗi microsyntax đều cần biến element đó thành template. Khi cần kết hợp điều kiện và vòng lặp, đặt một directive trên `ng-container`.
+Một element chỉ đặt được một structural directive có dấu `*`. Vì `*ngIf` và `*ngFor` đều được Angular mở rộng thành một `ng-template` bao quanh element đó, Angular không thể đặt cả hai trên cùng một thẻ `p`.
+
+Tách chúng thành hai cấp. `ng-container` chỉ giúp nhóm cấu trúc, nên không tạo thêm thẻ trong DOM:
 
 ```html
 <ng-container *ngIf="isLoggedIn">
@@ -140,6 +180,8 @@ Cách mở rộng này giải thích giới hạn một dấu `*` trên một el
   </p>
 </ng-container>
 ```
+
+Angular kiểm tra `isLoggedIn` trước. Nếu giá trị là `false`, toàn bộ danh sách không được tạo. Nếu là `true`, Angular mới lặp `notifications` và tạo một thẻ `p` cho mỗi thông báo.
 
 <Callout type="info" title="Mã Angular mới">
   Dùng `@if`, `@for` và `@switch` cho điều kiện, vòng lặp và rẽ nhánh thông thường. `ng-template` vẫn cần thiết khi làm việc với structural directive cũ, `NgTemplateOutlet`, template input hoặc thư viện UI.
