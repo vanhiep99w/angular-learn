@@ -19,6 +19,7 @@ description: Hiểu khi nào Angular tạo embedded view, cách truyền context
   - [Template có tên](#template-có-tên)
   - [Template được render qua outlet](#template-được-render-qua-outlet)
 - [Render một template bằng NgTemplateOutlet](#render-một-template-bằng-ngtemplateoutlet)
+  - [Ví dụ nhỏ nhất](#ví-dụ-nhỏ-nhất)
   - [Import cần thiết cho standalone component](#import-cần-thiết-cho-standalone-component)
   - [Context và cú pháp let](#context-và-cú-pháp-let)
   - [Khai báo kiểu cho context](#khai-báo-kiểu-cho-context)
@@ -239,7 +240,110 @@ Ví dụ này đặt hai khuôn ở cuối template. Vùng `section` chọn mộ
 
 `ng-container` là điểm Angular chèn view vào và không tạo thêm element DOM. `resultList` hoặc `emptyState` chỉ tạo node DOM khi outlet chọn chúng.
 
+#### Ví dụ chạy được: Angular đổi template nào đang hiển thị
+
+Ví dụ đầy đủ dưới đây bắt đầu bằng trạng thái rỗng. Mỗi lần bấm nút, `results` đổi giữa mảng rỗng và hai kết quả.
+
+```ts
+import { Component, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+
+type Result = {
+  id: number;
+  name: string;
+};
+
+@Component({
+  selector: 'app-search-results',
+  standalone: true,
+  imports: [NgTemplateOutlet],
+  template: `
+    <button type="button" (click)="toggleResults()">
+      Đổi kết quả
+    </button>
+
+    <section class="results">
+      <ng-container
+        [ngTemplateOutlet]="results().length > 0 ? resultList : emptyState"
+      />
+    </section>
+
+    <ng-template #resultList>
+      <ul>
+        @for (result of results(); track result.id) {
+          <li>{{ result.name }}</li>
+        }
+      </ul>
+    </ng-template>
+
+    <ng-template #emptyState>
+      <p>Không có kết quả phù hợp.</p>
+    </ng-template>
+  `,
+})
+export class SearchResultsComponent {
+  readonly results = signal<Result[]>([]);
+
+  toggleResults(): void {
+    this.results.update((current) =>
+      current.length === 0
+        ? [
+            { id: 1, name: 'Angular' },
+            { id: 2, name: 'TemplateRef' },
+          ]
+        : [],
+    );
+  }
+}
+```
+
+Lần đầu `results()` là `[]`. Biểu thức trong `[ngTemplateOutlet]` chọn `emptyState`. Angular lấy `TemplateRef` của `emptyState`, tạo embedded view và chèn phần tử `p` vào bên trong `section`.
+
+```html
+<section class="results">
+  <p>Không có kết quả phù hợp.</p>
+</section>
+```
+
+Khi bấm nút, signal đổi sang mảng có hai phần tử. Angular đánh giá lại biểu thức, thấy template cần render đã đổi từ `emptyState` sang `resultList`. `NgTemplateOutlet` hủy embedded view cũ, tạo embedded view mới rồi chèn danh sách vào `section`.
+
+```html
+<section class="results">
+  <ul>
+    <li>Angular</li>
+    <li>TemplateRef</li>
+  </ul>
+</section>
+```
+
+Hai thẻ `ng-template` không xuất hiện trong DOM. Chúng chỉ giữ hai khuôn để `NgTemplateOutlet` chọn đúng khuôn theo state hiện tại.
+
 ## Render một template bằng NgTemplateOutlet
+
+`NgTemplateOutlet` có một việc: lấy một template đã đặt tên và hiển thị nó tại vị trí của outlet.
+
+Hãy đọc ví dụ theo hai vai trò:
+
+1. `<ng-template #greeting>` giữ khuôn có tên `greeting`.
+2. `<ng-container [ngTemplateOutlet]="greeting" />` là vị trí yêu cầu Angular hiển thị khuôn đó.
+
+### Ví dụ nhỏ nhất
+
+```html
+<ng-template #greeting>
+  <p>Xin chào.</p>
+</ng-template>
+
+<ng-container [ngTemplateOutlet]="greeting" />
+```
+
+Angular không hiển thị thẻ `ng-template`. Nó hiển thị phần bên trong template tại chỗ của `ng-container`. DOM kết quả có một thẻ `p`:
+
+```html
+<p>Xin chào.</p>
+```
+
+`ng-container` là một vị trí chèn nội dung và không tạo wrapper trong DOM. Bạn có thể đặt outlet ở bất kỳ chỗ nào muốn nội dung xuất hiện.
 
 ### Import cần thiết cho standalone component
 
@@ -262,7 +366,22 @@ export class OrderPageComponent {}
 
 ### Context và cú pháp let
 
-Một template có thể nhận dữ liệu mỗi lần outlet render nó. Bạn truyền một object vào `[ngTemplateOutletContext]`. Trong `ng-template`, `let-...` tạo local variable từ các key của object đó.
+Template thường cần dữ liệu. Dùng `[ngTemplateOutletContext]` để đưa dữ liệu vào template. Bắt đầu với một giá trị qua key `$implicit`:
+
+```html
+<ng-template #userCard let-user>
+  <p>{{ user.name }}</p>
+</ng-template>
+
+<ng-container
+  [ngTemplateOutlet]="userCard"
+  [ngTemplateOutletContext]="{ $implicit: selectedUser() }"
+/>
+```
+
+`selectedUser()` được đưa vào `$implicit`, nên `let-user` nhận giá trị đó. Có thể hiểu `let-user` là biến cục bộ chỉ dùng bên trong `userCard`.
+
+Khi template cần nhiều giá trị, thêm các key có tên vào context:
 
 ```html
 <ng-container
