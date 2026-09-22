@@ -1,0 +1,438 @@
+---
+title: Mutation object và UI không cập nhật
+description: Những trường hợp sửa trực tiếp object hoặc array khiến Angular không phát hiện thay đổi, render trễ hoặc hiển thị state sai.
+---
+
+<Callout type="warn" title="Kết luận trước">
+  Với state được template, `computed`, `effect`, `@Input()` hoặc pure pipe sử dụng, không mutate object/array tại chỗ. Hãy tạo reference mới ở các nhánh đã đổi. Mutation đôi khi vẫn "có vẻ chạy", nhưng đó thường là do một lượt kiểm tra khác tình cờ che lỗi.
+</Callout>
+
+## Mục lục
+
+- [Vì sao mutation gây lỗi?](#vì-sao-mutation-gây-lỗi)
+  - [Giá trị và reference là hai thứ khác nhau](#giá-trị-và-reference-là-hai-thứ-khác-nhau)
+  - [Đường đi an toàn của một thay đổi](#đường-đi-an-toàn-của-một-thay-đổi)
+- [Các trường hợp UI không cập nhật hoặc cập nhật sai](#các-trường-hợp-ui-không-cập-nhật-hoặc-cập-nhật-sai)
+  - [Mutate giá trị bên trong signal](#mutate-giá-trị-bên-trong-signal)
+  - [Gọi set với chính object đã mutate](#gọi-set-với-chính-object-đã-mutate)
+  - [Component OnPush nhận input object bị mutate](#component-onpush-nhận-input-object-bị-mutate)
+  - [Mảng mới nhưng item cũ đã bị mutate](#mảng-mới-nhưng-item-cũ-đã-bị-mutate)
+  - [Computed và effect không chạy lại](#computed-và-effect-không-chạy-lại)
+  - [Pure pipe giữ kết quả cũ](#pure-pipe-giữ-kết-quả-cũ)
+  - [Callback ngoài Angular hoặc ứng dụng zoneless](#callback-ngoài-angular-hoặc-ứng-dụng-zoneless)
+  - [Shared reference làm state đổi ngầm](#shared-reference-làm-state-đổi-ngầm)
+- [Vì sao lỗi có lúc xuất hiện, có lúc không?](#vì-sao-lỗi-có-lúc-xuất-hiện-có-lúc-không)
+- [Mẫu cập nhật đúng cho object và array](#mẫu-cập-nhật-đúng-cho-object-và-array)
+  - [Object phẳng](#object-phẳng)
+  - [Object lồng nhau](#object-lồng-nhau)
+  - [Thêm, sửa và xóa phần tử mảng](#thêm-sửa-và-xóa-phần-tử-mảng)
+- [Cách debug khi UI không đổi](#cách-debug-khi-ui-không-đổi)
+- [Checklist trước khi mutate](#checklist-trước-khi-mutate)
+- [Tóm tắt](#tóm-tắt)
+
+## Vì sao mutation gây lỗi?
+
+### Giá trị và reference là hai thứ khác nhau
+
+Với object và array, biến JavaScript giữ một **reference** — địa chỉ trỏ đến vùng dữ liệu — chứ không chứa bản sao độc lập của toàn bộ dữ liệu.
+
+```ts
+const user = { name: 'An', active: false };
+const sameUser = user;
+
+user.active = true;
+
+console.log(sameUser.active); // true
+console.log(user === sameUser); // true: reference không đổi
+```
+
+`user.active` đã đổi, nhưng identity của object vẫn là `user`. Nhiều cơ chế tối ưu của Angular dựa vào việc nhận biết reference mới: signal dùng `Object.is`, `OnPush` kiểm tra input mới và pure pipe kiểm tra input thay đổi. Nếu chỉ mutate property, các cơ chế này có thể không có tín hiệu nào để chạy lại.
+
+### Đường đi an toàn của một thay đổi
+
+State UI nên đi qua một điểm ghi rõ ràng. Với signal, `.update()` trả về state kế tiếp; với input cho component `OnPush`, component cha truyền một object mới.
+
+```text
+Event / callback
+      │
+      ▼
+Owner tạo state mới (set hoặc update)
+      │
+      ▼
+Reference của nhánh đã đổi thay đổi
+      │
+      ├──► Signal thông báo template / computed / effect
+      └──► Input mới có thể đánh dấu component OnPush
+                                      │
+                                      ▼
+                              Angular kiểm tra view
+                                      │
+                                      ▼
+                            Binding khác biệt cập nhật DOM
+```
+
+Không cần clone sâu mọi dữ liệu. Chỉ cần tạo reference mới cho object/array ở đường đi đến property thay đổi. Các nhánh không thay đổi nên giữ nguyên reference.
+
+## Các trường hợp UI không cập nhật hoặc cập nhật sai
+
+### Mutate giá trị bên trong signal
+
+Đây là lỗi phổ biến nhất. Việc gọi signal để lấy object không tạo ra object mutable riêng; nó trả về object hiện đang được signal giữ.
+
+```ts
+import { signal } from '@angular/core';
+
+const user = signal({ name: 'An', active: false });
+
+// Sai: Angular không nhận được lệnh ghi vào signal.
+user().active = true;
+```
+
+Template đọc `user().active` có thể vẫn hiện `false`. `computed` và `effect` cũng không bị invalid vì signal chưa nhận giá trị kế tiếp.
+
+```ts
+// Đúng: trả object mới cho signal.
+user.update((current) => ({
+  ...current,
+  active: true,
+}));
+```
+
+<Callout type="warn" title="Đừng tin vào lần render tình cờ">
+  Nếu một click, một input khác hoặc một lượt change detection khác xảy ra sau mutation, template có thể đọc lại object và bỗng hiển thị giá trị mới. Điều đó không biến mutation thành reactive update; nó chỉ làm lỗi bị che đi.
+</Callout>
+
+### Gọi set với chính object đã mutate
+
+Đoạn sau trông giống như đã gọi API signal, nhưng vẫn sai:
+
+```ts
+const settings = signal({ language: 'vi', compact: false });
+const current = settings();
+
+current.compact = true;
+settings.set(current); // current vẫn là chính reference cũ.
+```
+
+Signal mặc định dùng `Object.is` để so sánh. `Object.is(current, settings())` là `true`, nên Angular có thể xem đây là cùng giá trị và không thông báo consumer. Mutation đã xảy ra trước đó, nhưng không có transition state rõ ràng để framework theo dõi.
+
+```ts
+settings.update((current) => ({
+  ...current,
+  compact: true,
+}));
+```
+
+### Component OnPush nhận input object bị mutate
+
+`OnPush` giúp Angular bỏ qua các component không có lý do cần kiểm tra. Một trong các lý do hợp lệ là input nhận **reference mới**. Sửa property trong object cha không tạo input mới cho component con.
+
+```ts
+// parent.component.ts
+profile = { name: 'An', role: 'member' };
+
+promote(): void {
+  this.profile.role = 'admin'; // Reference profile không đổi.
+}
+```
+
+```html
+<!-- parent.component.html -->
+<button type="button" (click)="promote()">Nâng quyền</button>
+<app-profile-card [profile]="profile" />
+```
+
+```ts
+// profile-card.component.ts
+@Component({
+  selector: 'app-profile-card',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `<p>{{ profile.name }} — {{ profile.role }}</p>`,
+})
+export class ProfileCardComponent {
+  @Input({ required: true }) profile!: Profile;
+}
+```
+
+`ProfileCardComponent` có thể tiếp tục hiển thị `member`, vì input reference vẫn là object cũ. Cập nhật cha theo kiểu bất biến:
+
+```ts
+promote(): void {
+  this.profile = {
+    ...this.profile,
+    role: 'admin',
+  };
+}
+```
+
+Nếu component con tự có event, Angular có thể kiểm tra nó và giá trị bỗng đúng. Đây là lý do bug thường chỉ lộ ra sau khi người dùng quay lại màn hình, mở/đóng một panel, hoặc khi state đổi từ callback khác.
+
+### Mảng mới nhưng item cũ đã bị mutate
+
+Tạo array mới là chưa đủ nếu component con `OnPush` nhận từng item và item đó đã bị mutate. Ví dụ sau chỉ đổi reference của array, còn `todo` cần đổi vẫn giữ reference cũ.
+
+```ts
+// Sai
+this.todos[0].done = true;
+this.todos = [...this.todos];
+```
+
+```html
+@for (todo of todos; track todo.id) {
+  <app-todo-row [todo]="todo" />
+}
+```
+
+`@for` thấy array mới và kiểm tra danh sách. Nhưng với `track todo.id`, node cho item `id = 1` được tái sử dụng; `app-todo-row` nhận lại đúng reference `todo` cũ. Nếu row là `OnPush`, nó có thể không render `done` mới.
+
+```ts
+// Đúng: array mới và object item đã đổi cũng mới.
+this.todos = this.todos.map((todo) =>
+  todo.id === id ? { ...todo, done: true } : todo,
+);
+```
+
+`track` không phải nguyên nhân của lỗi. Nó hoạt động đúng để tái sử dụng DOM; điều kiện là dữ liệu phải biểu lộ thay đổi bằng reference mới ở item đã đổi.
+
+### Computed và effect không chạy lại
+
+`computed` và `effect` chỉ chạy lại khi một signal chúng đã đọc được thông báo là thay đổi. Mutation nội bộ không tạo notification.
+
+```ts
+const cart = signal({ items: [{ price: 100, quantity: 1 }] });
+const total = computed(() =>
+  cart().items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+);
+
+effect(() => console.log('Tổng:', total()));
+
+cart().items[0].quantity = 2; // total vẫn cache 100; effect không chạy lại.
+```
+
+Sửa bằng cách tạo mới item, array và object chứa chúng:
+
+```ts
+cart.update((current) => ({
+  ...current,
+  items: current.items.map((item, index) =>
+    index === 0 ? { ...item, quantity: 2 } : item,
+  ),
+}));
+```
+
+Sau `.update()`, `total` bị invalid. Lần template hoặc effect đọc `total()` tiếp theo nhận kết quả `200`.
+
+### Pure pipe giữ kết quả cũ
+
+Pure pipe chỉ chạy lại khi primitive input đổi hoặc object/array input có reference mới. Đây là tối ưu mặc định của Angular.
+
+```ts
+@Pipe({ name: 'userLabel', pure: true })
+export class UserLabelPipe implements PipeTransform {
+  transform(user: User): string {
+    return `${user.name} (${user.role})`;
+  }
+}
+```
+
+```html
+<p>{{ user | userLabel }}</p>
+```
+
+```ts
+// Sai: pipe vẫn nhận cùng object user.
+this.user.role = 'admin';
+```
+
+Kết quả pipe có thể vẫn là `An (member)`. Tạo object mới để pipe nhận input mới:
+
+```ts
+this.user = { ...this.user, role: 'admin' };
+```
+
+Đừng chuyển pipe thành `pure: false` chỉ để chữa symptom. Impure pipe chạy trong mọi lượt change detection và thường che một luồng state không rõ ràng. Chỉ dùng nó khi bản chất phép biến đổi thực sự cần chạy mỗi lượt kiểm tra.
+
+### Callback ngoài Angular hoặc ứng dụng zoneless
+
+Với field bình thường, `this.status = 'done'` không tự chứa cơ chế notification như signal. UI chỉ đổi nếu Angular có một lý do để chạy change detection cho view đó.
+
+```ts
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `<p>{{ progress }}%</p>`,
+})
+export class UploadComponent {
+  progress = 0;
+
+  connect(uploader: ThirdPartyUploader): void {
+    uploader.onProgress((value) => {
+      this.progress = value;
+    });
+  }
+}
+```
+
+Nếu callback đến từ thư viện bên thứ ba chạy ngoài Zone.js, hoặc ứng dụng chạy zoneless, Angular có thể không biết cần kiểm tra component này. UI đứng ở giá trị cũ dù `progress` trong debugger đã đổi. Với `OnPush`, ngay cả khi có một tick toàn cục, component không được đánh dấu vẫn có thể bị bỏ qua.
+
+Giải pháp ưu tiên là biểu diễn state UI bằng signal:
+
+```ts
+readonly progress = signal(0);
+
+connect(uploader: ThirdPartyUploader): void {
+  uploader.onProgress((value) => this.progress.set(value));
+}
+```
+
+Template gọi `{{ progress() }}%`. Nếu vẫn cần field thường vì tương thích mã cũ, inject `ChangeDetectorRef` và gọi `markForCheck()` tại điểm callback; đây là giải pháp có chủ đích, không phải lý do để mutate state tùy ý.
+
+### Shared reference làm state đổi ngầm
+
+Mutation không chỉ gây UI cũ; nó còn có thể khiến nhiều nơi đổi cùng lúc ngoài dự kiến. Ví dụ một service trả về object state cho hai component.
+
+```ts
+const draft = { title: 'Bản nháp', tags: ['angular'] };
+formA.setValue(draft);
+formB.setValue(draft);
+
+formA.value.tags.push('signals');
+```
+
+Nếu hai bên giữ chung `draft.tags`, `formB` cũng quan sát dữ liệu đã đổi dù không hề nhận action hay input mới. Tùy thời điểm render, một màn hình có thể hiện dữ liệu mới còn màn hình khác giữ dữ liệu cũ. Các bug kiểu này khó tái hiện vì lỗi nằm ở alias reference, không nằm ở binding.
+
+Tại ranh giới ownership, clone phần dữ liệu mà consumer có quyền sửa, hoặc tốt hơn: không cho consumer sửa state của owner. Public API nên nhận một ý định (`addTag`) và owner tạo state kế tiếp.
+
+## Vì sao lỗi có lúc xuất hiện, có lúc không?
+
+Mutation không phải lúc nào cũng làm UI đứng yên. Nó chỉ không cung cấp tín hiệu reactive đáng tin cậy. UI có thể tình cờ cập nhật khi:
+
+- Có event trong chính component đó, làm Angular kiểm tra view.
+- Một signal khác được component đọc thay đổi và đánh dấu view.
+- Component bị tạo lại, ví dụ do điều hướng hoặc `@if` đổi nhánh.
+- Component dùng default change detection và Angular thực hiện một tick vì một công việc khác.
+- DevTools, log hoặc thao tác người dùng khiến bạn quan sát state sau một render khác.
+
+Các điều kiện này làm bug phụ thuộc vào thứ tự thao tác và cấu trúc component. Vì vậy, “tôi mutate mà vẫn thấy UI đổi” không phải là bằng chứng code an toàn. Code chỉ đáng tin khi bản thân thao tác ghi thông báo đúng consumer.
+
+## Mẫu cập nhật đúng cho object và array
+
+### Object phẳng
+
+```ts
+interface Preferences {
+  language: 'vi' | 'en';
+  compact: boolean;
+}
+
+readonly preferences = signal<Preferences>({
+  language: 'vi',
+  compact: false,
+});
+
+toggleCompact(): void {
+  this.preferences.update((current) => ({
+    ...current,
+    compact: !current.compact,
+  }));
+}
+```
+
+### Object lồng nhau
+
+Tạo mới mọi container trên đường đến property đổi. Không clone nhánh không liên quan.
+
+```ts
+interface AccountState {
+  user: {
+    name: string;
+    address: { city: string; country: string };
+  };
+  lastUpdatedAt: number;
+}
+
+this.account.update((current) => ({
+  ...current,
+  user: {
+    ...current.user,
+    address: {
+      ...current.user.address,
+      city: 'Hà Nội',
+    },
+  },
+}));
+```
+
+`lastUpdatedAt` vẫn giữ primitive cũ. Các object ở nhánh `user` và `address` đổi reference, nên consumer phụ thuộc state có một transition rõ ràng.
+
+### Thêm, sửa và xóa phần tử mảng
+
+```ts
+// Thêm
+this.todos.update((todos) => [
+  ...todos,
+  { id: crypto.randomUUID(), title: 'Đọc tài liệu', done: false },
+]);
+
+// Sửa một item
+this.todos.update((todos) =>
+  todos.map((todo) =>
+    todo.id === id ? { ...todo, done: !todo.done } : todo,
+  ),
+);
+
+// Xóa
+this.todos.update((todos) => todos.filter((todo) => todo.id !== id));
+```
+
+Không dùng `push`, `splice`, `sort`, `reverse` trực tiếp trên array do signal giữ. Với sắp xếp, copy trước rồi sort bản copy:
+
+```ts
+this.todos.update((todos) =>
+  [...todos].sort((a, b) => a.title.localeCompare(b.title)),
+);
+```
+
+## Cách debug khi UI không đổi
+
+1. **Xác định owner.** Property này là field thường, writable signal, input hay giá trị tính từ `computed`?
+2. **Kiểm tra reference trước và sau update.** Nếu object/array cần báo thay đổi nhưng `before === after` là `true`, đó là dấu hiệu mutation.
+3. **Tìm consumer.** Nó được dùng trực tiếp trong template, trong `computed`, `effect`, pure pipe hay truyền vào component `OnPush`?
+4. **Kiểm tra đường notification.** Signal có được gọi `.set()`/`.update()` không? Input của con có reference mới không? Callback ngoài Angular có đánh dấu view không?
+5. **Kiểm tra cache dẫn xuất.** Nếu `computed` hoặc pure pipe hiển thị cũ, quay về source và xem source có phát ra state mới không.
+6. **Dùng Angular DevTools.** Xem component có bị kiểm tra không, input có đổi không và component nào dùng `OnPush`.
+
+Một phép thử ngắn cho signal:
+
+```ts
+const before = this.user();
+this.user.update((user) => ({ ...user, active: true }));
+const after = this.user();
+
+console.log(before === after); // phải là false cho object đã thay đổi.
+```
+
+## Checklist trước khi mutate
+
+- State này có đang được template, `computed`, `effect`, pipe hoặc `@Input()` sử dụng không?
+- Nếu có, tôi đã gọi `.set()` hoặc `.update()` thay vì sửa giá trị từ `signal()` chưa?
+- Object/array đã đổi có reference mới chưa?
+- Với state lồng nhau, mọi nhánh từ root đến property đổi đã có reference mới chưa?
+- Nếu truyền item vào component `OnPush`, item đổi có phải object mới không?
+- Có phải UI chỉ đang cập nhật nhờ một event hoặc signal khác tình cờ làm render lại không?
+- Callback có đến từ thư viện ngoài Angular hoặc ứng dụng zoneless không? Nếu có, signal hoặc `markForCheck()` đã được dùng chưa?
+- Consumer có quyền mutate object mà owner trả về không? Nếu có, API ownership có cần siết lại không?
+
+## Tóm tắt
+
+- Mutation giữ nguyên reference, trong khi signal, `OnPush` và pure pipe thường cần một tín hiệu thay đổi rõ ràng để chạy lại.
+- `signal().property = ...` và mutate rồi `.set()` lại chính object đó đều không phải cập nhật reactive đáng tin cậy.
+- Component `OnPush` cần input reference mới; khi đổi một item trong mảng, hãy tạo mới cả array lẫn item đó.
+- Mutation có thể làm `computed`, `effect` và pure pipe giữ kết quả cũ; hoặc làm shared state đổi ngầm ở nhiều nơi.
+- Với callback ngoài Angular hoặc ứng dụng zoneless, field thường có thể không làm view được kiểm tra. Signal là lựa chọn ưu tiên cho state UI.
+- Quy tắc thực hành: coi dữ liệu đọc từ signal hoặc public state là readonly; owner dùng immutable update để công bố state kế tiếp.
+
+<Cards>
+  <Card title="Signals" href="/docs/reactivity-state/signals" description="Cách đọc, ghi và cập nhật immutable cho state signal." />
+  <Card title="Computed và effect" href="/docs/reactivity-state/computed-effect" description="Tránh state dẫn xuất cũ và dùng effect đúng ranh giới." />
+  <Card title="State cục bộ" href="/docs/reactivity-state/state-cuc-bo" description="Thiết kế ownership và local store cho từng feature." />
+</Cards>

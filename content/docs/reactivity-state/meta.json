@@ -3,6 +3,7 @@
   "pages": [
     "index",
     "signals",
+    "mutation-va-ui-khong-cap-nhat",
     "computed-effect",
     "rxjs-can-ban",
     "signals-rxjs",
