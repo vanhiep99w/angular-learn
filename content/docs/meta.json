@@ -10,6 +10,7 @@
     "routing-forms",
     "http-api-auth",
     "testing-performance-deploy",
-    "production-troubleshooting"
+    "production-troubleshooting",
+    "cau-hoi-phong-van"
   ]
 }

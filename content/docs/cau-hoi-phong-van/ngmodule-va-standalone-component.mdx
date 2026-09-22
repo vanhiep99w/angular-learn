@@ -1,0 +1,416 @@
+---
+title: NgModule và standalone component khác nhau thế nào?
+description: "Câu trả lời phỏng vấn về component thuộc NgModule và standalone component: khai báo, imports, providers, bootstrap, lazy loading và chuyển đổi."
+---
+
+<Callout type="info" title="Trả lời ngắn">
+  Angular không có khái niệm chính thức là “module component”. Cách gọi này thường chỉ component được khai báo trong một `NgModule`. Standalone component không cần nằm trong `declarations` của `NgModule`; nó tự khai báo các dependency dùng trong template qua `imports`. Khác biệt chính là phạm vi biên dịch template và cách tổ chức mã, không phải cách Angular tạo component hay inject service.
+</Callout>
+
+## Mục lục
+
+- [Phân biệt đúng hai khái niệm](#phân-biệt-đúng-hai-khái-niệm)
+- [Câu trả lời dùng trong phỏng vấn](#câu-trả-lời-dùng-trong-phỏng-vấn)
+- [So sánh nhanh](#so-sánh-nhanh)
+- [Cùng một màn hình, hai cách khai báo](#cùng-một-màn-hình-hai-cách-khai-báo)
+  - [Cách dựa trên NgModule](#cách-dựa-trên-ngmodule)
+  - [Cách standalone](#cách-standalone)
+- [Angular tìm dependency cho template ra sao](#angular-tìm-dependency-cho-template-ra-sao)
+- [`providers` và DI có thay đổi không?](#providers-và-di-có-thay-đổi-không)
+- [Bootstrap và router](#bootstrap-và-router)
+- [NgModule và standalone có dùng chung được không?](#ngmodule-và-standalone-có-dùng-chung-được-không)
+- [Khi nào nên chọn cách nào](#khi-nào-nên-chọn-cách-nào)
+- [Các câu hỏi gài thường gặp](#các-câu-hỏi-gài-thường-gặp)
+- [Lộ trình chuyển từ NgModule sang standalone](#lộ-trình-chuyển-từ-ngmodule-sang-standalone)
+- [Tóm tắt để nhớ](#tóm-tắt-để-nhớ)
+
+## Phân biệt đúng hai khái niệm
+
+Một **component thuộc NgModule** là component được đặt trong `declarations` của một module:
+
+```ts
+@NgModule({
+  declarations: [UserCardComponent],
+})
+export class UsersModule {}
+```
+
+Component này không tự mang phạm vi template của nó. Angular xem `UsersModule` để biết template của `UserCardComponent` được phép dùng directive, pipe và component nào.
+
+Một **standalone component** khai báo phạm vi template ngay trong metadata của component:
+
+```ts
+@Component({
+  selector: 'app-user-card',
+  standalone: true,
+  imports: [DatePipe],
+  templateUrl: './user-card.component.html',
+})
+export class UserCardComponent {}
+```
+
+Từ Angular 19, `standalone` mặc định là `true` với component mới. Khi đọc mã hiện đại, không thấy `standalone: true` không có nghĩa component đó thuộc `NgModule`; hãy kiểm tra xem nó có `standalone: false` hay có nằm trong `declarations` của module hay không.
+
+<Callout type="warn" title="Đừng nhầm `NgModule` với ES module">
+  `NgModule` là class có decorator `@NgModule` của Angular. Còn `import { Component } from '@angular/core'` là cú pháp module của TypeScript/JavaScript. Hai chữ “module” này không cùng một khái niệm.
+</Callout>
+
+## Câu trả lời dùng trong phỏng vấn
+
+> Component thuộc `NgModule` phải được khai báo trong `declarations`, còn directive, pipe và component mà template của nó dùng được lấy từ `imports` của `NgModule`. Standalone component không cần `NgModule`; nó đưa các dependency của template vào `imports` của chính component. Standalone giúp dependency hiện gần nơi dùng hơn và lazy load component trực tiếp. Nó không thay đổi bản chất của component, template hay DI. `NgModule` vẫn được Angular hỗ trợ và hai cách có thể cùng tồn tại trong một ứng dụng.
+
+Nếu người phỏng vấn hỏi sâu hơn, nói thêm rằng `providers` là một vấn đề riêng: vị trí đăng ký provider quyết định scope của service, không phải việc component có standalone hay không.
+
+## So sánh nhanh
+
+| Nội dung | Component thuộc `NgModule` | Standalone component |
+| --- | --- | --- |
+| Khai báo component | Phải có trong `declarations` của đúng một `NgModule`. | Không nằm trong `declarations` của `NgModule`. |
+| Dependency của template | Lấy từ `imports` của `NgModule` chứa component. | Khai báo trong `imports` của component. |
+| Dùng ở nơi khác | Import `NgModule` đã export component đó. | Import trực tiếp component vào `imports` của component cha, hoặc import vào `NgModule`. |
+| Bootstrap ứng dụng | Thường là `bootstrapModule(AppModule)`. | Thường là `bootstrapApplication(AppComponent, appConfig)`. |
+| Lazy loading | Thường dùng `loadChildren` để tải module. | Có thể dùng `loadComponent` để tải trực tiếp page component. |
+| Provider dùng chung | Thường cấu hình ở `providers` của module hoặc `providedIn: 'root'`. | Thường cấu hình qua `ApplicationConfig`, route `providers`, component `providers` hoặc `providedIn: 'root'`. |
+| Mức độ hỗ trợ hiện tại | Vẫn được hỗ trợ, cần thiết khi làm với mã hoặc thư viện cũ. | Là hướng mặc định cho ứng dụng mới. |
+
+## Cùng một màn hình, hai cách khai báo
+
+Ví dụ dưới đây đều tạo một `UserCardComponent` hiển thị tên và ngày tham gia của người dùng. Điều thay đổi là nơi Angular lấy các dependency cho template.
+
+### Cách dựa trên NgModule
+
+`UserCardComponent` là component không standalone. Nó cần được khai báo trong một module.
+
+```ts
+// user-card.component.ts
+import { Component, Input } from '@angular/core';
+
+export interface User {
+  name: string;
+  joinedAt: Date;
+}
+
+@Component({
+  selector: 'app-user-card',
+  standalone: false,
+  template: `
+    <article>
+      <h2>{{ user.name }}</h2>
+      <p>Tham gia: {{ user.joinedAt | date: 'dd/MM/yyyy' }}</p>
+    </article>
+  `,
+})
+export class UserCardComponent {
+  @Input({ required: true }) user!: User;
+}
+```
+
+Pipe `date` không được khai báo ở component. `UsersModule` đưa `CommonModule` vào phạm vi template của các component mà module khai báo.
+
+```ts
+// users.module.ts
+import { CommonModule } from '@angular/common';
+import { NgModule } from '@angular/core';
+import { UserCardComponent } from './user-card.component';
+
+@NgModule({
+  declarations: [UserCardComponent],
+  imports: [CommonModule],
+  exports: [UserCardComponent],
+})
+export class UsersModule {}
+```
+
+Một module khác muốn dùng `<app-user-card>` phải import `UsersModule`:
+
+```ts
+@NgModule({
+  imports: [CommonModule, UsersModule],
+})
+export class ProfileModule {}
+```
+
+Luồng phụ thuộc của template là:
+
+```text
+UserCardComponent
+        │ được khai báo trong
+        ▼
+UsersModule
+        │ imports
+        ▼
+CommonModule
+        │ cung cấp DatePipe, NgIf, NgFor...
+        ▼
+Template của UserCardComponent dùng được date
+```
+
+`exports` là phần dễ quên. `declarations` chỉ làm component dùng được bên trong `UsersModule`; muốn module khác dùng nó, module phải export component đó.
+
+### Cách standalone
+
+Với standalone, `UserCardComponent` import trực tiếp pipe mà template cần. Không cần `UsersModule` chỉ để khai báo và export một component.
+
+```ts
+// user-card.component.ts
+import { DatePipe } from '@angular/common';
+import { Component, input } from '@angular/core';
+
+export interface User {
+  name: string;
+  joinedAt: Date;
+}
+
+@Component({
+  selector: 'app-user-card',
+  imports: [DatePipe],
+  template: `
+    <article>
+      <h2>{{ user().name }}</h2>
+      <p>Tham gia: {{ user().joinedAt | date: 'dd/MM/yyyy' }}</p>
+    </article>
+  `,
+})
+export class UserCardComponent {
+  readonly user = input.required<User>();
+}
+```
+
+Component cha import trực tiếp `UserCardComponent`:
+
+```ts
+import { Component } from '@angular/core';
+import { UserCardComponent } from './user-card.component';
+
+@Component({
+  selector: 'app-profile-page',
+  imports: [UserCardComponent],
+  template: `<app-user-card [user]="user" />`,
+})
+export class ProfilePageComponent {
+  readonly user = {
+    name: 'An',
+    joinedAt: new Date('2025-01-15'),
+  };
+}
+```
+
+Luồng phụ thuộc ngắn hơn:
+
+```text
+ProfilePageComponent ── imports ──► UserCardComponent
+                                           │ imports
+                                           ▼
+                                        DatePipe
+                                           │
+                                           ▼
+                              Template dùng được date
+```
+
+Standalone không có nghĩa mỗi component phải tự import mọi thứ một cách máy móc. Một component có thể import một standalone component khác, hoặc import một `NgModule` cũ khi cần dùng các declaration mà module đó export.
+
+## Angular tìm dependency cho template ra sao
+
+Sự khác nhau cốt lõi nằm ở **compilation scope**, tức tập directive, pipe và component mà Angular cho phép xuất hiện trong template.
+
+Với component thuộc `NgModule`, Angular tạo scope từ module:
+
+- `declarations`: các component, directive và pipe mà module sở hữu.
+- `imports`: các API template mà module nhận từ module khác.
+- `exports`: các API template mà module cho module khác dùng.
+
+Với standalone component, Angular tạo scope từ `imports` của component. Mảng này có thể chứa standalone component, standalone directive, standalone pipe hoặc `NgModule`.
+
+Ví dụ, hai đoạn sau đều hợp lệ nhưng thuộc hai cơ chế khác nhau:
+
+```ts
+// NgModule: NgIf đến từ CommonModule mà module imports.
+@NgModule({
+  declarations: [OrdersPageComponent],
+  imports: [CommonModule],
+})
+export class OrdersModule {}
+```
+
+```ts
+// Standalone: NgIf đến từ imports của chính component.
+@Component({
+  imports: [NgIf],
+  template: `<p *ngIf="isLoading">Đang tải...</p>`,
+})
+export class OrdersPageComponent {
+  isLoading = true;
+}
+```
+
+Nếu quên `NgIf` trong `imports` của standalone component, Angular không biết `*ngIf` là directive nào. Lỗi này tương đương với việc quên import `CommonModule` vào `NgModule` trong kiến trúc cũ.
+
+## `providers` và DI có thay đổi không?
+
+Không. Standalone thay đổi cách ghép dependency cho **template**, còn DI vẫn dùng token, provider và injector như nhau.
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class UserApi {
+  // Một instance cho application injector.
+}
+```
+
+Service trên dùng được trong cả component thuộc `NgModule` lẫn standalone component:
+
+```ts
+@Component({
+  selector: 'app-user-card',
+  template: `...`,
+})
+export class UserCardComponent {
+  private readonly userApi = inject(UserApi);
+}
+```
+
+Các scope provider cần nhớ:
+
+| Vị trí đăng ký | Hệ quả |
+| --- | --- |
+| `providedIn: 'root'` hoặc application config | Thường có một instance trong toàn ứng dụng. |
+| `providers` của route | Instance sống theo route đang hoạt động. |
+| `providers` của component | Component đó và cây con có instance riêng. |
+| `providers` của `NgModule` | Có scope theo injector nơi module được nạp; cần đọc kỹ với eager và lazy module. |
+
+<Callout type="idea" title="Câu trả lời dễ bị hỏi tiếp">
+  Standalone component không tự làm service thành singleton. Service là singleton hay không phụ thuộc vào provider được đăng ký ở root, route hay component.
+</Callout>
+
+## Bootstrap và router
+
+NgModule-based app thường khởi động qua root module:
+
+```ts
+// main.ts
+platformBrowserDynamic().bootstrapModule(AppModule);
+```
+
+```ts
+// app.module.ts
+@NgModule({
+  declarations: [AppComponent],
+  imports: [BrowserModule, AppRoutingModule],
+  bootstrap: [AppComponent],
+})
+export class AppModule {}
+```
+
+Standalone app thường khởi động trực tiếp root component và đưa provider cấp ứng dụng vào cấu hình:
+
+```ts
+// main.ts
+bootstrapApplication(AppComponent, {
+  providers: [
+    provideRouter(routes),
+    provideHttpClient(),
+  ],
+});
+```
+
+Router cũng có thể tải trực tiếp standalone page:
+
+```ts
+export const routes: Routes = [
+  {
+    path: 'users',
+    loadComponent: () =>
+      import('./users-page.component').then((m) => m.UsersPageComponent),
+  },
+];
+```
+
+`loadChildren` vẫn tồn tại và vẫn phù hợp khi feature xuất nhiều route. Standalone không xóa lazy loading theo route; nó thêm lựa chọn tải thẳng một component khi feature chỉ cần một page hoặc không cần route module.
+
+## NgModule và standalone có dùng chung được không?
+
+Có. Đây là điều quan trọng khi nâng cấp ứng dụng cũ.
+
+- Một standalone component có thể import `NgModule` để dùng các component, directive và pipe mà module export.
+- Một `NgModule` có thể import standalone component, directive hoặc pipe.
+- Router có thể có route tải module cũ bằng `loadChildren` và route tải standalone page bằng `loadComponent` trong cùng một ứng dụng.
+- `importProvidersFrom()` cho phép đưa provider của module cũ vào application config khi cần tương thích.
+
+Ví dụ module cũ dùng standalone component:
+
+```ts
+@NgModule({
+  imports: [CommonModule, UserCardComponent],
+  declarations: [LegacyProfilePageComponent],
+})
+export class LegacyProfileModule {}
+```
+
+Vì thế không cần dừng toàn bộ dự án để “chuyển sang standalone”. Có thể chuyển từng feature hoặc từng route.
+
+## Khi nào nên chọn cách nào
+
+### Ứng dụng mới
+
+Chọn standalone làm mặc định. Angular hiện đại tạo component mới theo hướng này, bootstrap và route cũng có API trực tiếp. Mã ít lớp trung gian hơn, đặc biệt với feature nhỏ và lazy route.
+
+### Ứng dụng đang dùng NgModule
+
+Không cần đổi chỉ vì standalone mới hơn. Hãy ưu tiên chuyển khi đang sửa feature, cần giảm độ phức tạp của shared module, hoặc muốn dùng cách bootstrap/router mới. Nếu ứng dụng ổn định và module boundaries rõ ràng, việc chuyển đổi có thể làm dần.
+
+### Thư viện hoặc dependency cũ
+
+Bạn vẫn có thể gặp thư viện chỉ export `NgModule`. Standalone component import module đó bình thường. Không cần tạo wrapper module trừ khi muốn gom một tập dependency UI được dùng lặp lại.
+
+## Các câu hỏi gài thường gặp
+
+### Standalone có thay thế hoàn toàn `NgModule` không?
+
+Không. Standalone là cách được ưu tiên cho mã mới, nhưng `NgModule` vẫn được Angular hỗ trợ. Nó còn xuất hiện nhiều trong dự án cũ và thư viện.
+
+### Standalone có phải là component không có module TypeScript không?
+
+Không. Mọi file TypeScript vẫn dùng `import`/`export` bình thường. “Standalone” chỉ nói component không phụ thuộc vào `NgModule` của Angular để tham gia compilation scope.
+
+### Có phải standalone component không được dùng trong `NgModule`?
+
+Không. `NgModule` có thể đặt standalone component trong `imports`. Không đặt nó trong `declarations`.
+
+### Có cần thêm `CommonModule` vào mọi standalone component không?
+
+Không bắt buộc. Bạn có thể import trực tiếp `NgIf`, `NgFor`, `AsyncPipe`, `DatePipe` hoặc API standalone mà template cần. Import `CommonModule` vẫn hợp lệ khi dùng nhiều directive/pipe phổ biến.
+
+### `imports` của standalone component có phải là DI provider không?
+
+Không. `imports` tạo phạm vi cho template. Provider được đặt ở `providers`, `providedIn`, application config hoặc route config.
+
+### Standalone có làm bundle nhỏ hơn ngay lập tức không?
+
+Không thể kết luận chỉ từ chữ `standalone`. Bundle còn phụ thuộc vào route splitting, dependency thực tế, tree-shaking và cấu hình build. Lợi ích rõ hơn là dependency của template dễ nhìn và lazy-load component trực tiếp hơn.
+
+## Lộ trình chuyển từ NgModule sang standalone
+
+Chuyển theo feature để thay đổi nhỏ và dễ kiểm tra.
+
+1. Nâng Angular và các thư viện lên phiên bản hỗ trợ standalone.
+2. Chuyển leaf component trước: thêm `standalone: true`, bỏ component khỏi `declarations`, rồi đưa các dependency template vào `imports`.
+3. Cập nhật component/module đang dùng nó: standalone component đi vào `imports`, không đi vào `declarations`.
+4. Chuyển một route sang `loadComponent` nếu route đó chỉ tải một page.
+5. Chuyển bootstrap sang `bootstrapApplication()` sau khi các provider cấp ứng dụng đã được xác định rõ.
+6. Chạy test và kiểm tra đặc biệt các provider trước đây được đăng ký trong module lazy.
+
+<Callout type="warn" title="Điểm dễ tạo lỗi khi migration">
+  Đừng chuyển `providers` từ lazy `NgModule` lên application config theo thói quen. Việc này có thể biến service theo feature thành singleton toàn ứng dụng, làm state không được reset khi rời route.
+</Callout>
+
+## Tóm tắt để nhớ
+
+- Component thuộc `NgModule`: khai báo ở `declarations`; template nhận dependency qua `imports` của module.
+- Standalone component: không cần `declarations`; template nhận dependency qua `imports` của component.
+- `imports` phục vụ template; `providers` phục vụ DI. Hai mảng không thay thế nhau.
+- Standalone không bỏ `NgModule`, không thay đổi component lifecycle và không tự thay đổi scope của service.
+- Với app mới, dùng standalone làm mặc định. Với app cũ, chuyển dần theo feature và giữ nguyên những module đang hoạt động tốt.
+
+<Cards>
+  <Card title="Standalone component" href="/docs/component-template/component-standalone" description="Giải thích standalone theo hướng xây dựng component và ứng dụng." />
+  <Card title="Dependency injection" href="/docs/di-kien-truc/dependency-injection" description="Hiểu provider, injector và phạm vi sống của service." />
+</Cards>
