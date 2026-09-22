@@ -68,26 +68,28 @@ Provider quyết định `Logger` thực tế là gì. Vì vậy dependency có 
 Một token là **định danh theo object/reference**, không chỉ theo tên hiển thị. `InjectionToken` giúp biểu diễn dependency không có class runtime, chẳng hạn interface TypeScript hoặc chuỗi cấu hình.
 
 <Callout type="idea" title="Interface không phải token runtime">
-  Interface TypeScript bị xóa sau khi biên dịch. Không thể inject trực tiếp `Logger` nếu `Logger` chỉ là interface; hãy tạo `InjectionToken<Logger>` cho hợp đồng đó.
+  Interface TypeScript bị xóa sau khi biên dịch. Nếu `Logger` chỉ là interface, bạn không thể inject trực tiếp nó; hãy tạo `InjectionToken<Logger>` để Angular dùng làm token khi chạy.
 </Callout>
 
 ## Cơ chế phân giải: cây injector
 
-Angular tạo các injector theo cấu trúc ứng dụng. Hai nhánh quan trọng là:
+Angular dùng hai chuỗi injector khi phân giải dependency:
 
-- **EnvironmentInjector** chứa provider ở cấp application, platform và route. `bootstrapApplication` tạo injector ứng dụng; route có `providers` có thể tạo phạm vi environment riêng.
-- **ElementInjector** gắn với phần tử/component/directive trong cây view. `providers` của component/directive được lưu ở đây.
+- **ElementInjector** gắn với phần tử/component/directive trong cây view. `providers` của component hoặc directive nằm ở đây.
+- **EnvironmentInjector** chứa provider không gắn với một component cụ thể. `bootstrapApplication` tạo injector cấp application. Route chỉ có `providers` mới tạo thêm một `EnvironmentInjector` con cho route đó.
 
-Khi code yêu cầu một token, Angular bắt đầu từ injector tại vị trí đang chạy, rồi đi lên các injector cha đến khi tìm được provider. Instance tìm được được cache trong injector sở hữu provider, nên các lần yêu cầu sau trong cùng scope thường nhận lại cùng instance.
+Các `EnvironmentInjector` không phải là một injector duy nhất chứa tất cả provider. Chúng là chuỗi cha-con: injector của route (nếu có) → injector application → platform injector. Mỗi injector chỉ giữ provider thuộc scope của nó; không tìm thấy thì Angular mới hỏi injector cha.
+
+Khi component hoặc directive yêu cầu một token, Angular tìm trong `ElementInjector` hiện tại trước, rồi đi lên các `ElementInjector` tổ tiên. Nếu vẫn không có provider, Angular tiếp tục theo chuỗi `EnvironmentInjector`: route hiện tại → application → platform. Nếu đến `NullInjector` mà vẫn không tìm thấy token, Angular ném `NullInjectorError`.
 
 ```text
-Component con yêu cầu SESSION
+Component con yêu cầu AUTH_API
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ ElementInjector: <checkout-page>                                │
-│ providers: [CheckoutSession]  ──► trả instance CheckoutSession  │
+│ providers: [CheckoutSession]                                    │
 └─────────────────────────────────────────────────────────────────┘
-                               │ không có token thì đi lên
+                               │ không có AUTH_API thì đi lên
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ ElementInjector: <app-root>                                     │
@@ -96,16 +98,32 @@ Component con yêu cầu SESSION
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ EnvironmentInjector: application                                │
-│ providers: [HttpClient, API_URL, AuthService]                   │
+│ EnvironmentInjector: route hiện tại (chỉ có khi route có         │
+│ providers)                                                       │
+│ providers: [OrderDraft]                                         │
 └─────────────────────────────────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
+│ EnvironmentInjector: application                                │
+│ providers: [HttpClient, API_URL, AUTH_API]  ──► trả instance     │
+└─────────────────────────────────────────────────────────────────┘
+                               │ không có AUTH_API thì đi lên
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
 │ Platform injector                                               │
-│ provider dùng chung giữa nhiều Angular application (hiếm dùng)  │
+│ Provider ở cấp nền tảng Angular; ứng dụng thường ít tự cấu hình │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ NullInjector  ──► không có provider: ném NullInjectorError      │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+<Callout type="info" title="Đọc cây injector trong Angular DevTools">
+  DevTools hiển thị các scope thực sự tồn tại trên đường tìm kiếm của component đang chọn. `Root` là `EnvironmentInjector` của application; `Platform` là injector cha của nó; `Null Injector` là điểm dừng cuối. Nếu ứng dụng dùng standalone component, bạn có thể thấy node như `Standalone_[AppComponent]`. Route không có `providers` thì không có route injector riêng để hiển thị.
+</Callout>
 
 ### Thứ tự tìm provider
 
