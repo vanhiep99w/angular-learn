@@ -14,10 +14,14 @@ description: "Câu trả lời phỏng vấn về component thuộc NgModule và
 - [So sánh nhanh](#so-sánh-nhanh)
 - [Cùng một màn hình, hai cách khai báo](#cùng-một-màn-hình-hai-cách-khai-báo)
   - [Cách dựa trên NgModule](#cách-dựa-trên-ngmodule)
+  - [Đọc `declarations`, `imports` và `exports`](#đọc-declarations-imports-và-exports)
   - [Cách standalone](#cách-standalone)
 - [Angular tìm dependency cho template ra sao](#angular-tìm-dependency-cho-template-ra-sao)
 - [`providers` và DI có thay đổi không?](#providers-và-di-có-thay-đổi-không)
 - [Bootstrap và router](#bootstrap-và-router)
+  - [Bootstrap chỉ khởi động ứng dụng](#bootstrap-chỉ-khởi-động-ứng-dụng)
+  - [`RouterOutlet` và `provideRouter` làm hai việc khác nhau](#routeroutlet-và-providerouter-làm-hai-việc-khác-nhau)
+  - [Router tải trang theo URL](#router-tải-trang-theo-url)
 - [NgModule và standalone có dùng chung được không?](#ngmodule-và-standalone-có-dùng-chung-được-không)
 - [Khi nào nên chọn cách nào](#khi-nào-nên-chọn-cách-nào)
 - [Các câu hỏi gài thường gặp](#các-câu-hỏi-gài-thường-gặp)
@@ -146,6 +150,50 @@ Template của UserCardComponent dùng được date
 ```
 
 `exports` là phần dễ quên. `declarations` chỉ làm component dùng được bên trong `UsersModule`; muốn module khác dùng nó, module phải export component đó.
+
+### Đọc `declarations`, `imports` và `exports`
+
+Ba mảng này trả lời ba câu hỏi khác nhau:
+
+| Mảng | Câu hỏi nó trả lời | Trong ví dụ `UsersModule` |
+| --- | --- | --- |
+| `declarations` | Module này sở hữu component, directive và pipe nào? | `UserCardComponent` thuộc `UsersModule`. |
+| `imports` | Template của các declaration trong module được dùng thêm API UI nào? | `CommonModule` làm `DatePipe`, `NgIf`, `NgFor`... dùng được. |
+| `exports` | Module khác import module này thì được dùng API UI nào? | Module khác dùng được `UserCardComponent`. |
+
+`imports` không có nghĩa là chỉ một component trong `declarations` được dùng `CommonModule`. Mọi component, directive và pipe trong `declarations` của `UsersModule` đều nhận được phạm vi template từ `CommonModule`.
+
+```ts
+@NgModule({
+  declarations: [
+    UserCardComponent,
+    UserListPageComponent,
+  ],
+  imports: [CommonModule],
+  exports: [UserCardComponent],
+})
+export class UsersModule {}
+```
+
+Trong ví dụ này:
+
+- `UserCardComponent` và `UserListPageComponent` đều dùng được `*ngIf`, `*ngFor`, `date` vì `UsersModule` import `CommonModule`.
+- Chỉ `UserCardComponent` được module khác dùng, vì chỉ component này có trong `exports`.
+- `UserListPageComponent` vẫn dùng bình thường bên trong `UsersModule`, nhưng module khác không được đặt `<app-user-list-page>` trong template của họ.
+
+Một component không standalone phải nằm trong `declarations` của **đúng một** `NgModule`. Nếu khai báo cùng một component ở hai module, Angular báo lỗi vì không biết module nào sở hữu compilation scope của component đó.
+
+`exports` cũng có thể export lại API từ module đã import. Đây là kiểu `SharedModule` thường gặp trong mã Angular cũ:
+
+```ts
+@NgModule({
+  imports: [CommonModule],
+  exports: [CommonModule],
+})
+export class SharedModule {}
+```
+
+Module import `SharedModule` sẽ dùng được các API template mà `CommonModule` export. Cách này tiện khi nhiều module cùng cần một tập directive và pipe, nhưng đừng biến `SharedModule` thành nơi gom mọi thứ không liên quan.
 
 ### Cách standalone
 
@@ -283,7 +331,30 @@ Các scope provider cần nhớ:
 
 ## Bootstrap và router
 
-NgModule-based app thường khởi động qua root module:
+Đây là hai việc xảy ra nối tiếp nhau, nhưng không phải một việc:
+
+1. **Bootstrap** tạo ứng dụng Angular và render root component, thường là `AppComponent`.
+2. **Router** đọc URL hiện tại, chọn route phù hợp rồi render page vào `<router-outlet>` bên trong root component.
+
+```text
+Trình duyệt tải main.ts
+        │
+        ▼
+Bootstrap tạo ứng dụng và AppComponent
+        │
+        ▼
+AppComponent có <router-outlet>
+        │
+        ▼
+Router khớp URL, ví dụ /users
+        │
+        ▼
+Router tải và render UsersPageComponent vào router-outlet
+```
+
+### Bootstrap chỉ khởi động ứng dụng
+
+Trong kiến trúc NgModule, Angular khởi động từ root module. Module này nói Angular component nào là root component qua mảng `bootstrap`.
 
 ```ts
 // main.ts
@@ -300,7 +371,9 @@ platformBrowserDynamic().bootstrapModule(AppModule);
 export class AppModule {}
 ```
 
-Standalone app thường khởi động trực tiếp root component và đưa provider cấp ứng dụng vào cấu hình:
+Ý nghĩa của đoạn trên là: Angular tạo `AppModule`, đọc `bootstrap: [AppComponent]`, rồi tạo `AppComponent` và gắn nó vào phần tử `<app-root>` trong `index.html`.
+
+Với standalone, không cần `AppModule` làm bước trung gian. Angular nhận trực tiếp root component:
 
 ```ts
 // main.ts
@@ -312,9 +385,57 @@ bootstrapApplication(AppComponent, {
 });
 ```
 
-Router cũng có thể tải trực tiếp standalone page:
+`bootstrapApplication(AppComponent, ...)` cũng tạo application injector. Mảng `providers` ở đây là nơi đăng ký các service dùng cho toàn app, chẳng hạn Router và `HttpClient`.
+
+### `RouterOutlet` và `provideRouter` làm hai việc khác nhau
+
+Đây là cặp API rất dễ nhầm:
+
+| API | Vai trò | Đặt ở đâu trong standalone app? |
+| --- | --- | --- |
+| `RouterOutlet` | Directive tạo vị trí trong template để Router render page hiện tại. | `imports` của `AppComponent`, vì nó được dùng trong template. |
+| `provideRouter(routes)` | Đăng ký Router và cấu hình route vào DI của application. | `providers` khi gọi `bootstrapApplication()`. |
+
+Root component standalone thường có dạng sau:
 
 ```ts
+// app.component.ts
+import { Component } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
+
+@Component({
+  selector: 'app-root',
+  imports: [RouterOutlet],
+  template: `<router-outlet />`,
+})
+export class AppComponent {}
+```
+
+Nếu chỉ có `provideRouter(routes)` mà `AppComponent` không có `<router-outlet>`, Router vẫn biết URL nhưng không có chỗ trong giao diện để đặt page. Ngược lại, chỉ thêm `<router-outlet>` mà không gọi `provideRouter(routes)` thì Angular không có Router service và cấu hình route.
+
+Trong app dựa trên NgModule, hai việc này thường bị che bởi `AppRoutingModule`:
+
+```ts
+// app-routing.module.ts
+const routes: Routes = [
+  { path: 'users', loadChildren: () => import('./users/users.module').then((m) => m.UsersModule) },
+];
+
+@NgModule({
+  imports: [RouterModule.forRoot(routes)],
+  exports: [RouterModule],
+})
+export class AppRoutingModule {}
+```
+
+`RouterModule.forRoot(routes)` đăng ký Router. `exports: [RouterModule]` làm `router-outlet`, `routerLink` và các directive router khác dùng được trong template của `AppModule`.
+
+### Router tải trang theo URL
+
+Trong standalone app, route có thể tải một page component trực tiếp:
+
+```ts
+// app.routes.ts
 export const routes: Routes = [
   {
     path: 'users',
@@ -324,7 +445,19 @@ export const routes: Routes = [
 ];
 ```
 
-`loadChildren` vẫn tồn tại và vẫn phù hợp khi feature xuất nhiều route. Standalone không xóa lazy loading theo route; nó thêm lựa chọn tải thẳng một component khi feature chỉ cần một page hoặc không cần route module.
+Khi người dùng vào `/users`, Router mới chạy `import(...)`, lấy `UsersPageComponent`, tạo component đó và đặt nó vào `<router-outlet>`. Đây là lazy loading: mã của page không cần nằm trong JavaScript tải ban đầu.
+
+`loadChildren` vẫn dùng được. Trong mã cũ, nó thường tải một lazy `NgModule`:
+
+```ts
+{
+  path: 'admin',
+  loadChildren: () =>
+    import('./admin/admin.module').then((m) => m.AdminModule),
+}
+```
+
+Trong mã standalone hiện đại, `loadChildren` cũng có thể tải một mảng routes của cả feature. Dùng `loadComponent` khi route chỉ cần một page; dùng `loadChildren` khi feature có nhiều route con như `/admin/users`, `/admin/roles` và `/admin/settings`.
 
 ## NgModule và standalone có dùng chung được không?
 
