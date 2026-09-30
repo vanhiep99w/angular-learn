@@ -24,11 +24,18 @@ description: Hiểu khi nào Angular kiểm tra component OnPush, cách phối h
   - [Component tạo động nhận input qua setInput](#component-tạo-động-nhận-input-qua-setinput)
   - [Đánh dấu bằng markForCheck](#đánh-dấu-bằng-markforcheck)
 - [OnPush ảnh hưởng cây component thế nào](#onpush-ảnh-hưởng-cây-component-thế-nào)
+  - [Chỉ một component OnPush và phần còn lại CheckAlways](#chỉ-một-component-onpush-và-phần-còn-lại-checkalways)
   - [Component con dùng Default có vượt qua cha OnPush không](#component-con-dùng-default-có-vượt-qua-cha-onpush-không)
 - [Ví dụ hoàn chỉnh về input và mutation](#ví-dụ-hoàn-chỉnh-về-input-và-mutation)
   - [Component con nhận object](#component-con-nhận-object)
   - [Component cha cập nhật state](#component-cha-cập-nhật-state)
   - [Thử từng thao tác và giải thích kết quả](#thử-từng-thao-tác-và-giải-thích-kết-quả)
+- [Case thực tế: Save không cập nhật MessagesList](#case-thực-tế-save-không-cập-nhật-messageslist)
+  - [Cây component và service dùng chung](#cây-component-và-service-dùng-chung)
+  - [Mảng thường và getter trong MessagesList](#mảng-thường-và-getter-trong-messageslist)
+  - [Vì sao Save không đánh dấu sibling](#vì-sao-save-không-đánh-dấu-sibling)
+  - [Sửa bằng signal mà giữ nguyên getter](#sửa-bằng-signal-mà-giữ-nguyên-getter)
+  - [Các cách khác và kiểm chứng](#các-cách-khác-và-kiểm-chứng)
 - [OnPush với danh sách và dữ liệu dẫn xuất](#onpush-với-danh-sách-và-dữ-liệu-dẫn-xuất)
   - [Mảng mới nhưng item cũ vẫn có thể gây UI cũ](#mảng-mới-nhưng-item-cũ-vẫn-có-thể-gây-ui-cũ)
   - [Không tạo input mới ở mọi lượt kiểm tra](#không-tạo-input-mới-ở-mọi-lượt-kiểm-tra)
@@ -543,6 +550,64 @@ AppComponent                  (CheckAlways)
 
 Không nên suy luận “cha đã chạy thì mọi con đều chạy”. Mỗi ranh giới OnPush vẫn có điều kiện của riêng nó.
 
+### Chỉ một component OnPush và phần còn lại CheckAlways
+
+Giả sử chỉ `CounterComponent` dùng OnPush. Các component còn lại đều dùng CheckAlways, không có view nào bị `detach()`:
+
+```text
+AppComponent                 (CheckAlways)
+├── HeaderComponent          (CheckAlways)
+├── MainComponent            (CheckAlways)
+│   └── CounterComponent     (OnPush)
+└── FooterComponent          (CheckAlways)
+```
+
+**Trường hợp 1 — click trong Counter, app dùng Zone.js.** Counter có field thường `count = 0` và template:
+
+```html
+<p>{{ count }}</p>
+<button type="button" (click)="count = count + 1">+1</button>
+```
+
+Khi người dùng click, Angular đánh dấu Counter và đường ancestor liên quan cần kiểm tra. Event trong Angular zone của app dùng Zone.js dẫn tới một lượt change detection toàn cục. Trong cây này, tất cả các view CheckAlways đều được duyệt và kiểm tra; Counter cũng được kiểm tra vì có event.
+
+Giả sử binding ở các component khác không đổi, kết quả là:
+
+| Component | Template được kiểm tra? | State có tự đổi theo Counter không? | DOM có đổi không? |
+| --- | --- | --- | --- |
+| Counter | Có | `count` đổi từ `0` thành `1` do handler | Text số đếm đổi thành `1` |
+| App và Main | Có | Không | Không, nếu binding giữ nguyên |
+| Header và Footer | Có | Không | Không, nếu binding giữ nguyên |
+
+Vì vậy, nói **“các component trong cây trên đều được kiểm tra”** là đúng với lượt cập nhật này. Nhưng nói **“state con đổi làm state cha đổi, rồi kéo state của mọi component đổi”** là sai. State của Counter chỉ nằm trong Counter; không có input, output hay service nào chuyển giá trị mới sang các component khác trong ví dụ này.
+
+```text
+Click trong Counter
+    → Angular chạy lượt change detection
+    → Các view đủ điều kiện được kiểm tra
+    → Chỉ binding có giá trị khác mới làm DOM đổi
+```
+
+<Callout type="info" title="Cha được kiểm tra không có nghĩa state cha thay đổi">
+  Angular có thể đọc lại template của App, Main, Header và Footer dù dữ liệu của chúng vẫn như cũ. Việc kiểm tra này không tạo lại component instance, không chạy lại constructor hay `ngOnInit`, và không mặc định viết lại DOM.
+</Callout>
+
+Chỉ bật OnPush cho Counter không tự khiến Header và Footer CheckAlways được bỏ qua trong lượt change detection toàn cục. OnPush là ranh giới kiểm tra của component đó, không phải công tắc giới hạn mọi update của app vào một component duy nhất.
+
+**Trường hợp 2 — signal chỉ được Counter đọc, app dùng zoneless.** Giữ cấu trúc cây trên, nhưng đổi `count` thành `signal(0)` và template của Counter đọc `{{ count() }}`. Xét riêng một callback async gọi `this.count.set(1)` sau lần render đầu. Không có event Angular hoặc notification khác xảy ra cùng lúc.
+
+Ở lượt cập nhật này, signal thông báo cho view consumer là Counter. Angular có thể dùng lượt kiểm tra hướng đích (**Targeted**) — tập trung vào view cần refresh:
+
+- Counter được kiểm tra và text số đếm đổi thành `1`.
+- Angular đi qua đường App → Main để tới Counter, nhưng không cần refresh template của các ancestor sạch chỉ để đi tiếp.
+- Header và Footer sạch có thể được bỏ qua, dù strategy của chúng là CheckAlways.
+
+CheckAlways không có nghĩa template phải được đánh giá sau mọi signal update. Phạm vi còn phụ thuộc loại lượt đồng bộ và notification nào đã xảy ra.
+
+Không nên mở rộng kết quả của trường hợp signal này thành “zoneless luôn chỉ kiểm tra đúng một component”. Event Angular hoặc `markForCheck()` có thể khiến các ancestor được refresh và phạm vi kiểm tra rộng hơn.
+
+**Kết luận:** với click trong app dùng Zone.js và cây ở trên, các component đều được kiểm tra. Với các nguồn cập nhật khác, hãy xác định notification và chế độ đồng bộ trước khi kết luận phạm vi kiểm tra. Trong mọi trường hợp, **kiểm tra template không đồng nghĩa state hoặc DOM của mọi component đều thay đổi**.
+
 ### Component con dùng Default có vượt qua cha OnPush không
 
 Đổi UserCard sang CheckAlways không làm nó tự chạy xuyên qua một cha OnPush sạch:
@@ -643,6 +708,170 @@ Render màn hình rồi thử theo thứ tự:
 </Callout>
 
 Nếu thay `@Input()` bằng `input.required<User>()`, template đổi sang `user().name`. Cơ chế reference vẫn như cũ; Signal Input không tự phát hiện `user.name` bị sửa sâu ở cha.
+
+## Case thực tế: Save không cập nhật MessagesList
+
+Case này dựa trên nhóm `src/app/messages/` của project học `01-starting-project`, dùng Angular 18 và Zone.js. Các đoạn code dưới đây rút gọn phần debug và style để tập trung vào luồng dữ liệu.
+
+### Cây component và service dùng chung
+
+Người dùng nhập tin nhắn trong NewMessage rồi bấm **Save**. MessagesList cần hiển thị tin nhắn mới. Nhưng cả hai component đều dùng OnPush và là **sibling** — hai component cùng cha, không phải quan hệ cha con:
+
+```text
+AppComponent                    (CheckAlways)
+└── MessagesComponent           (OnPush)
+    ├── NewMessageComponent     (OnPush) ← event Save
+    └── MessagesListComponent   (OnPush) ← cần hiển thị dữ liệu
+```
+
+Phần ghép UI trong `messages.component.html` chỉ có:
+
+```html
+<app-new-message />
+<app-messages-list />
+```
+
+Không có input binding truyền danh sách từ cha xuống MessagesList. NewMessage và MessagesList cùng inject `MessagesService` có `providedIn: 'root'`, nên trong cấu hình này chúng đọc cùng một instance service.
+
+### Mảng thường và getter trong MessagesList
+
+Service ban đầu giữ dữ liệu bằng một mảng JavaScript thường:
+
+```ts title="messages.service.ts"
+import { Injectable } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class MessagesService {
+  private messages: string[] = [];
+
+  get allMessages(): string[] {
+    return [...this.messages];
+  }
+
+  addMessage(message: string): void {
+    this.messages = [...this.messages, message];
+  }
+}
+```
+
+MessagesList có các member đọc state như sau:
+
+```ts
+// Bên trong MessagesListComponent, đang dùng OnPush.
+private messageService = inject(MessagesService);
+
+get messages(): string[] {
+  return this.messageService.allMessages;
+}
+```
+
+Template dùng getter đó để render danh sách:
+
+```html title="messages-list.component.html"
+<ul>
+  @for (message of messages; track message) {
+    <li>{{ message }}</li>
+  }
+</ul>
+```
+
+Trong NewMessage, form dùng `(ngSubmit)="onSubmit()"`. Handler Save hiện tại là:
+
+```ts
+// Bên trong NewMessageComponent.
+// mesageService là property inject MessagesService trong project.
+onSubmit(): void {
+  this.mesageService.addMessage(this.enteredText);
+  this.enteredText = '';
+}
+```
+
+Sau Save, service đã có mảng mới trong bộ nhớ. Việc xóa nội dung ô nhập cũng có thể xuất hiện trên UI của NewMessage, nhưng MessagesList vẫn hiển thị danh sách cũ.
+
+### Vì sao Save không đánh dấu sibling
+
+Luồng xảy ra sau lần render đầu là:
+
+1. Angular xử lý `(ngSubmit)` trong NewMessage và đánh dấu view đó cùng đường ancestor cần kiểm tra.
+2. `addMessage()` tạo mảng mới trong service, nhưng đây vẫn là phép gán field thường.
+3. Messages được kiểm tra, nhưng template của nó không cấp input mới cho MessagesList.
+4. MessagesList không xử lý event Save, không đọc signal và không được đánh dấu bởi cơ chế khác.
+5. Angular bỏ qua template OnPush sạch của MessagesList. Getter `messages` và vòng `@for` không được đánh giá lại ở view đó.
+
+Giả sử không có notification khác đồng thời đánh dấu MessagesList:
+
+| View | Được kiểm tra sau Save? | Lý do |
+| --- | --- | --- |
+| App | Có | CheckAlways trong lượt change detection của app dùng Zone.js |
+| Messages | Có | Ancestor trên đường event |
+| NewMessage | Có | View xử lý event Save |
+| MessagesList | Không | Sibling OnPush sạch, không có input mới hoặc notification liên quan |
+
+Getter không phải một subscription — đăng ký nhận thông báo khi dữ liệu đổi. Angular chỉ gọi getter khi đánh giá expression cần nó. Getter có trả mảng mới mỗi lần gọi cũng không giúp được nếu template đang bị bỏ qua.
+
+<Callout type="warn" title="Mảng mới trong service không phải input mới của component">
+  Service đã cập nhật bất biến bằng `[...this.messages, message]`; lỗi ở đây không phải mutate array tại chỗ. Mảng mới chỉ nằm trong field của service, không đi qua input binding tới MessagesList. Cùng inject một service cũng không tự đăng ký notification cho mọi component đọc field thường của nó.
+</Callout>
+
+Nói chính xác là **Angular không kiểm tra lại template của MessagesList**, chứ không phải service chưa lưu dữ liệu. Điều còn thiếu là notification hợp lệ cho **view hiển thị danh sách**.
+
+### Sửa bằng signal mà giữ nguyên getter
+
+Có thể chỉ đổi phần state trong service sang signal. Getter vẫn trả về array như trước:
+
+```ts title="messages.service.ts"
+import { Injectable, signal } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class MessagesService {
+  private readonly messages = signal<string[]>([]);
+
+  get allMessages(): string[] {
+    return [...this.messages()];
+  }
+
+  addMessage(message: string): void {
+    this.messages.update((messages) => [...messages, message]);
+  }
+}
+```
+
+**Giữ nguyên getter `messages` của MessagesList và template `@for (message of messages; track message)`.** Không đổi thành `messages()` trong cách sửa này, vì `messages` của component vẫn là một getter trả array, không phải signal.
+
+Ở lần render đầu, template đọc getter và lần đọc đó đi tới signal trong service:
+
+```text
+Template MessagesList → getter messages → getter allMessages → đọc signal messages()
+```
+
+Angular theo dõi signal được đọc trong lúc đánh giá template. Lần đọc đi qua các getter đồng bộ vẫn được ghi nhận, nên MessagesList trở thành consumer của signal trong service.
+
+Sau Save, `messages.update()` công bố array mới. Signal thông báo cho MessagesList cần refresh, dù event Save nằm ở sibling NewMessage. Template của MessagesList được kiểm tra và `@for` nhận danh sách mới.
+
+Điểm tạo notification là **đọc và ghi signal**, không phải việc getter tạo một bản sao array. Chỉ import `signal` mà vẫn khai báo `private messages: string[] = []` thì chưa thay đổi cơ chế cập nhật.
+
+### Các cách khác và kiểm chứng
+
+Signal không phải lựa chọn bắt buộc. Nếu giữ state không phải signal, vẫn cần một đường cập nhật view rõ ràng:
+
+| Cách | Điều gì khiến MessagesList được kiểm tra? |
+| --- | --- |
+| Service phát Observable, MessagesList dùng AsyncPipe | Emission mới khiến pipe đánh dấu view chứa nó |
+| Cha đọc dữ liệu và truyền input xuống List | Khi cha được kiểm tra, binding cấp array reference mới cho input của List |
+| List nhận thông báo thay đổi và gọi `markForCheck()` | Đánh dấu đúng view consumer; cần quản lý subscription nếu có |
+
+Gọi `markForCheck()` trên `ChangeDetectorRef` của NewMessage không đánh dấu sibling MessagesList. Đánh dấu thêm cha Messages cũng không tự làm mọi child OnPush sạch được kiểm tra. Nếu dùng cách thủ công, phải thông báo cho view hiển thị dữ liệu, không chỉ view ghi dữ liệu.
+
+Để đối chiếu trong project Angular 18 này, có thể thử đổi **riêng MessagesList** sang `ChangeDetectionStrategy.Default`. Sau Save, cha Messages đã được đánh dấu bởi event, nên Angular đi tới List và đọc lại getter. Danh sách sẽ cập nhật trong luồng này dù service vẫn dùng mảng thường.
+
+Cách thử đó chứng minh dữ liệu đã được lưu, nhưng không biến field thường thành reactive state. Nếu service đổi từ callback khác mà cha OnPush vẫn sạch, chỉ đổi List sang Default chưa bảo đảm UI được cập nhật.
+
+Kiểm chứng tối thiểu với trạng thái mới sau khi tải lại trang:
+
+1. **Bản mảng thường, List OnPush:** nhập một tin nhắn khác rỗng rồi Save. Service giữ dữ liệu mới, ô nhập được xóa, nhưng danh sách vẫn cũ nếu List không có notification khác.
+2. **Bản signal, List vẫn OnPush:** tải lại trang, nhập tin nhắn rồi Save. Tin nhắn xuất hiện trong danh sách mà không cần thêm event ở List hay gọi `detectChanges()` thủ công.
+
+**Kết luận:** trong case này, Save đã thông báo cho NewMessage và các ancestor, nhưng chưa thông báo cho MessagesList. Muốn giữ List OnPush, hãy nối nguồn state với view consumer bằng signal, AsyncPipe, input binding hoặc đánh dấu đúng view.
 
 ## OnPush với danh sách và dữ liệu dẫn xuất
 
