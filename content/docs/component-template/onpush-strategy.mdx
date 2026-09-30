@@ -1,0 +1,870 @@
+---
+title: OnPush Change Detection trong Angular
+description: Hiểu khi nào Angular kiểm tra component OnPush, cách phối hợp input, Signals, AsyncPipe và ChangeDetectorRef để UI luôn cập nhật đúng.
+---
+
+<Callout type="info" title="Phạm vi và kiến thức đầu vào">
+  Bài này giải thích `ChangeDetectionStrategy.OnPush` từ cơ chế đến thực hành. Bạn nên biết component, input và event binding. Ví dụ dùng standalone component và API có trong Angular 18; phần ghi chú phiên bản giúp áp dụng vào Angular mới hơn.
+</Callout>
+
+## Mục lục
+
+- [OnPush là gì](#onpush-là-gì)
+  - [Ba khái niệm cần tách biệt](#ba-khái-niệm-cần-tách-biệt)
+  - [Mô hình từ state đến DOM](#mô-hình-từ-state-đến-dom)
+- [Cấu hình và khác biệt phiên bản](#cấu-hình-và-khác-biệt-phiên-bản)
+  - [Default và OnPush khác nhau ở đâu](#default-và-onpush-khác-nhau-ở-đâu)
+  - [Đọc tài liệu theo đúng phiên bản](#đọc-tài-liệu-theo-đúng-phiên-bản)
+- [Khi nào component OnPush được kiểm tra](#khi-nào-component-onpush-được-kiểm-tra)
+  - [Input nhận giá trị mới](#input-nhận-giá-trị-mới)
+  - [Event trong component và component con](#event-trong-component-và-component-con)
+  - [Signal được đọc trong template thay đổi](#signal-được-đọc-trong-template-thay-đổi)
+  - [AsyncPipe nhận giá trị mới](#asyncpipe-nhận-giá-trị-mới)
+  - [Đánh dấu bằng markForCheck](#đánh-dấu-bằng-markforcheck)
+- [OnPush ảnh hưởng cây component thế nào](#onpush-ảnh-hưởng-cây-component-thế-nào)
+  - [Component con dùng Default có vượt qua cha OnPush không](#component-con-dùng-default-có-vượt-qua-cha-onpush-không)
+- [Ví dụ hoàn chỉnh về input và mutation](#ví-dụ-hoàn-chỉnh-về-input-và-mutation)
+  - [Component con nhận object](#component-con-nhận-object)
+  - [Component cha cập nhật state](#component-cha-cập-nhật-state)
+  - [Thử từng thao tác và giải thích kết quả](#thử-từng-thao-tác-và-giải-thích-kết-quả)
+- [OnPush với danh sách và dữ liệu dẫn xuất](#onpush-với-danh-sách-và-dữ-liệu-dẫn-xuất)
+  - [Mảng mới nhưng item cũ vẫn có thể gây UI cũ](#mảng-mới-nhưng-item-cũ-vẫn-có-thể-gây-ui-cũ)
+  - [Không tạo input mới ở mọi lượt kiểm tra](#không-tạo-input-mới-ở-mọi-lượt-kiểm-tra)
+- [Chọn API của ChangeDetectorRef](#chọn-api-của-changedetectorref)
+  - [markForCheck và detectChanges không giống nhau](#markforcheck-và-detectchanges-không-giống-nhau)
+  - [View đã detach không được chữa bằng markForCheck](#view-đã-detach-không-được-chữa-bằng-markforcheck)
+- [OnPush không phải zoneless](#onpush-không-phải-zoneless)
+  - [Zone.js tạo tick nhưng không vô hiệu hóa OnPush](#zonejs-tạo-tick-nhưng-không-vô-hiệu-hóa-onpush)
+  - [Zoneless cần notification rõ ràng](#zoneless-cần-notification-rõ-ràng)
+- [Những lỗi dễ gặp](#những-lỗi-dễ-gặp)
+  - [Gán input trực tiếp qua ViewChild](#gán-input-trực-tiếp-qua-viewchild)
+  - [Đánh dấu view nhưng dữ liệu dẫn xuất vẫn cũ](#đánh-dấu-view-nhưng-dữ-liệu-dẫn-xuất-vẫn-cũ)
+  - [Dùng lifecycle hook như bộ đếm render tuyệt đối](#dùng-lifecycle-hook-như-bộ-đếm-render-tuyệt-đối)
+- [Kiểm thử hành vi OnPush](#kiểm-thử-hành-vi-onpush)
+  - [Test input bằng ComponentRef](#test-input-bằng-componentref)
+  - [Test qua host để thấy input reference thật](#test-qua-host-để-thấy-input-reference-thật)
+- [Quy trình debug và áp dụng](#quy-trình-debug-và-áp-dụng)
+  - [Xác định view và nguồn state](#xác-định-view-và-nguồn-state)
+  - [Kiểm tra reference và notification](#kiểm-tra-reference-và-notification)
+  - [Kiểm tra ranh giới con và cache](#kiểm-tra-ranh-giới-con-và-cache)
+  - [Xác minh bằng tương tác và đo lại](#xác-minh-bằng-tương-tác-và-đo-lại)
+  - [Khi nào nên áp dụng OnPush](#khi-nào-nên-áp-dụng-onpush)
+- [Checklist và tóm tắt](#checklist-và-tóm-tắt)
+- [Tài liệu tham khảo và đi tiếp](#tài-liệu-tham-khảo-và-đi-tiếp)
+
+## OnPush là gì
+
+**OnPush là chiến lược cho phép Angular bỏ qua việc kiểm tra template của component khi component không có lý do cần cập nhật.** Nó không có nghĩa “chỉ cập nhật khi input đổi”.
+
+Ví dụ, một bộ đếm không có input vẫn hoạt động với OnPush:
+
+```ts title="counter.component.ts"
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+
+@Component({
+  selector: 'app-counter',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <p>{{ count }}</p>
+    <button type="button" (click)="increase()">+1</button>
+  `,
+})
+export class CounterComponent {
+  count = 0;
+
+  increase(): void {
+    this.count += 1;
+  }
+}
+```
+
+Angular biết `(click)` đã chạy trong view này. Nó đánh dấu component cần kiểm tra, nên `count` mới xuất hiện trên màn hình dù đây chỉ là một thuộc tính thường của class, hay **field**.
+
+### Ba khái niệm cần tách biệt
+
+**Change detection** là quá trình Angular đọc expression trong template, so sánh kết quả với lần trước và đồng bộ phần khác biệt vào DOM.
+
+Với `{{ count }}`, Angular đọc `count`. Nếu giá trị vẫn là `1`, nó không cần ghi lại text node.
+
+| Khái niệm | Ý nghĩa | Ví dụ |
+| --- | --- | --- |
+| View | Phần giao diện Angular quản lý, như template của một component | Template chứa `{{ count }}` |
+| Dirty hoặc cần refresh | View đã có dấu hiệu cần được kiểm tra lại | Event chạy, signal được template đọc thay đổi |
+| DOM update | Angular ghi khác biệt thật vào DOM | Text đổi từ `1` thành `2` |
+
+Dirty không đồng nghĩa DOM chắc chắn đổi. Nó chỉ cho Angular một lý do để kiểm tra. OnPush chủ yếu giảm số lượt kiểm tra không cần thiết; component instance không bị tạo lại sau mỗi lần state đổi.
+
+### Mô hình từ state đến DOM
+
+Hãy hình dung hai cánh cửa: Angular phải biết cần đồng bộ ứng dụng, rồi phải chọn được view cần kiểm tra. **Notification** là tín hiệu báo cho Angular rằng có công việc đồng bộ cần xử lý.
+
+```text
+State đổi
+    │
+    ▼
+Notification hợp lệ: event, signal, AsyncPipe, markForCheck...
+    │
+    ▼
+Angular kiểm tra view cần cập nhật
+    │
+    ▼
+Binding đổi → ghi phần khác biệt vào DOM
+```
+
+Dòng `this.count = 10` chỉ làm **state đổi**. Nếu nó chạy trong một callback mà không thông báo cho Angular kiểm tra component OnPush, UI có thể vẫn hiển thị số cũ.
+
+**Câu hỏi quan trọng:** sau thao tác ghi này, cơ chế nào bảo đảm view được kiểm tra?
+
+## Cấu hình và khác biệt phiên bản
+
+Cấu hình nằm trong metadata của `@Component`:
+
+```ts
+@Component({
+  selector: 'app-user-card',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `<p>{{ name }}</p>`,
+})
+export class UserCardComponent {
+  name = 'An';
+}
+```
+
+OnPush không chỉ dành cho standalone component. Component khai báo trong NgModule cũng dùng cùng thuộc tính `changeDetection`.
+
+### Default và OnPush khác nhau ở đâu
+
+Trong một lượt duyệt thông thường, chiến lược **CheckAlways** kiểm tra view khi Angular đi tới nó. OnPush cho phép bỏ qua template nếu view không có input mới hoặc notification liên quan.
+
+| Khía cạnh | CheckAlways | OnPush |
+| --- | --- | --- |
+| Tên API | `Default` trong Angular 18–21; `Eager` trong Angular v22 | `OnPush` |
+| Khi traversal đi tới view | Thường kiểm tra template | Chỉ kiểm tra khi có điều kiện phù hợp |
+| Input object bị mutate tại chỗ | Template có thể đọc được mutation ở lượt kiểm tra kế tiếp | Không tạo lý do kiểm tra chỉ bằng input đó |
+| Field thường đổi trong timer | Trong app dùng Zone.js, tick có thể làm view cập nhật | Tick không đủ nếu view vẫn sạch |
+| Chi phí chính | Có thể kiểm tra nhiều view không liên quan | Bỏ qua được nhiều view không cần cập nhật |
+
+**Traversal** là quá trình Angular đi qua cây view. Đi qua một nhánh để tới view con không nhất thiết có nghĩa template của mọi ancestor đều được đánh giá lại.
+
+CheckAlways cũng không có nghĩa “theo dõi mọi dòng gán JavaScript”. Đặc biệt trong zoneless, ứng dụng vẫn cần notification để lên lịch đồng bộ.
+
+### Đọc tài liệu theo đúng phiên bản
+
+Tài liệu cũ thường viết “Default là mặc định, OnPush phải bật thủ công”. Điều đó đúng với Angular 18 mà nhiều khóa học đang dùng, nhưng không còn đúng cho mọi phiên bản.
+
+| Phiên bản | Chiến lược khi không khai báo `changeDetection` | Ghi chú |
+| --- | --- | --- |
+| Angular 18–21 | `ChangeDetectionStrategy.Default` | Khai báo `OnPush` rõ ràng để dùng chiến lược này |
+| Angular v22 | `ChangeDetectionStrategy.OnPush` | `Eager` là tên cho chiến lược kiểm tra chủ động; `Default` là alias đã deprecated |
+
+Các ví dụ trong bài vẫn khai báo `OnPush` tường minh để thể hiện ý định và dùng được trên các phiên bản khác nhau.
+
+<Callout type="warn" title="Đừng trộn strategy với Zone.js">
+  Angular v21+ dùng zoneless mặc định, trừ khi ứng dụng cấu hình lại để dùng Zone.js. Đây là một thay đổi khác với việc OnPush trở thành mặc định ở v22. Strategy quyết định view nào cần kiểm tra; Zone.js hoặc scheduler zoneless — bộ lập lịch đồng bộ — liên quan đến lúc Angular được đánh thức để đồng bộ.
+</Callout>
+
+## Khi nào component OnPush được kiểm tra
+
+Component OnPush được khởi tạo và render lần đầu như bình thường. Sau đó, các cơ chế phổ biến sau giúp view được kiểm tra lại:
+
+| Cơ chế | Ví dụ | Điều cần nhớ |
+| --- | --- | --- |
+| Input mới qua binding | `<app-card [user]="user" />` nhận object mới | Binding của cha phải được đánh giá để Angular biết input đổi |
+| Event Angular xử lý | `(click)`, output binding, `@HostListener` | Event trong component hoặc các view con liên quan có thể đánh dấu đường ancestor |
+| Signal được template đọc thay đổi | `count.update(...)` với `{{ count() }}` | Dependency phải được template đọc; đọc trong một method bất kỳ không đủ |
+| AsyncPipe nhận emission | `{{ user$ \| async }}` | Pipe đánh dấu view chứa nó cần kiểm tra |
+| Đánh dấu thủ công | `cdr.markForCheck()` | Không cập nhật DOM đồng bộ ngay tại dòng gọi |
+
+**Emission** là một giá trị mà Observable phát ra. Observable là nguồn dữ liệu theo thời gian của RxJS, ví dụ chuỗi trạng thái tải hoặc chuỗi HTTP response.
+
+Ngoài các cơ chế trên, `detectChanges()` có thể kiểm tra view trực tiếp. Đây là API điều khiển cục bộ, không phải cách mặc định để thiết kế data flow.
+
+### Input nhận giá trị mới
+
+Với primitive như `number`, `string` hoặc `boolean`, đổi giá trị có thể tạo input mới:
+
+```ts
+this.quantity = 2; // Trước đó là 1.
+```
+
+Với object và array, điều cần quan tâm là **reference** — danh tính của object mà biến đang trỏ tới:
+
+```ts
+const oldUser = this.user;
+
+this.user = { ...this.user, name: 'Bình' };
+
+console.log(oldUser === this.user); // false: object mới.
+```
+
+Angular không quét sâu từng property của input để quyết định nó đã đổi. Trong implementation binding của Angular 18, phép so sánh dùng `Object.is`. Cả `@Input()` và `input()` đều không biến mutation sâu của object thành một input update tự động.
+
+```ts
+// Không tạo input object mới.
+this.user.name = 'Bình';
+
+// Tạo input object mới.
+this.user = { ...this.user, name: 'Bình' };
+```
+
+Tuy nhiên, reference mới **chưa đủ nếu cha chưa được kiểm tra**. Khi field thường của cha đổi trong callback async, cha vẫn cần signal hoặc `markForCheck()` để binding `[user]="user"` được đánh giá.
+
+**Quy tắc thực hành:** dùng cập nhật bất biến (**immutable update**) — tạo dữ liệu mới thay vì sửa object cũ — tại ranh giới state. Công bố thay đổi bằng notification rõ ràng, rồi truyền giá trị mới qua binding.
+
+### Event trong component và component con
+
+Ví dụ bộ đếm đầu bài cho thấy field thường có thể cập nhật nhờ event. Notification đến từ `(click)`, không đến từ phép gán `count`.
+
+Một event trong component con cũng có thể khiến ancestor OnPush được kiểm tra:
+
+```text
+PageComponent          (OnPush)
+└── EditorComponent    (OnPush)
+    └── SaveButton     ← Angular xử lý (click) ở đây
+```
+
+Đường liên quan từ `SaveButton` lên `EditorComponent` và `PageComponent` được đánh dấu. Các component OnPush ở nhánh sibling sạch vẫn có thể bị bỏ qua.
+
+Điều này áp dụng cho listener Angular quản lý. Đừng xem callback của SDK bên thứ ba hoặc `element.addEventListener()` thủ công là tương đương hoàn toàn với `(click)` trong template.
+
+### Signal được đọc trong template thay đổi
+
+Signal là một hộp giá trị có khả năng thông báo **consumer** — nơi sử dụng dữ liệu — đã đọc nó. Trong ví dụ sau, template đọc `count()`, nên Angular biết view này phụ thuộc `count`:
+
+```ts title="signal-counter.component.ts"
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-signal-counter',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `<p>{{ count() }}</p>`,
+})
+export class SignalCounterComponent {
+  readonly count = signal(0);
+
+  increase(): void {
+    this.count.update((value) => value + 1);
+  }
+}
+```
+
+Nếu một callback gọi `increase()`, signal update là cơ chế thông báo. Component không cần nhận input mới hay chờ một click khác để hiện số mới.
+
+Có hai điều kiện quan trọng:
+
+- Template phải có dependency vào signal, trực tiếp hoặc qua một `computed` mà nó đọc.
+- Giá trị ghi phải được signal xem là thay đổi theo equality function. Mặc định, signal cũng dùng `Object.is`.
+
+```ts
+// Sai: mutate object nhưng không ghi vào signal.
+this.user().name = 'Bình';
+
+// Đúng: ghi một object mới.
+this.user.update((user) => ({ ...user, name: 'Bình' }));
+```
+
+Signal update có thể cho Angular đi qua ancestor để đến view consumer mà không phải chạy lại template của mọi ancestor sạch. Vì vậy, **signal ở con đổi không có nghĩa toàn bộ cây cha phải được kiểm tra như khi có một event**.
+
+### AsyncPipe nhận giá trị mới
+
+AsyncPipe quản lý subscription của template. Khi Observable phát giá trị, pipe đánh dấu view chứa nó cần kiểm tra. Nó cũng unsubscribe khi view bị hủy.
+
+Ví dụ một service sở hữu state người dùng:
+
+```ts title="user-store.service.ts"
+import { Injectable } from '@angular/core';
+import { BehaviorSubject } from 'rxjs';
+
+export interface User {
+  id: number;
+  name: string;
+}
+
+@Injectable({ providedIn: 'root' })
+export class UserStore {
+  private readonly userSubject = new BehaviorSubject<User>({
+    id: 1,
+    name: 'An',
+  });
+
+  readonly user$ = this.userSubject.asObservable();
+
+  rename(name: string): void {
+    this.userSubject.next({ ...this.userSubject.value, name });
+  }
+}
+```
+
+`BehaviorSubject` là một Observable có giữ giá trị hiện tại và cấp giá trị đó cho subscriber mới. Component dùng AsyncPipe để đọc stream:
+
+```ts title="user-panel.component.ts"
+import { AsyncPipe } from '@angular/common';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { UserStore } from './user-store.service';
+
+@Component({
+  selector: 'app-user-panel',
+  standalone: true,
+  imports: [AsyncPipe],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    @if (user$ | async; as user) {
+      <p>{{ user.name }}</p>
+    }
+  `,
+})
+export class UserPanelComponent {
+  readonly user$ = inject(UserStore).user$;
+}
+```
+
+Khi một nơi khác gọi `UserStore.rename('Bình')`, `UserPanelComponent` vẫn cập nhật dù không có input và không xử lý event tại chính nó.
+
+Nếu cha truyền một Observable cho con qua input, reference của Observable có thể giữ nguyên suốt đời component. Con vẫn cập nhật theo emission khi **template của con dùng AsyncPipe**. Reference stream không cần đổi để pipe thông báo.
+
+<Callout type="warn" title="Emission không chữa mọi mutation">
+  AsyncPipe đánh dấu view chứa pipe, nhưng không tạo reference mới cho object được phát ra. Nếu view đó truyền cùng object đã mutate xuống một child OnPush khác, child vẫn có thể bị bỏ qua. Hãy phát dữ liệu bất biến ở ranh giới state.
+</Callout>
+
+### Đánh dấu bằng markForCheck
+
+Khi buộc phải dùng field thường với callback async, `ChangeDetectorRef.markForCheck()` là cách báo rõ ràng rằng view cần kiểm tra.
+
+Ví dụ sau có một timer RxJS. Subscription được dọn khi component bị hủy:
+
+```ts title="manual-tick.component.ts"
+import {
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  DestroyRef,
+  inject,
+  OnInit,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { interval } from 'rxjs';
+
+@Component({
+  selector: 'app-manual-tick',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `<p>{{ ticks }}</p>`,
+})
+export class ManualTickComponent implements OnInit {
+  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly destroyRef = inject(DestroyRef);
+
+  ticks = 0;
+
+  ngOnInit(): void {
+    interval(1_000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.ticks += 1;
+        this.cdr.markForCheck();
+      });
+  }
+}
+```
+
+Nếu bỏ `markForCheck()`, việc timer chạy trong Zone.js cũng không bảo đảm template OnPush này được kiểm tra lại. Một tick toàn cục có thể xảy ra, nhưng view sạch vẫn bị bỏ qua.
+
+Trong code mới, state signal hoặc AsyncPipe thường giúp tránh bước đánh dấu thủ công. Dùng `markForCheck()` khi cần một cầu nối có chủ đích với field thường hoặc API cũ.
+
+## OnPush ảnh hưởng cây component thế nào
+
+Giả sử ứng dụng đã render lần đầu và không có view nào đang cần cập nhật:
+
+```text
+AppComponent                  (CheckAlways)
+├── HeaderComponent           (OnPush)
+└── MainComponent             (OnPush)
+    └── UserCardComponent     (OnPush)
+```
+
+`CheckAlways` trong sơ đồ tương ứng với `Default` ở Angular 18 hoặc `Eager` ở v22. Bảng dưới giả định không có notification nào khác xảy ra cùng lúc:
+
+| Tình huống | Kết quả chính |
+| --- | --- |
+| Click trong `HeaderComponent`, không đổi input của Main | Header được kiểm tra; Main và UserCard có thể bị bỏ qua |
+| Click trong Main, input của UserCard giữ nguyên | Main được kiểm tra; UserCard sạch vẫn có thể bị bỏ qua |
+| Click trong UserCard | UserCard và ancestor Main được đánh dấu để kiểm tra |
+| App truyền input mới cho Main | Main được kiểm tra; UserCard không tự động phải kiểm tra nếu input của nó giữ nguyên |
+| Signal chỉ được template UserCard đọc thay đổi | UserCard cần refresh; Angular đi qua đường ancestor cần thiết, không mặc định refresh template Main |
+
+Không nên suy luận “cha đã chạy thì mọi con đều chạy”. Mỗi ranh giới OnPush vẫn có điều kiện của riêng nó.
+
+### Component con dùng Default có vượt qua cha OnPush không
+
+Đổi UserCard sang CheckAlways không làm nó tự chạy xuyên qua một cha OnPush sạch:
+
+```text
+MainComponent        (OnPush, sạch)
+└── UserCard         (CheckAlways)
+```
+
+Trong một lượt duyệt thông thường, nếu nhánh Main bị bỏ qua và không có descendant notification cần xử lý, Angular không đi tiếp vào UserCard. Chiến lược của con không tự vô hiệu hóa ranh giới của cha.
+
+Nếu view con có notification hợp lệ, Angular có thể được chỉ dẫn đi vào nhánh đó. **Đừng dùng Default ở con như cách chữa một luồng dữ liệu thiếu notification.**
+
+## Ví dụ hoàn chỉnh về input và mutation
+
+Ví dụ này dùng field thường để tách rõ vai trò của input và event. Không có signal hay AsyncPipe vô tình che mất hành vi cần quan sát.
+
+### Component con nhận object
+
+```ts title="user-card.component.ts"
+import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
+
+export interface User {
+  id: number;
+  name: string;
+}
+
+@Component({
+  selector: 'app-user-card',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <p data-testid="user-name">{{ user.name }}</p>
+    <button type="button" (click)="probeClicks = probeClicks + 1">
+      Click trong component con
+    </button>
+    <small>Số click ở con: {{ probeClicks }}</small>
+  `,
+})
+export class UserCardComponent {
+  @Input({ required: true }) user!: User;
+  probeClicks = 0;
+}
+```
+
+Input thuộc về cha. Nút ở con chỉ đổi state cục bộ `probeClicks`, không sửa object của cha.
+
+### Component cha cập nhật state
+
+```ts title="onpush-demo.component.ts"
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { User, UserCardComponent } from './user-card.component';
+
+@Component({
+  selector: 'app-onpush-demo',
+  standalone: true,
+  imports: [UserCardComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <button type="button" (click)="mutate()" data-testid="mutate">
+      Mutate object cũ
+    </button>
+    <button type="button" (click)="replace()" data-testid="replace">
+      Tạo object mới
+    </button>
+    <p data-testid="parent-name">Cha đang giữ: {{ user.name }}</p>
+    <app-user-card [user]="user" />
+  `,
+})
+export class OnPushDemoComponent {
+  user: User = { id: 1, name: 'An' };
+
+  mutate(): void {
+    this.user.name = 'Bình';
+  }
+
+  replace(): void {
+    this.user = { ...this.user, name: 'Chi' };
+  }
+}
+```
+
+### Thử từng thao tác và giải thích kết quả
+
+Render màn hình rồi thử theo thứ tự:
+
+| Thao tác | Text ở cha | Text ở con | Vì sao |
+| --- | --- | --- | --- |
+| Render lần đầu | `An` | `An` | View được khởi tạo |
+| Bấm **Mutate object cũ** | `Bình` | Vẫn `An` | Event đánh dấu cha; input reference của con không đổi |
+| Bấm **Click trong component con** | `Bình` | `Bình` | Event ở con khiến template đọc lại object đã mutate |
+| Bấm **Tạo object mới** | `Chi` | `Chi` | Cha truyền reference input mới cho con |
+
+Đây là nguyên nhân bug “click một cái thì dữ liệu mới hiện”. Mutation đã đổi dữ liệu trong bộ nhớ, nhưng không tạo notification qua input. Một event đến sau vô tình làm template đọc lại dữ liệu đó.
+
+<Callout type="warn" title="Đừng kết luận mutation an toàn vì một lần click">
+  Giao diện cập nhật nhờ một event khác không chứng minh mutation là reactive update. Hãy sửa điểm ghi state bằng immutable update, thay vì yêu cầu người dùng thao tác thêm hoặc rải `detectChanges()` để che lỗi.
+</Callout>
+
+Nếu thay `@Input()` bằng `input.required<User>()`, template đổi sang `user().name`. Cơ chế reference vẫn như cũ; Signal Input không tự phát hiện `user.name` bị sửa sâu ở cha.
+
+## OnPush với danh sách và dữ liệu dẫn xuất
+
+### Mảng mới nhưng item cũ vẫn có thể gây UI cũ
+
+Một array mới giúp component nhận array nhận ra input đổi. Nhưng mỗi row có thể là một component OnPush nhận **item**, không nhận toàn bộ array:
+
+```html
+@for (user of users(); track user.id) {
+  <app-user-card [user]="user" />
+}
+```
+
+Đoạn dưới đổi array reference nhưng giữ lại item đã mutate:
+
+```ts
+// Sai: user có id = 1 vẫn là object cũ.
+this.users.update((users) => {
+  const user = users.find((item) => item.id === 1);
+  if (user) user.name = 'Bình';
+  return [...users];
+});
+```
+
+Template danh sách được kiểm tra, nhưng row cho user `id = 1` có thể tiếp tục bị bỏ qua vì input vẫn là object cũ.
+
+```ts
+// Đúng: array mới và item đã thay đổi cũng mới.
+this.users.update((users) =>
+  users.map((user) =>
+    user.id === 1 ? { ...user, name: 'Bình' } : user,
+  ),
+);
+```
+
+Các item không đổi giữ nguyên reference. Angular có thể tái sử dụng row theo `track user.id` và bỏ qua các row sạch.
+
+`track` giữ identity của row để tái sử dụng DOM. Nó không thay thế input notification, cũng không buộc child OnPush kiểm tra khi item reference giữ nguyên.
+
+### Không tạo input mới ở mọi lượt kiểm tra
+
+OnPush mất nhiều lợi ích nếu một method của cha liên tục tạo object hoặc array mới dù dữ liệu nghiệp vụ không đổi:
+
+```ts
+// Fragment trong component cha.
+getUser(): User {
+  return { id: this.userId, name: this.userName };
+}
+```
+
+```html
+<!-- Method trả object mới mỗi lần được gọi khi template cha được kiểm tra. -->
+<app-user-card [user]="getUser()" />
+```
+
+Một getter trả về `.map()` mới mỗi lần cũng có thể gây tình trạng tương tự. Các reference mới khiến child liên tục nhận input mới.
+
+<Callout type="info" title="Object literal trong template là trường hợp khác">
+  Angular compiler có thể cache object/array literal viết trực tiếp trong template theo các giá trị binding của chúng. Vì vậy, không thể kết luận `[user]="{ id: userId, name: userName }"` luôn tạo reference mới ở mọi lượt kiểm tra. Vấn đề của ví dụ trên là method tự tạo object mới mỗi lần được gọi.
+</Callout>
+
+Với state signal, dùng `computed` để giữ kết quả dẫn xuất ổn định cho đến khi dependency đổi:
+
+```ts
+readonly userId = signal(1);
+readonly userName = signal('An');
+
+readonly user = computed(() => ({
+  id: this.userId(),
+  name: this.userName(),
+}));
+```
+
+```html
+<app-user-card [user]="user()" />
+```
+
+Đoạn TypeScript trên là phần khai báo trong component; cần import `signal` và `computed` từ `@angular/core`.
+
+`computed` cache kết quả đã tính cho đến khi dependency đổi. Một lượt kiểm tra không liên quan vì thế không tự tạo input object mới.
+
+## Chọn API của ChangeDetectorRef
+
+### markForCheck và detectChanges không giống nhau
+
+| API | Hành vi | Trường hợp phù hợp |
+| --- | --- | --- |
+| `markForCheck()` | Đánh dấu view và đường ancestor liên quan cần kiểm tra; không ghi DOM ngay | Field thường đổi từ subscription hoặc callback tích hợp |
+| `detectChanges()` | Thực hiện kiểm tra cục bộ ngay cho view và các view con đủ điều kiện | Luồng kiểm soát local change detection có chủ đích |
+| `detach()` | Loại view khỏi các lượt kiểm tra tự động | UI dữ liệu dày cần tự quyết định nhịp refresh |
+| `reattach()` | Đưa view trở lại cây kiểm tra tự động | Kết thúc chế độ kiểm soát thủ công |
+
+```ts
+this.status = 'Đã tải xong';
+this.cdr.markForCheck();
+// DOM không được bảo đảm đã đổi ngay ở dòng này.
+```
+
+Ngược lại, `detectChanges()` chạy kiểm tra đồng bộ tại điểm gọi. Tuy nhiên, đừng hiểu nó là “ép tất cả child OnPush sạch chạy bất kể điều kiện”. Các view con vẫn có quy tắc kiểm tra của chúng.
+
+**Lựa chọn mặc định:** signal hoặc AsyncPipe cho state reactive; `markForCheck()` khi cần nối field thường vào Angular. Chỉ dùng `detectChanges()` khi thật sự cần kiểm tra cục bộ ngay và hiểu lifecycle tại điểm gọi.
+
+### View đã detach không được chữa bằng markForCheck
+
+Một view detached không tham gia lượt kiểm tra tự động, kể cả khi được đánh dấu dirty:
+
+```ts
+this.cdr.detach();
+this.status = 'Dữ liệu mới';
+this.cdr.markForCheck(); // View vẫn chưa được kiểm tra tự động.
+```
+
+Nếu tự quản lý nhịp refresh, dùng `detectChanges()` để kiểm tra view tại thời điểm đã chọn. Nếu muốn trở về data flow thông thường, gọi `reattach()` và bảo đảm có notification phù hợp.
+
+Không dùng `detach()` chỉ để “OnPush mạnh hơn”. Nó tạo trách nhiệm mới: lịch refresh, teardown, trạng thái hidden/visible và khả năng UI hiển thị dữ liệu cũ đều do bạn kiểm soát.
+
+## OnPush không phải zoneless
+
+### Zone.js tạo tick nhưng không vô hiệu hóa OnPush
+
+Trong ứng dụng dùng Zone.js, timer hoặc HTTP callback có thể làm Angular chạy một lượt đồng bộ. Nhưng một component OnPush sạch vẫn có thể bị bỏ qua.
+
+```ts
+// Fragment trong component OnPush: notification còn thiếu.
+this.http.get<User>('/api/user').subscribe((user) => {
+  this.user = user;
+});
+```
+
+`HttpClient` trả dữ liệu không đồng nghĩa mọi component đang giữ kết quả đều tự dirty. Subscription thủ công chỉ chạy callback mà bạn viết.
+
+Có ba hướng rõ ràng:
+
+- Đưa Observable vào template qua AsyncPipe.
+- Ghi kết quả vào signal được template đọc, ví dụ `this.user.set(user)`.
+- Nếu giữ field thường, gọi `markForCheck()` sau khi gán và quản lý vòng đời subscription.
+
+`takeUntilDestroyed()` chỉ giải quyết cleanup của subscription. Nó không tự đánh dấu view. `NgZone.run()` cũng không thay thế việc đánh dấu một view OnPush sạch.
+
+### Zoneless cần notification rõ ràng
+
+Zoneless bỏ sự phụ thuộc vào Zone.js để suy đoán lúc state có thể đổi. Angular dựa vào các notification như signal update, listener Angular, `markForCheck()` hoặc `ComponentRef.setInput()`.
+
+Một callback timer chỉ gán field thường không phải là notification:
+
+```ts
+setTimeout(() => {
+  this.message = 'Xong'; // Chưa nói cho Angular view nào cần kiểm tra.
+}, 1_000);
+```
+
+Dùng signal được template đọc:
+
+```ts
+readonly message = signal('Đang chờ');
+
+// Trong method hoặc callback setup phù hợp:
+setTimeout(() => {
+  this.message.set('Xong');
+}, 1_000);
+```
+
+Template tương ứng là `{{ message() }}`. Trong code thực tế, hủy timer hoặc subscription khi component bị hủy nếu công việc không còn cần thiết.
+
+OnPush giúp kiểm tra xem component có data flow với notification rõ ràng hay không. Tuy vậy, OnPush không bắt buộc để dùng zoneless, và chỉ bật OnPush cũng không tự tắt Zone.js.
+
+## Những lỗi dễ gặp
+
+### Gán input trực tiếp qua ViewChild
+
+Gán property trên instance không tương đương với một input binding Angular xử lý:
+
+```ts
+// Fragment: child là instance lấy được qua @ViewChild.
+this.child.user = { id: 1, name: 'Bình' };
+```
+
+Cách này không tự thực hiện đầy đủ cơ chế input update, như đánh dấu OnPush và tạo `ngOnChanges`. Ưu tiên để cha sở hữu dữ liệu và truyền qua template:
+
+```html
+<app-user-card [user]="user" />
+```
+
+Với component tạo động, dùng `ComponentRef.setInput('user', nextUser)` thay vì gán `componentRef.instance.user` trực tiếp. API này đi qua cơ chế input của Angular.
+
+Nếu một public method của child là cần thiết, method đó nên tự quản lý state bằng signal hoặc đánh dấu view của chính child. Đừng chỉ đánh dấu cha rồi giả định con cũng sẽ được kiểm tra.
+
+### Đánh dấu view nhưng dữ liệu dẫn xuất vẫn cũ
+
+OnPush, `computed` và pure pipe có các ranh giới cập nhật khác nhau. Pure pipe là pipe chỉ tính lại khi input của pipe thay đổi theo cơ chế so sánh của nó.
+
+Giả sử `label` là `computed` từ signal `user`:
+
+```ts
+readonly user = signal({ name: 'An' });
+readonly label = computed(() => `Xin chào ${this.user().name}`);
+
+// Sai: cache của computed không được invalidated bởi mutation này.
+this.user().name = 'Bình';
+this.cdr.markForCheck();
+```
+
+Template có thể đọc lại `user().name`, nhưng `label()` vẫn có thể giữ `Xin chào An` vì signal chưa công bố giá trị mới. Một pure pipe nhận cùng object reference cũng có thể giữ kết quả cũ.
+
+```ts
+// Đúng: cập nhật nguồn reactive, thay vì ép view để che mutation.
+this.user.update((user) => ({ ...user, name: 'Bình' }));
+```
+
+`markForCheck()` giải quyết **view cần kiểm tra**, không giải quyết mọi cache dữ liệu. Nếu state dẫn xuất bị cũ, sửa nguồn và dependency trước.
+
+### Dùng lifecycle hook như bộ đếm render tuyệt đối
+
+Đếm `ngDoCheck()` hoặc đặt `console.log()` trong getter không phải phép đo chính xác “DOM render bao nhiêu lần”. Hook có scope riêng, getter có thể chạy nhiều lần và development mode thêm các bước kiểm tra.
+
+Nếu mục tiêu là biết OnPush bỏ qua view nào, dùng profiler phù hợp. Nếu mục tiêu là biết UI chậm ở đâu, đọc thời gian JavaScript, layout và paint trong trace.
+
+**Kết luận:** không dùng số log để khẳng định một component đã ghi lại DOM hoặc để chốt lợi ích performance.
+
+## Kiểm thử hành vi OnPush
+
+### Test input bằng ComponentRef
+
+Trong component test, đặt input bằng API Angular thay vì gán property trực tiếp:
+
+```ts
+fixture.componentRef.setInput('user', { id: 1, name: 'Bình' });
+fixture.detectChanges();
+
+const name = fixture.nativeElement.querySelector('[data-testid="user-name"]');
+expect(name.textContent?.trim()).toBe('Bình');
+```
+
+Đoạn trên giả định fixture của `UserCardComponent` đã được tạo. `setInput()` đánh dấu component phù hợp và bảo toàn semantics của input, bao gồm với Signal Input.
+
+### Test qua host để thấy input reference thật
+
+Test trực tiếp child rồi gọi `detectChanges()` có thể không phản ánh việc child bị bỏ qua trong cây thật. Với bug mutation ở cha, dùng host có binding `[user]="user"`.
+
+Hai component của ví dụ hoàn chỉnh ở trên đã tạo đúng ranh giới này:
+
+```ts title="onpush-demo.component.spec.ts"
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { OnPushDemoComponent } from './onpush-demo.component';
+
+// Ví dụ dùng assertion Jasmine; có thể điều chỉnh cho runner của dự án.
+describe('OnPush input boundary', () => {
+  let fixture: ComponentFixture<OnPushDemoComponent>;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [OnPushDemoComponent],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(OnPushDemoComponent);
+    fixture.detectChanges();
+  });
+
+  function click(testId: string): void {
+    const button = fixture.nativeElement.querySelector(
+      `[data-testid="${testId}"]`,
+    ) as HTMLButtonElement;
+    button.click();
+    fixture.detectChanges();
+  }
+
+  function childName(): string {
+    return fixture.nativeElement
+      .querySelector('app-user-card [data-testid="user-name"]')
+      .textContent.trim();
+  }
+
+  it('keeps a clean child unchanged after an in-place mutation', () => {
+    click('mutate');
+
+    const parent = fixture.nativeElement.querySelector(
+      '[data-testid="parent-name"]',
+    );
+    expect(parent.textContent).toContain('Bình');
+    expect(childName()).toBe('An');
+  });
+
+  it('updates the child after receiving a new object reference', () => {
+    click('replace');
+    expect(childName()).toBe('Chi');
+  });
+});
+```
+
+Test mutation là test minh họa cơ chế, không phải hành vi nghiệp vụ nên giữ trong app thật. Trong ứng dụng thật, nút đổi tên cần dùng immutable update và test phải khẳng định cả cha lẫn con cập nhật.
+
+Với app zoneless, thêm test để notification thật tự lên lịch: cấu hình TestBed tương ứng, kích hoạt event hoặc signal update, rồi `await fixture.whenStable()` trước assertion. Cách đó giúp phát hiện trường hợp chỉ chạy đúng khi test ép `detectChanges()`.
+
+## Quy trình debug và áp dụng
+
+<Steps>
+<Step>
+
+### Xác định view và nguồn state
+
+Tìm component đang hiển thị sai. State là field thường, input, signal, Observable hay `computed`? Ai là owner có quyền ghi state đó?
+
+</Step>
+<Step>
+
+### Kiểm tra reference và notification
+
+Với object/array, so sánh reference trước và sau update. Với callback async, kiểm tra có signal update, AsyncPipe hoặc `markForCheck()` không. Nếu cha đổi field, nhớ kiểm tra cha có được đánh dấu để đánh giá binding hay không.
+
+</Step>
+<Step>
+
+### Kiểm tra ranh giới con và cache
+
+Một array mới có thể vẫn chứa item cũ. Một view đã được đánh dấu có thể vẫn đọc `computed` hoặc pure pipe cache cũ. Kiểm tra thêm view có bị `detach()` hay không.
+
+</Step>
+<Step>
+
+### Xác minh bằng tương tác và đo lại
+
+Viết test cho đúng luồng đã lỗi: input từ cha, async response hoặc callback thư viện. Sau khi UI đúng, dùng profiler để xem các view không liên quan có được bỏ qua và interaction có nhanh hơn không.
+
+</Step>
+</Steps>
+
+### Khi nào nên áp dụng OnPush
+
+OnPush phù hợp cho component có contract rõ ràng: input bất biến, output thể hiện ý định người dùng, state signal hoặc Observable được template tiêu thụ đúng cách.
+
+Với Angular 18, hãy chuyển từng subtree, bắt đầu từ component lá ít dependency. Kiểm tra mutation, subscription thủ công và callback SDK trước khi mở rộng. Với Angular v22, cơ chế này đã là mặc định; giữ data flow đúng vẫn quan trọng hơn việc có khai báo metadata hay không.
+
+OnPush không làm một phép tính nặng chạy nhanh hơn khi view thật sự phải kiểm tra. Nó cũng không giảm số DOM node của bảng 10.000 hàng. Nếu nút thắt là tính toán, dùng thuật toán phù hợp hoặc cache dữ liệu dẫn xuất; nếu là DOM quá lớn, cân nhắc phân trang hoặc virtual scrolling.
+
+**Quyết định thực hành:** dùng OnPush như ranh giới dữ liệu có notification rõ ràng, rồi đo để biết nó giảm được chi phí nào trong ứng dụng của bạn.
+
+## Checklist và tóm tắt
+
+- [ ] Tôi biết strategy mặc định của phiên bản Angular đang dùng.
+- [ ] Component nhận object/array input bằng reference mới khi dữ liệu thay đổi.
+- [ ] Mỗi item đã đổi trong list cũng có reference mới nếu truyền vào child OnPush.
+- [ ] Callback async cập nhật signal, được AsyncPipe tiêu thụ hoặc gọi `markForCheck()`.
+- [ ] Binding của cha có cơ hội được đánh giá để truyền input mới xuống con.
+- [ ] Không mutate signal rồi dựa vào click khác để UI tình cờ cập nhật.
+- [ ] Không tạo input object/array mới vô điều kiện trong template hoặc getter.
+- [ ] Không dùng `detectChanges()` để che lỗi dependency hoặc mutation.
+- [ ] Test kiểm tra hành vi qua binding, event và async flow giống ứng dụng thật.
+
+Tóm lại, **OnPush bỏ qua view không có lý do cần kiểm tra; nó không giới hạn cập nhật chỉ ở input**. Input mới, event, signal dependency, AsyncPipe và `markForCheck()` đều là những cơ chế quan trọng.
+
+Mô hình dễ nhớ là: **state mới → notification đúng → view được kiểm tra → DOM chỉ đổi ở binding khác biệt**.
+
+## Tài liệu tham khảo và đi tiếp
+
+Các điểm về phiên bản và API được đối chiếu với tài liệu Angular chính thức:
+
+- [Skipping component subtrees](https://angular.dev/best-practices/skipping-subtrees) — các tình huống input, event và ranh giới OnPush.
+- [ChangeDetectionStrategy](https://angular.dev/api/core/ChangeDetectionStrategy) — strategy mặc định và tên API hiện hành.
+- [Signals trong component OnPush](https://angular.dev/guide/signals#reading-signals-in-onpush-components) — dependency giữa signal và template.
+- [AsyncPipe](https://angular.dev/api/common/AsyncPipe) — emission, đánh dấu view và tự unsubscribe.
+- [ChangeDetectorRef](https://angular.dev/api/core/ChangeDetectorRef) — đánh dấu, kiểm tra, detach và reattach.
+- [Zoneless](https://angular.dev/guide/zoneless) — notification và lưu ý kiểm thử không dùng Zone.js.
+- [Binding implementation trong Angular 18.2.14](https://github.com/angular/angular/blob/18.2.14/packages/core/src/render3/bindings.ts) — phép so sánh binding bằng `Object.is`.
+- [Pure literal structures trong Angular 18.2.14](https://github.com/angular/angular/blob/18.2.14/packages/compiler/src/template/pipeline/src/phases/pure_literal_structures.ts) — cách compiler biến literal trong template thành biểu thức có thể cache.
+
+<Cards>
+  <Card title="Signals, Zone.js và Change Detection" href="/docs/nen-tang/signals-va-zonejs" description="Phân biệt notification, scheduler và quá trình đồng bộ view." />
+  <Card title="Mutation object và UI không cập nhật" href="/docs/reactivity-state/mutation-va-ui-khong-cap-nhat" description="Đi sâu vào reference, pure pipe và cache dữ liệu dẫn xuất." />
+  <Card title="Signals" href="/docs/reactivity-state/signals" description="Thiết kế state reactive để component OnPush cập nhật đúng." />
+  <Card title="Profiling hiệu năng" href="/docs/testing-performance-deploy/profiling-performance" description="Đo lợi ích của OnPush trên một interaction có thể tái lập." />
+</Cards>

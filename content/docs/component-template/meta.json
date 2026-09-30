@@ -9,6 +9,7 @@
     "ng-template-va-template-ref",
     "giao-tiep-component",
     "lifecycle-hooks",
+    "onpush-strategy",
     "content-projection",
     "styling-component"
   ]
