@@ -1,4 +1,4 @@
 {
   "title": "Câu hỏi phỏng vấn",
-  "pages": ["ngmodule-va-standalone-component"]
+  "pages": ["ngmodule-va-standalone-component", "signals-vs-rxjs"]
 }
