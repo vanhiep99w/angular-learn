@@ -112,9 +112,100 @@ Angular kiểm tra view cần cập nhật
 Binding đổi → ghi phần khác biệt vào DOM
 ```
 
-Dòng `this.count = 10` chỉ làm **state đổi**. Nếu nó chạy trong một callback mà không thông báo cho Angular kiểm tra component OnPush, UI có thể vẫn hiển thị số cũ.
+Dòng `this.count = 10` chỉ đổi giá trị trong bộ nhớ. Nó không tự sửa text trong DOM, cũng không tự đánh dấu component OnPush cần kiểm tra. Cùng một dòng gán có thể cho kết quả UI khác nhau tùy nơi nó chạy.
 
-**Câu hỏi quan trọng:** sau thao tác ghi này, cơ chế nào bảo đảm view được kiểm tra?
+**Ví dụ cụ thể: gán trong click và gán trong timer.** Component dưới đây bắt đầu với `count = 0`:
+
+```ts title="notification-demo.component.ts"
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+
+@Component({
+  selector: 'app-notification-demo',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <p>Count trên UI: {{ count }}</p>
+    <button type="button" (click)="setNow()">Gán 10 ngay</button>
+    <button type="button" (click)="setLater()">Gán 10 sau 2 giây</button>
+  `,
+})
+export class NotificationDemoComponent {
+  count = 0;
+
+  setNow(): void {
+    this.count = 10;
+  }
+
+  setLater(): void {
+    setTimeout(() => {
+      this.count = 10;
+      console.log('Count trong bộ nhớ:', this.count);
+    }, 2_000);
+  }
+}
+```
+
+**Trường hợp 1 — bấm “Gán 10 ngay”.** Angular quản lý listener `(click)` này, nên nó đánh dấu view cần kiểm tra. Handler gán `count = 10` ngay trước lượt kiểm tra đó. Template đọc `10` và Angular đổi text trên màn hình từ `0` thành `10`.
+
+```text
+(click) → view được đánh dấu → count = 10 → kiểm tra template → UI hiện 10
+```
+
+UI cập nhật nhờ notification từ **event**, không phải vì phép gán field tự có khả năng thông báo.
+
+**Trường hợp 2 — tải lại trang, rồi bấm “Gán 10 sau 2 giây”.** Đừng thử ngay sau trường hợp 1 mà không reset, vì UI lúc đó đã là `10`. Để quan sát lỗi, chờ timer mà không bấm nút khác hoặc tạo notification khác cho view.
+
+| Thời điểm | Việc xảy ra | `count` trong bộ nhớ | Text trên UI |
+| --- | --- | --- | --- |
+| Vừa render | Angular đọc giá trị ban đầu | `0` | `0` |
+| Bấm nút đặt trễ | `setLater()` chỉ đăng ký timer; chưa chạy dòng gán | `0` | `0` |
+| Lượt kiểm tra sau click | Angular đọc `count`, rồi view trở về trạng thái sạch | `0` | `0` |
+| Sau 2 giây | Callback gán `count = 10`, console in `10` | `10` | Vẫn `0` nếu không có lý do khác để kiểm tra view |
+
+Điểm dễ nhầm là: **click và callback timer là hai lần thực thi khác nhau**. Click đánh dấu view cho lượt kiểm tra lúc đó. Nó không đánh dấu view mãi mãi cho mọi callback được đăng ký trong handler.
+
+Sau khi console đã in `10`, bấm **“Gán 10 ngay”**. UI sẽ hiện `10` vì click mới lại đánh dấu view. Lúc này field trong bộ nhớ vốn đã là `10`; event mới chỉ giúp Angular đọc lại giá trị đó.
+
+<Callout type="info" title="Ngay cả khi timer chạy trong Zone.js">
+  Zone.js có thể làm Angular chạy một lượt change detection khi timer hoàn tất. Nhưng component OnPush đã sạch vẫn có thể bị bỏ qua. Trong zoneless, phép gán field thường trong timer cũng không tự lên lịch kiểm tra. Vì vậy, điều cần bổ sung là notification cho view này, không chỉ mong timer hoặc một tick toàn cục làm thay việc đó.
+</Callout>
+
+**Cách sửa khi giữ field thường:** thêm `ChangeDetectorRef` và `inject` vào import từ `@angular/core`, rồi thay phần xử lý timer trong class bằng:
+
+```ts
+private readonly cdr = inject(ChangeDetectorRef);
+
+setLater(): void {
+  setTimeout(() => {
+    this.count = 10;
+    this.cdr.markForCheck(); // Báo rõ: view này cần được kiểm tra lại.
+  }, 2_000);
+}
+```
+
+`markForCheck()` đánh dấu view để Angular đồng bộ. Nó không ghi DOM ngay tại dòng gọi; UI cập nhật trong lượt kiểm tra được lên lịch sau đó.
+
+**Cách sửa bằng signal:** import `signal` từ `@angular/core`, đổi field và method như sau:
+
+```ts
+readonly count = signal(0);
+
+setNow(): void {
+  this.count.set(10);
+}
+
+setLater(): void {
+  setTimeout(() => {
+    this.count.set(10);
+  }, 2_000);
+}
+```
+
+Template phải đổi từ `{{ count }}` sang `{{ count() }}`. Angular ghi nhận template đọc signal này, nên khi giá trị đổi từ `0` sang `10`, signal update thông báo cho view cần cập nhật. Không cần gọi thêm `markForCheck()` trong callback.
+
+Timer trong ví dụ chỉ dùng để minh họa cơ chế. Với component thực tế, hủy timer khi component bị hủy nếu công việc không còn cần thiết.
+
+**Câu hỏi quan trọng:** sau thao tác ghi này, cơ chế nào bảo đảm view được kiểm tra? Trong ba cách trên, câu trả lời lần lượt là **event Angular quản lý**, **`markForCheck()`** và **signal được template đọc**.
 
 ## Cấu hình và khác biệt phiên bản
 
