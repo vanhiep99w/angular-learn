@@ -1,4 +1,9 @@
 {
   "title": "Câu hỏi phỏng vấn",
-  "pages": ["ngmodule-va-standalone-component", "signals-vs-rxjs"]
+  "pages": [
+    "ngmodule-va-standalone-component",
+    "signals-vs-rxjs",
+    "service-lazy-loading-va-provider-scope",
+    "code-splitting-lazy-loading-va-deferrable-views"
+  ]
 }
