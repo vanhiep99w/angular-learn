@@ -402,7 +402,33 @@ Các page con đi lên route injector và gặp cùng một `WorkspaceContext`. 
 
 ### Guard và resolver chạy trước component
 
-Giả sử bước payment chỉ được mở khi address hợp lệ:
+Giả sử checkout có hai page con là address và payment. Chúng ta muốn chỉ cho vào payment sau khi địa chỉ đã hợp lệ.
+
+Trước hết, `CheckoutShellComponent` chỉ là **component layout cha** của flow checkout. Bản thân nó không phải API đặc biệt của Angular:
+
+```ts
+@Component({
+  standalone: true,
+  selector: 'app-checkout-shell',
+  imports: [RouterOutlet],
+  providers: [CheckoutContext],
+  template: `<router-outlet />`,
+})
+export class CheckoutShellComponent {}
+```
+
+Router tạo shell trước, sau đó render `AddressPage` hoặc `PaymentPage` vào `<router-outlet>` của shell:
+
+```text
+CheckoutShellComponent
+└── <router-outlet>
+    ├── AddressPage
+    └── PaymentPage
+```
+
+Nếu chỉ các component đã render cần `CheckoutContext`, đặt provider ở shell như trên là hợp lý. Nhưng guard lại chạy **trước khi Router tạo `CheckoutShellComponent`**. Vì thế guard chưa thể nhìn thấy provider nằm trên component này.
+
+Context và guard của ví dụ:
 
 ```ts
 @Injectable()
@@ -415,7 +441,7 @@ const checkoutGuard: CanActivateChildFn = () => {
 };
 ```
 
-Route cung cấp context trước khi guard chạy:
+Muốn guard dùng được `CheckoutContext`, hãy chuyển provider lên route. Route injector được tạo trong quá trình Router xử lý điều hướng, nên guard có thể inject context trước khi component xuất hiện:
 
 ```ts
 export const routes: Routes = [
@@ -423,6 +449,7 @@ export const routes: Routes = [
     path: 'checkout',
     providers: [CheckoutContext],
     canActivateChild: [checkoutGuard],
+    component: CheckoutShellComponent,
     children: [
       { path: 'address', component: AddressPage },
       { path: 'payment', component: PaymentPage },
@@ -431,9 +458,9 @@ export const routes: Routes = [
 ];
 ```
 
-Nếu `CheckoutContext` chỉ nằm trong `providers` của `CheckoutShellComponent`, guard không dùng được vì lúc guard chạy, shell còn chưa tồn tại.
+Lúc này không khai báo lại `CheckoutContext` trong `providers` của shell. Nếu cung cấp ở cả hai nơi, shell và các page con có thể nhận instance component-scoped khác với instance mà guard lấy từ route injector.
 
-Đó là một lý do rất cụ thể để chọn route scope: dependency cần có mặt trong **quá trình điều hướng**, không chỉ sau khi UI đã render.
+Đây là lý do rất cụ thể để chọn route scope: dependency phải có mặt trong **quá trình điều hướng**, không chỉ sau khi UI đã render. Phần [Mổ xẻ ba cách đặt CheckoutStore](#mổ-xẻ-ba-cách-đặt-checkoutstore) bên dưới sẽ so sánh đầy đủ root, shell component và route.
 
 ### Mỗi feature một cấu hình
 
