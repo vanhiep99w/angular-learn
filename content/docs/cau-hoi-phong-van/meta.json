@@ -4,6 +4,7 @@
     "ngmodule-va-standalone-component",
     "signals-vs-rxjs",
     "service-lazy-loading-va-provider-scope",
-    "code-splitting-lazy-loading-va-deferrable-views"
+    "code-splitting-lazy-loading-va-deferrable-views",
+    "chon-scope-cho-angular-service"
   ]
 }

@@ -1,0 +1,754 @@
+---
+title: Chọn scope cho Angular service
+description: Xác định khi nào nên giữ state trong component, dùng service ở root, hoặc tạo instance riêng tại component và route.
+---
+
+<Callout type="info" title="Chốt nhanh trước khi đi sâu">
+  Nếu bạn đang nghĩ “để hết service ở root cho khỏe, ứng dụng vẫn chạy mà?” thì bạn **không sai**. Root là lựa chọn tốt trong rất nhiều trường hợp. Chỉ khi state, cấu hình hoặc resource thực sự thuộc về một vùng UI nhỏ hơn, chúng ta mới cần kéo scope xuống route hay component.
+</Callout>
+
+## Mục lục
+
+- [Bắt đầu từ hai câu hỏi khác nhau](#bắt-đầu-từ-hai-câu-hỏi-khác-nhau)
+  - [Logic có thật sự cần một service](#logic-có-thật-sự-cần-một-service)
+  - [Instance này thuộc về ai](#instance-này-thuộc-về-ai)
+- [Root không có tội](#root-không-có-tội)
+  - [Khi root là lựa chọn đẹp nhất](#khi-root-là-lựa-chọn-đẹp-nhất)
+  - [Cái giá đi kèm một singleton toàn app](#cái-giá-đi-kèm-một-singleton-toàn-app)
+- [Khi component tự giữ state là đủ](#khi-component-tự-giữ-state-là-đủ)
+  - [Một ví dụ không cần store](#một-ví-dụ-không-cần-store)
+  - [Khi nào component bắt đầu quá tải](#khi-nào-component-bắt-đầu-quá-tải)
+- [Component scoped service đáng dùng ở đâu](#component-scoped-service-đáng-dùng-ở-đâu)
+  - [Một editor nhiều mảnh](#một-editor-nhiều-mảnh)
+  - [Hai editor trên cùng màn hình](#hai-editor-trên-cùng-màn-hình)
+  - [Resource cần dừng cùng UI](#resource-cần-dừng-cùng-ui)
+- [Route scoped service giải quyết chuyện gì](#route-scoped-service-giải-quyết-chuyện-gì)
+  - [Context cho cả một feature](#context-cho-cả-một-feature)
+  - [Guard và resolver chạy trước component](#guard-và-resolver-chạy-trước-component)
+  - [Mỗi feature một cấu hình](#mỗi-feature-một-cấu-hình)
+  - [Lưu ý về vòng đời route injector](#lưu-ý-về-vòng-đời-route-injector)
+- [Mổ xẻ ba cách đặt CheckoutStore](#mổ-xẻ-ba-cách-đặt-checkoutstore)
+  - [Đặt ở root](#đặt-ở-root)
+  - [Đặt ở shell component](#đặt-ở-shell-component)
+  - [Đặt ở route](#đặt-ở-route)
+- [Những bẫy scope thường gặp](#những-bẫy-scope-thường-gặp)
+  - [Scope quá rộng](#scope-quá-rộng)
+  - [Scope quá hẹp](#scope-quá-hẹp)
+  - [Local service không kéo mọi dependency xuống local](#local-service-không-kéo-mọi-dependency-xuống-local)
+- [Scope DI không quyết định chunk](#scope-di-không-quyết-định-chunk)
+- [Quy trình chốt scope](#quy-trình-chốt-scope)
+- [Kiểm thử đúng instance](#kiểm-thử-đúng-instance)
+- [Tóm tắt](#tóm-tắt)
+- [Tài liệu tham khảo](#tài-liệu-tham-khảo)
+- [Đọc tiếp](#đọc-tiếp)
+
+## Bắt đầu từ hai câu hỏi khác nhau
+
+Đây là chỗ rất nhiều dự án Angular bị “rối”. Thấy component dài một chút, chúng ta lập tức tách ra `SomethingService`. Tạo service xong lại tiện tay thêm `providedIn: 'root'`. Vậy là một state vốn thuộc một màn hình đã trở thành state dùng chung cho cả ứng dụng.
+
+Muốn tránh chuyện đó, hãy tách bài toán thành hai câu hỏi:
+
+1. **Logic có cần được tách thành một class service không?**
+2. **Nếu đã là service, instance của nó thuộc về ai?**
+
+Hai câu hỏi nghe gần giống nhau nhưng thực ra giải quyết hai việc hoàn toàn khác nhau.
+
+```text
+Logic hoặc state mới
+        │
+        ├── chỉ một component dùng, còn gọn
+        │       └── để ngay trong component
+        │
+        └── cần service vì chia sẻ hoặc đủ phức tạp
+                │
+                ├── cả app dùng chung ─────────► root
+                ├── một feature dùng chung ────► route
+                └── một cây UI dùng chung ─────► component
+```
+
+Có thể hình dung đơn giản thế này:
+
+- **Root service** giống bảng thông báo chung của cả công ty.
+- **Route service** giống bảng công việc của một team.
+- **Component service** giống cuốn sổ riêng trên bàn của một người.
+
+### Logic có thật sự cần một service
+
+Một component hoàn toàn có thể tự giữ:
+
+- Signal phục vụ template của chính nó.
+- Trạng thái mở hoặc đóng popover.
+- Item đang được chọn.
+- Giá trị form tạm thời.
+- Một listener nhỏ được cleanup trong lifecycle.
+- Logic hiển thị gắn trực tiếp với UI.
+
+Chỉ nên tách service khi có một lợi ích nhìn thấy được, chẳng hạn:
+
+- Nhiều component cần dùng chung state.
+- Logic validation, history hoặc đồng bộ dữ liệu đã đủ lớn.
+- Muốn giấu WebSocket, storage hoặc SDK phía sau một API dễ dùng hơn.
+- Muốn thay implementation bằng fake trong test.
+- Một component làm owner, nhưng nhiều component con đều cần context của nó.
+
+<Callout type="idea" title="Đừng tách chỉ để file component ngắn hơn">
+  Một component 150 dòng nhưng trách nhiệm rõ ràng vẫn dễ bảo trì hơn ba file service vòng qua vòng lại mà không file nào có owner rõ ràng.
+</Callout>
+
+### Instance này thuộc về ai
+
+Giả sử service là cần thiết. Câu hỏi tiếp theo không phải “đặt root cho tiện được không?”, mà là:
+
+> Khi nào state này hết giá trị, và những ai cần nhìn thấy cùng một instance?
+
+| Owner thật sự | Nơi đặt provider thường hợp lý | Ví dụ |
+| --- | --- | --- |
+| Cả Angular application | `providedIn: 'root'` | Auth session, telemetry, repository stateless. |
+| Một feature điều hướng | `providers` của route | Workspace context, checkout context cho guard và các page con. |
+| Một cây UI | `providers` của component | Editor session, dialog state, tabs context. |
+| Một component đơn giản | Không cần service | Toggle, selection, state trình bày cục bộ. |
+
+Nói nôm na: scope chính là câu trả lời cho câu hỏi **“ai sở hữu instance này?”**.
+
+## Root không có tội
+
+`providedIn: 'root'` không phải anti-pattern. Trái lại, đây là lựa chọn rất tốt cho phần lớn service hạ tầng.
+
+### Khi root là lựa chọn tốt nhất
+
+Ví dụ một repository chỉ gọi API:
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class ProductsRepository {
+  private readonly http = inject(HttpClient);
+
+  getById(id: string) {
+    return this.http.get<Product>(`/api/products/${id}`);
+  }
+}
+```
+
+Service này không giữ tab đang chọn, form đang nhập hay draft của một page. Nó chỉ cung cấp năng lực lấy dữ liệu sản phẩm. Để root vừa gọn, vừa đúng nghĩa.
+
+Root thường hợp với:
+
+- Repository hoặc API client không giữ state màn hình.
+- Auth/session thật sự dùng chung toàn app.
+- Logger và telemetry.
+- Feature flag toàn cục.
+- Cache được thiết kế rõ ràng là cache cấp application.
+- Store mà mọi consumer **phải** nhìn cùng một state.
+
+Nếu service của bạn thuộc nhóm này, cứ để root. Không cần “hạ scope” chỉ vì nghe nói local provider tốt hơn.
+
+### Cái giá đi kèm một singleton toàn app
+
+Vấn đề chỉ bắt đầu khi service có mutable state hoặc resource cục bộ. Khi chọn root, bạn đang đồng ý với các điều sau:
+
+- Mọi consumer đi tới root provider sẽ dùng cùng instance.
+- State sống rất lâu, thường tới lúc app bị hủy.
+- Rời một page không tự xóa state.
+- Socket, timer hoặc subscription không tự dừng theo page.
+- Root service không thể nhìn xuống child injector để lấy config chỉ có ở route/component.
+
+Ví dụ `CheckoutStore` ở root hoàn toàn có thể chạy ngon. Nhưng lúc đó chính ứng dụng phải nhớ:
+
+- Khi nào gọi `reset()`?
+- Logout có xóa địa chỉ cũ không?
+- User mới đăng nhập có nhìn thấy state của user trước không?
+- Nếu có hai checkout context, phân biệt chúng bằng ID nào?
+
+Root không gây ra bug. **Root chỉ giao toàn bộ trách nhiệm quản lý vòng đời lại cho bạn.**
+
+## Khi component tự giữ state là đủ
+
+### Một ví dụ không cần store
+
+Hãy nhìn một quantity picker rất bình thường:
+
+```ts
+import { Component, computed, input, signal } from '@angular/core';
+
+@Component({
+  standalone: true,
+  selector: 'app-quantity-picker',
+  template: `
+    <button type="button" (click)="decrement()">−</button>
+    <span>{{ quantity() }}</span>
+    <button type="button" (click)="increment()">+</button>
+    <p>Tạm tính: {{ subtotal() }}</p>
+  `,
+})
+export class QuantityPickerComponent {
+  readonly unitPrice = input.required<number>();
+  readonly quantity = signal(1);
+  readonly subtotal = computed(() => this.unitPrice() * this.quantity());
+
+  increment(): void {
+    this.quantity.update((value) => value + 1);
+  }
+
+  decrement(): void {
+    this.quantity.update((value) => Math.max(1, value - 1));
+  }
+}
+```
+
+`quantity` chỉ phục vụ template này. Component biến mất thì state cũng hết nhiệm vụ. Tạo thêm `QuantityPickerStore` ở đây chỉ làm bạn phải mở thêm một file để hiểu cùng một câu chuyện.
+
+Đây chính là trường hợp mà câu hỏi “sao không để luôn trong component?” có đáp án rất rõ: **để trong component là đúng rồi**.
+
+### Khi nào component bắt đầu quá tải
+
+Bây giờ tưởng tượng editor không còn một khung text đơn giản nữa. Nó có:
+
+- Toolbar thay đổi format.
+- Canvas chỉnh nội dung.
+- Autosave chạy nền.
+- Undo/redo history.
+- Status bar báo đã lưu hay chưa.
+
+Bạn vẫn có thể nhét tất cả vào `EditorComponent`, rồi truyền `input` và `output` qua từng tầng. Không sai. Nhưng khi ba, bốn component con cùng xoay quanh một draft, service cục bộ bắt đầu “đáng tiền”: nó trở thành context chung cho cả editor mà không biến draft thành state toàn app.
+
+## Component scoped service đáng dùng ở đâu
+
+### Một editor nhiều mảnh
+
+Trước hết, tạo store không tự provide ở root:
+
+```ts title="draft-store.ts"
+import { Injectable, computed, signal } from '@angular/core';
+
+@Injectable()
+export class DraftStore {
+  private readonly contentState = signal('');
+  private readonly savedContent = signal('');
+
+  readonly content = this.contentState.asReadonly();
+  readonly dirty = computed(
+    () => this.contentState() !== this.savedContent(),
+  );
+
+  update(content: string): void {
+    this.contentState.set(content);
+  }
+
+  markSaved(): void {
+    this.savedContent.set(this.contentState());
+  }
+}
+```
+
+Sau đó để editor shell làm owner:
+
+```ts title="editor-shell.component.ts"
+import { Component } from '@angular/core';
+import { DraftStore } from './draft-store';
+import { EditorCanvasComponent } from './editor-canvas.component';
+import { EditorToolbarComponent } from './editor-toolbar.component';
+
+@Component({
+  standalone: true,
+  selector: 'app-editor-shell',
+  providers: [DraftStore],
+  imports: [EditorToolbarComponent, EditorCanvasComponent],
+  template: `
+    <app-editor-toolbar />
+    <app-editor-canvas />
+  `,
+})
+export class EditorShellComponent {}
+```
+
+Toolbar và canvas chỉ việc inject context gần nhất:
+
+```ts
+@Component({ /* ... */ })
+export class EditorToolbarComponent {
+  readonly draft = inject(DraftStore);
+}
+
+@Component({ /* ... */ })
+export class EditorCanvasComponent {
+  readonly draft = inject(DraftStore);
+}
+```
+
+Điểm hay ở đây không phải “service chuyên nghiệp hơn component”. Điểm hay là **owner được nói rõ bằng code**: editor shell sinh ra draft, các child dùng chung draft, shell biến mất thì draft cũng hết vòng đời.
+
+Bạn vẫn có thể truyền input/output nếu cây component còn nông. Local service chỉ là một lựa chọn để chia sẻ context, không phải luật bắt buộc.
+
+### Hai editor trên cùng màn hình
+
+Đây là lúc khác biệt với root hiện ra rõ nhất:
+
+```html
+<app-editor-shell />
+<app-editor-shell />
+```
+
+Angular tạo hai shell, đồng nghĩa có hai `ElementInjector` và hai `DraftStore`:
+
+```text
+Editor A ──► DraftStore A
+  ├── Toolbar A
+  └── Canvas A
+
+Editor B ──► DraftStore B
+  ├── Toolbar B
+  └── Canvas B
+```
+
+Gõ ở editor A không làm editor B “nhảy chữ”. Undo của A cũng không động vào history của B.
+
+Nếu dùng root, bạn vẫn giải quyết được bằng `Map<editorId, Draft>`. Nhưng hãy nhìn phần việc phát sinh:
+
+1. Mọi consumer phải cầm đúng `editorId`.
+2. Mọi lời gọi phải truyền ID.
+3. Khi editor đóng, phải nhớ xóa entry.
+4. ID sai là state chảy sang editor khác.
+
+Component scope không tạo ra năng lực mới. Nó chỉ giúp Angular quản lý phần phân vùng này thay bạn.
+
+### Resource cần dừng cùng UI
+
+Một ví dụ khác là live order feed:
+
+```ts
+import { DestroyRef, Injectable, inject, signal } from '@angular/core';
+
+@Injectable()
+export class OrderFeed {
+  private readonly socket = new WebSocket('wss://example.test/orders');
+  private readonly messagesState = signal<readonly string[]>([]);
+
+  readonly messages = this.messagesState.asReadonly();
+
+  constructor() {
+    this.socket.addEventListener('message', (event) => {
+      this.messagesState.update((items) => [...items, String(event.data)]);
+    });
+
+    inject(DestroyRef).onDestroy(() => this.socket.close());
+  }
+}
+```
+
+Page sở hữu feed:
+
+```ts
+@Component({
+  standalone: true,
+  providers: [OrderFeed],
+  template: `...`,
+})
+export class LiveOrdersPage {
+  readonly feed = inject(OrderFeed);
+}
+```
+
+Khi page bị destroy, `OrderFeed` cũng bị destroy và socket được đóng.
+
+Nhưng cần nói thật: nếu chỉ một page dùng socket và logic rất ngắn, đặt socket thẳng trong component rồi đóng ở `ngOnDestroy` cũng hoàn toàn ổn. Chỉ tách `OrderFeed` khi bạn có reconnect, parse message, nhiều child cùng dùng hoặc muốn test protocol riêng.
+
+<Callout type="idea" title="Tách logic và chọn scope là hai việc riêng">
+  Bạn có thể giữ socket trong component. Bạn cũng có thể tách socket thành service nhưng vẫn provide tại component. “Đã là service” không kéo theo “phải là root”.
+</Callout>
+
+## Route scoped service giải quyết chuyện gì
+
+Component provider rất hợp với UI subtree. Nhưng Router còn có một thời điểm đặc biệt: guard và resolver chạy **trước khi component được tạo**. Đây là vùng mà route provider phát huy tác dụng.
+
+### Context cho cả một feature
+
+Giả sử workspace có ba page: overview, members và settings. Cả ba đều cần cùng context của workspace hiện tại.
+
+```ts
+import { Routes } from '@angular/router';
+import { WorkspaceContext } from './workspace-context';
+
+export const WORKSPACE_ROUTES: Routes = [
+  {
+    path: ':workspaceId',
+    providers: [WorkspaceContext],
+    children: [
+      {
+        path: 'overview',
+        loadComponent: () =>
+          import('./overview.page').then((m) => m.OverviewPage),
+      },
+      {
+        path: 'members',
+        loadComponent: () =>
+          import('./members.page').then((m) => m.MembersPage),
+      },
+      {
+        path: 'settings',
+        loadComponent: () =>
+          import('./settings.page').then((m) => m.SettingsPage),
+      },
+    ],
+  },
+];
+```
+
+Các page con đi lên route injector và gặp cùng một `WorkspaceContext`. Page ở ngoài workspace không thấy provider này.
+
+Đặt context ở root vẫn có thể chạy. Khi đó service phải tự theo dõi “workspace hiện tại là ai” và tự reset lúc URL đổi. Route scope chỉ giúp ranh giới feature hiện ra ngay trong route config.
+
+### Guard và resolver chạy trước component
+
+Giả sử bước payment chỉ được mở khi address hợp lệ:
+
+```ts
+@Injectable()
+export class CheckoutContext {
+  readonly canContinue = signal(false);
+}
+
+const checkoutGuard: CanActivateChildFn = () => {
+  return inject(CheckoutContext).canContinue();
+};
+```
+
+Route cung cấp context trước khi guard chạy:
+
+```ts
+export const routes: Routes = [
+  {
+    path: 'checkout',
+    providers: [CheckoutContext],
+    canActivateChild: [checkoutGuard],
+    children: [
+      { path: 'address', component: AddressPage },
+      { path: 'payment', component: PaymentPage },
+    ],
+  },
+];
+```
+
+Nếu `CheckoutContext` chỉ nằm trong `providers` của `CheckoutShellComponent`, guard không dùng được vì lúc guard chạy, shell còn chưa tồn tại.
+
+Đó là một lý do rất cụ thể để chọn route scope: dependency cần có mặt trong **quá trình điều hướng**, không chỉ sau khi UI đã render.
+
+### Mỗi feature một cấu hình
+
+Route provider còn giải quyết một bài toán mà root service không tự làm được: cùng một abstraction nhưng mỗi feature cần config khác nhau.
+
+```ts
+import { InjectionToken } from '@angular/core';
+
+export const USERS_API_URL = new InjectionToken<string>('users.api-url');
+
+@Injectable()
+export class UsersApi {
+  private readonly http = inject(HttpClient);
+  private readonly apiUrl = inject(USERS_API_URL);
+
+  list() {
+    return this.http.get<readonly User[]>(`${this.apiUrl}/users`);
+  }
+}
+```
+
+Public route dùng endpoint public:
+
+```ts
+{
+  path: 'users',
+  providers: [
+    UsersApi,
+    { provide: USERS_API_URL, useValue: '/api/public' },
+  ],
+  component: PublicUsersPage,
+}
+```
+
+Admin route dùng endpoint admin:
+
+```ts
+{
+  path: 'admin/users',
+  providers: [
+    UsersApi,
+    { provide: USERS_API_URL, useValue: '/api/admin' },
+  ],
+  component: AdminUsersPage,
+}
+```
+
+Bây giờ mỗi route có một `UsersApi` được lắp ráp bằng config gần nó nhất.
+
+Nếu `UsersApi` là một root instance, nó được tạo trong root injector. Root injector chỉ nhìn lên cha, không nhìn xuống route con. Vì thế nó không thể tự “ngửi” ra `USERS_API_URL` của route hiện tại.
+
+### Lưu ý về vòng đời route injector
+
+Đây là chỗ dễ hiểu nhầm nhất:
+
+> Route-scoped không đồng nghĩa chắc chắn “mỗi lần quay lại URL sẽ có instance mới”.
+
+Route scope bảo đảm vùng **phân giải token**. Còn injector có được giữ lại hay không phụ thuộc phiên bản Angular Router, route config và `RouteReuseStrategy`.
+
+Nếu yêu cầu là “UI biến mất thì instance phải chết ngay”, component provider thường dễ dự đoán hơn. Nếu vẫn cần route provider cho guard/resolver, hãy kiểm tra đúng hành vi Router của dự án và thiết kế reset rõ ràng.
+
+## Mổ xẻ ba cách đặt CheckoutStore
+
+Checkout là ví dụ hay vì cả ba đáp án dưới đây đều có thể đúng. Khác biệt nằm ở sản phẩm muốn state sống bao lâu.
+
+### Đặt ở root
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class CheckoutStore {
+  readonly address = signal<Address | null>(null);
+  readonly payment = signal<Payment | null>(null);
+
+  reset(): void {
+    this.address.set(null);
+    this.payment.set(null);
+  }
+}
+```
+
+Root hợp lý khi:
+
+- Toàn app chỉ có một checkout session.
+- Người dùng rời checkout rồi quay lại vẫn cần giữ dữ liệu.
+- Header hoặc feature khác cần đọc trạng thái checkout.
+- Team đã xác định rõ lúc reset: đặt hàng thành công, hủy flow, logout hoặc đổi account.
+
+Trong bối cảnh này, để root không chỉ “không sao” mà còn đúng yêu cầu.
+
+Cái cần canh là những đường thoát bất ngờ. Ví dụ user A nhập địa chỉ, logout giữa chừng, user B đăng nhập. Nếu luồng logout quên gọi `reset()`, dữ liệu cũ vẫn nằm nguyên trong singleton.
+
+### Đặt ở shell component
+
+Nếu checkout chỉ là một phiên UI và không cần guard inject store, shell component có thể làm owner:
+
+```ts
+@Injectable()
+export class CheckoutStore {
+  readonly address = signal<Address | null>(null);
+  readonly payment = signal<Payment | null>(null);
+}
+
+@Component({
+  standalone: true,
+  selector: 'app-checkout-shell',
+  providers: [CheckoutStore],
+  imports: [RouterOutlet],
+  template: `<router-outlet />`,
+})
+export class CheckoutShellComponent {}
+```
+
+```ts
+export const routes: Routes = [
+  {
+    path: 'checkout',
+    component: CheckoutShellComponent,
+    children: [
+      { path: 'address', component: AddressPage },
+      { path: 'payment', component: PaymentPage },
+      { path: 'review', component: ReviewPage },
+    ],
+  },
+];
+```
+
+Address, payment và review cùng dùng store của shell. Khi shell bị destroy, store cũng đi theo. Không cần một lệnh reset toàn cục chỉ để dọn state của phiên UI này.
+
+### Đặt ở route
+
+Nếu guard, resolver và các page con đều cần context:
+
+```ts
+export const routes: Routes = [
+  {
+    path: 'checkout',
+    providers: [CheckoutStore],
+    canActivateChild: [checkoutGuard],
+    children: [
+      { path: 'address', component: AddressPage },
+      { path: 'payment', component: PaymentPage },
+      { path: 'review', component: ReviewPage },
+    ],
+  },
+];
+```
+
+Bảng dưới đây là cách đọc nhanh ba thiết kế:
+
+| Thiết kế | Ai dùng chung | Có chủ đích giữ state khi rời checkout | Guard/resolver dùng được | Owner được diễn đạt |
+| --- | --- | --- | --- | --- |
+| Root store | Toàn application | Có, trừ khi gọi reset | Có | Application session |
+| Shell component | Shell và UI descendants | Không khi shell bị destroy | Không trước khi shell được tạo | Checkout UI session |
+| Route provider | Route subtree | Phụ thuộc lifecycle/reuse của route injector | Có | Route feature context |
+
+Không có “đáp án Angular chuẩn” cho bảng này. Đáp án nằm ở vòng đời mà sản phẩm mong muốn.
+
+## Những bẫy scope thường gặp
+
+### Scope quá rộng
+
+Để mọi service ở root có thể khiến bạn gặp những lỗi khá khó chịu:
+
+- Hai editor vô tình dùng chung draft.
+- Dialog mới mở ra vẫn còn form của lần trước.
+- Socket của page cũ tiếp tục chạy âm thầm.
+- Checkout phải nhớ reset ở năm đường điều hướng khác nhau.
+- Service bắt đầu giữ `Map<id, state>` chỉ để mô phỏng nhiều instance.
+- Feature không liên quan cũng inject được một context vốn chỉ có nghĩa ở một vùng nhỏ.
+
+Nhưng đừng đánh đồng: các lỗi này đến từ **state và resource có owner cục bộ**, không phải vì root tự thân có vấn đề. Repository stateless ở root vẫn rất ổn.
+
+### Scope quá hẹp
+
+Hạ mọi provider xuống component cũng không phải thuốc tiên. Bạn có thể vô tình tạo:
+
+- Nhiều cache giống nhau.
+- Cùng một API request bị gọi lặp.
+- Mỗi widget mở một WebSocket riêng.
+- Nhiều `AuthService` với trạng thái đăng nhập khác nhau.
+- Provider con che provider cha khiến test hoặc behavior khó hiểu.
+
+Ví dụ sau đáng nghi nếu không có lý do rất rõ:
+
+```ts
+@Component({
+  providers: [AuthService, ProductsRepository],
+})
+export class ProductCardComponent {}
+```
+
+Mỗi product card có thể sinh một auth context và repository riêng. Trong đa số ứng dụng, card chỉ cần state hiển thị cục bộ; auth và repository vẫn nên lấy từ root.
+
+### Local service không kéo mọi dependency xuống local
+
+Nhiều người ngại component provider vì tưởng mọi dependency bên dưới cũng bị tạo lại. Thực tế Angular chỉ tạo instance cục bộ cho những token được provide ở scope đó.
+
+```text
+EditorShell ElementInjector
+└── DraftStore instance riêng
+    ├── inject(HttpClient) ──► root HttpClient
+    └── inject(Logger) ──────► root Logger
+```
+
+`DraftStore` là local. `HttpClient` và `Logger` vẫn dùng instance từ root nếu không có provider gần hơn che chúng.
+
+## Scope DI không quyết định chunk
+
+Đây là một đường ray khác hoàn toàn.
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class ReportsRepository {}
+```
+
+Nếu `ReportsRepository` chỉ được import từ lazy feature, code của nó vẫn có thể nằm trong lazy graph. Instance thuộc root không có nghĩa file JavaScript phải nằm trong initial chunk.
+
+Chiều ngược lại cũng đúng: một route-scoped service bị static import từ code eager vẫn có thể đi vào initial graph.
+
+Hãy nhớ hai câu ngắn gọn:
+
+- **Scope trả lời:** injector nào giữ instance?
+- **Import graph trả lời:** code nằm trong chunk nào?
+
+Nếu muốn đào sâu phần này, xem [Lazy loading service và phạm vi provider](/docs/cau-hoi-phong-van/service-lazy-loading-va-provider-scope).
+
+## Quy trình chốt scope
+
+Thay vì tranh luận “root hay không root” theo cảm giác, hãy đi lần lượt qua bảy bước sau:
+
+1. **Chỉ một component dùng, logic vẫn gọn?** Để ngay trong component.
+2. **Nhiều child của cùng một owner cần context?** Cân nhắc component-scoped service.
+3. **Có thể tồn tại hai owner cùng lúc?** Nếu state phải độc lập, đừng dùng một root instance trần.
+4. **Guard, resolver hoặc nhiều route con cần dependency?** Cân nhắc route provider.
+5. **Rời feature rồi quay lại có phải giữ state không?** Nếu có, root hoặc persistence có chủ đích có thể hợp hơn local provider.
+6. **State phải sống qua cả lần reload trình duyệt?** DI scope không giải quyết được; cần storage hoặc server.
+7. **Service stateless hoặc thật sự global?** `providedIn: 'root'` là lựa chọn gọn nhất.
+
+```text
+Chỉ một component dùng?
+├── Có, logic gọn ───────────────► component field
+└── Không / logic đã phức tạp
+    │
+    ├── nhiều UI instance độc lập ► component provider
+    ├── route callbacks cần dùng ─► route provider
+    └── cả app dùng cùng instance ► root provider
+```
+
+<Callout type="idea" title="Một câu để tự kiểm tra">
+  Nếu xóa component hoặc feature này khỏi màn hình, state/service đó còn ý nghĩa không? Nếu câu trả lời là “không”, root có thể đang rộng hơn owner thật.
+</Callout>
+
+## Kiểm thử đúng instance
+
+Scope đúng ở production nhưng test lấy nhầm injector thì kết quả vẫn gây hiểu lầm.
+
+Với root service, `TestBed.inject()` thường là đủ:
+
+```ts
+TestBed.configureTestingModule({
+  providers: [CheckoutStore],
+});
+
+const store = TestBed.inject(CheckoutStore);
+```
+
+Với component provider, `TestBed.inject(DraftStore)` không lấy instance của `EditorShellComponent`. Cần tạo component rồi đọc đúng injector:
+
+```ts
+const fixture = TestBed.createComponent(EditorShellComponent);
+const store = fixture.debugElement.injector.get(DraftStore);
+```
+
+Một bẫy khác: bạn provide fake ở root test nhưng component lại tự provide class thật. Provider gần component hơn sẽ thắng. Khi đó cần override metadata trước khi tạo fixture:
+
+```ts
+TestBed.overrideComponent(EditorShellComponent, {
+  set: {
+    providers: [
+      { provide: DraftStore, useClass: FakeDraftStore },
+    ],
+  },
+});
+```
+
+Với route provider, hãy test qua Router setup hoặc integration test đi vào đúng route. Inject token thẳng từ root test không tái hiện được route injector.
+
+## Tóm tắt
+
+- Root là mặc định tốt, không phải thứ cần né.
+- State đơn giản chỉ phục vụ một component thì cứ để trong component.
+- Tách thành service và chọn scope là hai quyết định riêng.
+- Component-scoped service có giá trị khi một UI owner có nhiều child, nhiều instance độc lập hoặc resource cần cleanup cùng UI.
+- Route-scoped service có giá trị khi guard, resolver, route con hoặc config feature cần cùng dependency.
+- Root checkout store hoàn toàn đúng nếu sản phẩm muốn một checkout session dùng chung và có reset policy rõ ràng.
+- Scope quá rộng tạo shared state ngoài ý muốn. Scope quá hẹp lại nhân bản cache, request và resource.
+- Local service vẫn dùng được dependency root; Angular không tạo lại toàn bộ dependency tree.
+- Scope DI không quyết định chunk. Import graph mới quyết định code được tải eager hay lazy.
+
+Câu chốt dễ nhớ nhất là:
+
+> **Đừng hỏi “service nên ở root hay không?”. Hãy hỏi “ai là owner thật sự của instance này?”.**
+
+## Tài liệu tham khảo
+
+- [Hierarchical injectors](https://angular.dev/guide/di/hierarchical-dependency-injection): cây `EnvironmentInjector`, `ElementInjector` và quy tắc provider gần nhất.
+- [Defining dependency providers](https://angular.dev/guide/di/defining-dependency-providers): các loại provider và vị trí đăng ký dependency.
+- [Define routes](https://angular.dev/guide/routing/define-routes): route-level providers và route tree.
+- [Angular DevTools Injector Tree](https://angular.dev/tools/devtools/injectors): quan sát token được phân giải từ injector nào.
+
+## Đọc tiếp
+
+<Cards>
+  <Card title="Dependency Injection" href="/docs/di-kien-truc/dependency-injection" description="Hiểu injector hierarchy, provider resolution và vòng đời instance." />
+  <Card title="Thiết kế service" href="/docs/di-kien-truc/service" description="Tách UI, use case, facade và repository theo trách nhiệm." />
+  <Card title="Provider và InjectionToken" href="/docs/di-kien-truc/provider-token" description="Cấu hình và thay implementation theo từng injector scope." />
+  <Card title="Lazy loading service" href="/docs/cau-hoi-phong-van/service-lazy-loading-va-provider-scope" description="Phân biệt provider scope với vị trí service trong bundle." />
+</Cards>
