@@ -97,18 +97,43 @@ Nói ngắn gọn: standalone không bỏ component, template hay DI. Nó chỉ 
 
 Trong kiến trúc dựa trên NgModule, một component không tự nói được template của nó có thể dùng gì. Angular nhìn vào `declarations` và `imports` của module chứa component đó. Trong standalone, component giữ danh sách khả năng template của chính mình.
 
-```text
-NgModule truyền thống                         Standalone
+```d2 title="NgModule và standalone cung cấp dependency template"
+direction: right
 
-ProductCardComponent                         ProductCardComponent
-        │                                            │
-        ▼                                            ▼
-ProductsModule                              imports: [CurrencyPipe]
-declarations: [ProductCardComponent]                │
-imports: [CommonModule]                             ▼
-        │                                  Template dùng currency
-        ▼
-Template dùng currency
+old: "NgModule\nProductCardComponent" {
+  width: 184
+  height: 58
+}
+
+module: "ProductsModule\ndeclarations:\nProductCardComponent\nimports: CommonModule" {
+  width: 192
+  height: 100
+}
+
+oldTemplate: "Template dùng currency" {
+  width: 200
+  height: 58
+}
+
+new: "Standalone\nProductCardComponent" {
+  width: 184
+  height: 58
+}
+
+pipe: "imports: CurrencyPipe" {
+  width: 192
+  height: 58
+}
+
+newTemplate: "Template dùng currency" {
+  width: 200
+  height: 58
+}
+
+old -> module
+module -> oldTemplate
+new -> pipe
+pipe -> newTemplate
 ```
 
 Sơ đồ không có nghĩa mọi dependency phải được lặp lại vô ích. Angular có thể biên dịch và tối ưu dependency theo cách riêng. Ý nghĩa thực tế cho người đọc mã là: mở file component, bạn thấy ngay template đó dựa vào API UI nào.
@@ -144,14 +169,43 @@ Không có `NgModule` không có nghĩa đặt toàn bộ component vào một t
 
 Standalone giảm phần mã nghi thức như sau:
 
-```text
-Tạo một màn hình mới
+```d2 title="Tạo màn hình: NgModule và standalone"
+direction: right
 
-Trước đây: tạo component → khai báo trong feature module →
-          import các module UI vào feature module → kiểm tra exports
+old: "NgModule\nTạo component" {
+  width: 130
+  height: 58
+}
 
-Hiện nay: tạo component → thêm đúng dependency template vào imports →
-          gắn component vào route hoặc component cha
+declare: "Khai báo trong\nfeature module" {
+  width: 136
+  height: 58
+}
+
+deps: "Import module UI\nKiểm tra exports" {
+  width: 152
+  height: 58
+}
+
+new: "Standalone\nTạo component" {
+  width: 130
+  height: 58
+}
+
+imports: "Thêm dependency\ntemplate vào imports" {
+  width: 184
+  height: 58
+}
+
+attach: "Gắn vào route\nhoặc component cha" {
+  width: 168
+  height: 58
+}
+
+old -> declare
+declare -> deps
+new -> imports
+imports -> attach
 ```
 
 Điểm cần giữ lại là kỷ luật thiết kế: component cha sở hữu state của màn hình, component con nhận input và phát sự kiện, service chứa logic không thuộc một template cụ thể.
@@ -204,22 +258,30 @@ Một component chỉ cần một trong `template` hoặc `templateUrl`. Tương
 
 Khi Angular gặp selector của component trong template cha, nó cần ba nhóm thông tin: class nào tạo state, template nào tạo DOM và dependency template nào được phép xuất hiện.
 
-```text
-Template của AppComponent
-        │
-        │ gặp <app-price-tag>
-        ▼
-PriceTagComponent metadata
-├── selector: app-price-tag
-├── templateUrl: price-tag.component.html
-├── imports: [CurrencyPipe]
-└── providers: [...] (nếu có)
-        │
-        ▼
-Angular tạo instance component
-        │
-        ├── inject dependency từ injector gần nhất
-        └── render template với amount()
+```d2 title="Angular tạo component khi selector khớp"
+direction: right
+
+template: "AppComponent\ngặp <app-price-tag>" {
+  width: 176
+  height: 58
+}
+
+metadata: "PriceTag metadata\nselector + templateUrl\nimports: CurrencyPipe\nproviders nếu có" {
+  width: 200
+  height: 100
+}
+
+instance: "Tạo instance\nInject từ injector gần\nnhất" {
+  width: 200
+  height: 79
+}
+
+render: "Render template\nvới amount()" {
+  width: 144
+  height: 58
+}
+
+template -> metadata -> instance -> render
 ```
 
 `imports` không phải danh sách file TypeScript mà class cần chạy. Nó là danh sách các khối xây dựng **có thể xuất hiện trong HTML template**. Phân biệt này sẽ tránh rất nhiều lỗi lúc mới học.
@@ -451,21 +513,44 @@ export const appConfig: ApplicationConfig = {
 
 ### Luồng khởi động
 
-```text
-index.html
-    │
-    ▼
-main.ts
-bootstrapApplication(AppComponent, appConfig)
-    │
-    ├── tạo injector cấp ứng dụng từ appConfig.providers
-    │
-    ├── tạo AppComponent
-    │
-    ▼
-AppComponent template
-    ├── <router-outlet />: router chọn component của URL hiện tại
-    └── component con: Angular render theo imports của từng component
+```d2 title="Bootstrap và render component con"
+direction: right
+
+entry: "index.html\nmain.ts" {
+  width: 130
+  height: 58
+}
+
+bootstrap: "bootstrapApplication\nAppComponent +\nappConfig" {
+  width: 184
+  height: 79
+}
+
+injector: "App injector\nappConfig.providers" {
+  width: 176
+  height: 58
+}
+
+app: "Tạo AppComponent\nrender template" {
+  width: 152
+  height: 58
+}
+
+router: "<router-outlet>\nChọn theo URL" {
+  width: 144
+  height: 58
+}
+
+children: "Component con\nRender theo imports" {
+  width: 176
+  height: 58
+}
+
+entry -> bootstrap
+bootstrap -> injector
+bootstrap -> app
+app -> router
+app -> children
 ```
 
 Khi ứng dụng không dùng router, root component có thể render component con trực tiếp. Router không phải điều kiện để dùng standalone; nó chỉ là một cách phổ biến để ghép các màn hình.

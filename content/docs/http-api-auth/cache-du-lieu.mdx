@@ -89,19 +89,44 @@ Một ứng dụng có thể có nhiều cache cùng hoạt động. Mỗi lớp
 và phạm vi khác nhau. Chọn lớp dựa trên nơi có đủ ngữ cảnh để trả lời: dữ liệu này
 thuộc ai, có được stale không và mutation nào làm nó cũ?
 
-```text
-┌─────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│ Component / │─────►│ TaskApi + cache  │─────►│ HttpClient /     │
-│ facade      │◄─────│ domain policy    │◄─────│ interceptor      │
-└─────────────┘      └─────────┬────────┘      └─────────┬────────┘
-                               │                         │
-                        memory / IndexedDB         HTTP cache / SW
-                               │                         │
-                               └──────────┬──────────────┘
-                                          ▼
-                               ┌──────────────────┐
-                               │ CDN / API server │
-                               └──────────────────┘
+```d2 title="Các tầng cache từ ứng dụng tới HTTP"
+direction: right
+
+ui: "Component / facade" {
+  width: 168
+  height: 58
+}
+
+cache: "TaskApi + cache\nDomain policy" {
+  width: 144
+  height: 58
+}
+
+http: "HttpClient /\ninterceptor" {
+  width: 130
+  height: 58
+}
+
+local: "Memory / IndexedDB" {
+  width: 168
+  height: 58
+}
+
+transport: "HTTP cache / SW" {
+  width: 144
+  height: 58
+}
+
+server: "CDN / API server" {
+  width: 152
+  height: 58
+}
+
+ui <-> cache
+cache <-> http
+cache -> local
+http -> transport
+transport -> server
 ```
 
 Không cần bật mọi lớp. Với một ứng dụng nội bộ nhỏ, cache trong memory ở service
@@ -247,13 +272,15 @@ TTL quyết định **khi nào hỏi lại**. `ETag` hoặc `Last-Modified` giú
 **có gì thay đổi không** với chi phí body thấp. Client có thể lưu ETag cùng entry
 và gửi `If-None-Match` khi entry stale.
 
-```text
-Angular cache                 API
-     │ GET /api/tasks, If-None-Match: "v42"
-     ├──────────────────────────────────────►
-     │              304 Not Modified
-     ◄──────────────────────────────────────┤
-     │ gia hạn TTL, giữ body cũ              │
+```d2 title="HTTP revalidation bằng ETag"
+shape: sequence_diagram
+
+cache: "Angular cache"
+api: "API"
+
+cache -> api: "GET /api/tasks; If-None-Match: v42"
+api -> cache: "304 Not Modified"
+cache -> cache: "Gia hạn TTL, giữ body cũ"
 ```
 
 Nếu server trả `200 OK` với ETag mới, thay body và ETag trong cache. Nếu trả `304`,
@@ -273,23 +300,55 @@ request nền lấy phiên bản mới. Nếu response khác, UI cập nhật l�
 
 ### Luồng đọc hai giai đoạn
 
-```text
-Người dùng mở /tasks
-        │
-        ▼
-┌───────────────────┐     fresh      ┌────────────────────────┐
-│ Cache có entry?   │ ─────────────► │Trả entry, không gọi API│
-└─────────┬─────────┘                └────────────────────────┘
-          │ stale, còn dùng được
-          ▼
-┌───────────────────┐     ngay       ┌────────────────────────┐
-│ Trả entry stale   │ ─────────────► │ UI render dữ liệu cũ   │
-└─────────┬─────────┘                └────────────────────────┘
-          │ đồng thời
-          ▼
-┌───────────────────┐     mới        ┌────────────────────────┐
-│ Revalidate API    │ ─────────────► │ Cập nhật cache và UI
-└───────────────────┘                └────────────────────────┘
+```d2 title="Chọn entry fresh hoặc stale"
+direction: right
+
+page: "Mở /tasks" {
+  width: 130
+  height: 58
+}
+
+cache: "Cache entry?" {
+  width: 195
+  height: 90
+  shape: diamond
+}
+
+fresh: "Trả entry fresh\nKhông gọi API" {
+  width: 144
+  height: 58
+}
+
+stale: "Trả entry stale\nUI render dữ liệu cũ" {
+  width: 184
+  height: 58
+}
+
+page -> cache
+cache -> fresh: "Fresh"
+cache -> stale: "Stale, còn dùng được"
+```
+
+```d2 title="Stale-while-revalidate cập nhật UI khi có dữ liệu mới"
+direction: right
+
+n0: "UI đang có entry stale" {
+  width: 200
+  height: 58
+}
+
+n1: "Revalidate API" {
+  width: 136
+  height: 58
+}
+
+n2: "Cập nhật cache + UI" {
+  width: 176
+  height: 58
+}
+
+n0 -> n1: "Đồng thời"
+n1 -> n2: "Dữ liệu mới"
 ```
 
 UI cần biểu đạt đúng trạng thái này. Spinner toàn trang khi đã có dữ liệu thường
@@ -612,11 +671,32 @@ Một race thường gặp là request cũ bắt đầu trước, request mới 
 request cũ lại về sau cùng và ghi đè cache mới. Invalidation không tự loại bỏ mọi
 request đã bay trước đó.
 
-```text
-T0: GET /tasks bắt đầu (A)
-T1: PATCH /tasks/7 thành công, cache bị invalidate
-T2: GET /tasks bắt đầu lại (B), server trả dữ liệu mới
-T3: A trả dữ liệu cũ và vô tình ghi đè kết quả của B
+```d2 title="Race condition: response cũ ghi đè cache mới"
+direction: right
+
+n0: "T0: GET /tasks A\nbắt đầu" {
+  width: 152
+  height: 58
+}
+
+n1: "T1: PATCH /tasks/7\nthành công, invalidate" {
+  width: 200
+  height: 58
+}
+
+n2: "T2: GET /tasks B\nTrả dữ liệu mới" {
+  width: 152
+  height: 58
+}
+
+n3: "T3: A trả dữ liệu cũ\nGhi đè B nếu không bảo\nvệ" {
+  width: 200
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Có vài hàng rào, mỗi hàng rào giải quyết một phần:

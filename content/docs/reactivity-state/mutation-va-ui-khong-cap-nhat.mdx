@@ -52,23 +52,61 @@ console.log(user === sameUser); // true: reference không đổi
 
 State UI nên đi qua một điểm ghi rõ ràng. Với signal, `.update()` trả về state kế tiếp; với input cho component `OnPush`, component cha truyền một object mới.
 
-```text
-Event / callback
-      │
-      ▼
-Owner tạo state mới (set hoặc update)
-      │
-      ▼
-Reference của nhánh đã đổi thay đổi
-      │
-      ├──► Signal thông báo template / computed / effect
-      └──► Input mới có thể đánh dấu component OnPush
-                                      │
-                                      ▼
-                              Angular kiểm tra view
-                                      │
-                                      ▼
-                            Binding khác biệt cập nhật DOM
+```d2 title="Owner tạo reference mới cho nhánh state đổi"
+direction: right
+
+n0: "Event / callback" {
+  width: 152
+  height: 58
+}
+
+n1: "Owner set / update\nTạo state mới" {
+  width: 168
+  height: 58
+}
+
+n2: "Reference của nhánh\nđổi\nThay đổi" {
+  width: 176
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+```
+
+```d2 title="Notification dẫn đến kiểm tra view và ghi DOM khác biệt"
+direction: right
+
+reference: "Reference mới" {
+  width: 130
+  height: 58
+}
+
+signal: "Signal thông báo\nTemplate, computed,\neffect" {
+  width: 176
+  height: 79
+}
+
+input: "Input mới có thể\nđánh dấu OnPush" {
+  width: 152
+  height: 58
+}
+
+check: "Angular kiểm tra view" {
+  width: 192
+  height: 58
+}
+
+dom: "Binding khác\nCập nhật DOM" {
+  width: 130
+  height: 58
+}
+
+reference -> signal
+reference -> input
+signal -> check
+input -> check
+check -> dom
 ```
 
 Không cần clone sâu mọi dữ liệu. Chỉ cần tạo reference mới cho object/array ở đường đi đến property thay đổi. Các nhánh không thay đổi nên giữ nguyên reference.

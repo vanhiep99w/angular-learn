@@ -51,24 +51,70 @@ Deployment không chỉ là chép thư mục `dist/` lên một host. Một bả
 
 **Artefact** là output bất biến của một lần build, ví dụ thư mục browser hoặc Docker image. **Cấu hình** là giá trị thay đổi theo môi trường, ví dụ URL API công khai, domain hoặc cờ bật tính năng. Tách chúng ra giúp cùng một artefact đã kiểm thử được promotion từ staging sang production mà không build lại một mã nguồn khác.
 
-```text
-commit đã review
-      │
-      ▼
-test + production build ──► artefact có version
-      │                              │
-      ▼                              ▼
-  staging: deploy ──► smoke test ──► promotion
-                                         │
-                                         ▼
-                               production rollout
-                                         │
-                       ┌─────────────────┴─────────────────┐
-                       ▼                                   ▼
-                 chỉ số ổn định                       lỗi/regrression
-                       │                                   │
-                       ▼                                   ▼
-                  giữ release                    rollback artefact trước
+```d2 title="Kiểm chứng và promote cùng một artefact (1/2)"
+direction: right
+
+n0: "Commit đã review" {
+  width: 152
+  height: 58
+}
+
+n1: "Test + production\nbuild" {
+  width: 160
+  height: 58
+}
+
+n2: "Artefact có version" {
+  width: 176
+  height: 58
+}
+
+n3: "Deploy staging + smoke\ntest" {
+  width: 200
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Kiểm chứng và promote cùng một artefact (2/2)"
+direction: right
+
+n3: "Deploy staging + smoke\ntest" {
+  width: 200
+  height: 58
+}
+
+n4: "Promotion\nProduction rollout" {
+  width: 168
+  height: 58
+}
+
+n3 -> n4
+```
+
+```d2 title="Theo dõi rollout để giữ release hoặc rollback"
+direction: right
+
+rollout: "Production rollout" {
+  width: 168
+  height: 58
+}
+
+stable: "Chỉ số ổn định\nGiữ release" {
+  width: 136
+  height: 58
+}
+
+regression: "Lỗi / regression\nRollback artefact\ntrước" {
+  width: 160
+  height: 79
+}
+
+rollout -> stable
+rollout -> regression
 ```
 
 Đừng coi trạng thái “deploy command thành công” là bằng chứng ứng dụng hoạt động. Lệnh chỉ chứng minh provider nhận tệp hoặc image. HTTP response, route sâu, API, đăng nhập và chỉ số lỗi mới kiểm tra được bản phát hành từ góc nhìn người dùng.
@@ -150,18 +196,32 @@ Hãy thay `dist/storefront/browser` bằng output path thực tế của workspa
 
 Static host chỉ cần phục vụ tệp đã build. Browser nhận `index.html`, tải chunks JavaScript/CSS có hash, rồi Angular bootstrap và điều hướng ở client. Đây là mô hình phù hợp với Cloudflare Pages, S3 + CDN, Netlify hoặc một web server chỉ đọc tệp.
 
-```text
-Browser ── GET /products/42 ──► CDN/static host
-                                      │
-                          fallback HTML cho route client
-                                      │
-                                      ▼
-                                index.html
-                                      │
-                           main.<hash>.js + CSS/assets
-                                      │
-                                      ▼
-                              Angular Router hiển thị /products/42
+```d2 title="Static host trả HTML fallback cho deep link"
+direction: right
+
+n0: "Browser\nGET /products/42" {
+  width: 152
+  height: 58
+}
+
+n1: "CDN / static host\nFallback index.html" {
+  width: 176
+  height: 58
+}
+
+n2: "Tải main.<hash>.js\nCSS + assets" {
+  width: 168
+  height: 58
+}
+
+n3: "Angular Router\nHiển thị /products/42" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Quy trình phát hành cơ bản:
@@ -316,25 +376,63 @@ Cloudflare Pages static phù hợp để upload browser output. Một Node SSR s
 
 Luồng lựa chọn:
 
-```text
-Cần HTML động từ Angular?
-        │
-   ┌────┴────┐
-   │ Không   │ Có
-   ▼         ▼
-Static SPA   SSR
-   │         │
-Pages/CDN    Runtime Node? ── Có ──► Docker/container platform
-                 │
-                 Không
-                   │
-                   ▼
-         Runtime Workers tương thích? ── Có ──► adapter + Cloudflare Workers
-                   │
-                   Không
-                   │
-                   ▼
-          Giữ static/prerender hoặc chọn runtime Node
+```d2 title="Chọn static SPA hay HTML động"
+direction: right
+
+html: "Cần HTML động\ntừ Angular?" {
+  width: 195
+  height: 90
+  shape: diamond
+}
+
+static: "Static SPA\nPages / CDN" {
+  width: 130
+  height: 58
+}
+
+ssr: "SSR\nCần runtime phù hợp" {
+  width: 176
+  height: 58
+}
+
+html -> static: "Không"
+html -> ssr: "Có"
+```
+
+```d2 title="Chọn runtime triển khai SSR"
+direction: right
+
+node: "Có runtime Node?" {
+  width: 228
+  height: 90
+  shape: diamond
+}
+
+docker: "Docker /\nContainer platform" {
+  width: 168
+  height: 58
+}
+
+workers: "Workers runtime\ntương thích?" {
+  width: 216
+  height: 90
+  shape: diamond
+}
+
+adapter: "Adapter +\nCloudflare Workers" {
+  width: 168
+  height: 58
+}
+
+fallback: "Static / prerender\nHoặc chọn runtime Node" {
+  width: 200
+  height: 58
+}
+
+node -> docker: "Có"
+node -> workers: "Không"
+workers -> adapter: "Có"
+workers -> fallback: "Không"
 ```
 
 Adapter, cấu hình deploy và API Workers thay đổi theo phiên bản Angular/Cloudflare. Bắt đầu từ tài liệu của **đúng phiên bản Angular**, sau đó chạy preview/development runtime của adapter trước khi deploy. Đừng lấy Dockerfile Node làm cấu hình Workers: Workers không cung cấp đầy đủ filesystem, process model hay Node APIs như container.

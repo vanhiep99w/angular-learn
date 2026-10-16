@@ -42,21 +42,21 @@ E2E (end-to-end) là kiểm thử điều khiển ứng dụng qua giao diện t
 
 Test pyramid không yêu cầu một tỷ lệ số học cố định. Nó nhắc rằng test càng gần người dùng càng tốn thời gian chạy, khó cô lập và khó chỉ ra nguyên nhân lỗi. Vì vậy, số E2E nên ít hơn số unit test; mỗi test phải đại diện cho một cam kết nghiệp vụ quan trọng.
 
-```text
-                  ┌───────────────────────────┐
-                  │ E2E: hành trình quan trọng│
-                  │ chậm, chi phí cao, ít     │
-                  └─────────────▲─────────────┘
-                                │
-                    ┌───────────┴───────────┐
-                    │ Component: template,  │
-                    │ trạng thái, tương tác │
-                    └───────────▲───────────┘
-                                │
-              ┌─────────────────┴─────────────────┐
-              │ Unit: rule nghiệp vụ, hàm, service│
-              │ nhanh, rẻ, nhiều                  │
-              └───────────────────────────────────┘
+```d2 title="Các tầng kiểm thử: nhiều unit, ít E2E"
+grid-rows: 3
+vertical-gap: 10
+e2e: "E2E: ít, chậm, chi phí cao\nHành trình người dùng thật" {
+  width: 220
+  height: 58
+}
+component: "Integration / component: vừa phải\nTemplate, trạng thái, tương tác" {
+  width: 290
+  height: 58
+}
+unit: "Unit: nhiều, nhanh, rẻ, cô lập\nHàm, service, state, validator, rule nghiệp vụ" {
+  width: 370
+  height: 58
+}
 ```
 
 Ví dụ, quy tắc “giá sản phẩm phải lớn hơn 0” nên có unit hoặc component test. Một E2E cho lỗi validation này chỉ có giá trị khi nó đồng thời bảo vệ việc hiển thị lỗi, khóa nút lưu và ngăn request thật. Nếu E2E chỉ lặp lại assertion của unit test, nó tăng chi phí nhưng không tăng nhiều niềm tin.
@@ -84,15 +84,54 @@ Mỗi test cần một câu mô tả được giá trị: “người có quyề
 
 Một runner như Playwright mở một browser context riêng — phiên trình duyệt có cookie, local storage và cache tách biệt. Runner tải bản Angular đang phục vụ qua HTTP, tìm phần tử trong DOM, phát sự kiện như click/keyboard và chờ các điều kiện có thể quan sát. Ứng dụng Angular tiếp tục chạy router, change detection và `HttpClient` bình thường.
 
-```text
-Test runner
-    │ mở context, điều khiển thao tác
-    ▼
-Browser ─── tải HTML/JS/CSS ───► Angular dev hoặc preview server
-    │                                  │
-    │ DOM, router, render               │ HttpClient
-    │                                  ▼
-    └──────── assertion ◄──── API test environment / mock có chủ đích
+```d2 title="E2E điều khiển browser tải ứng dụng"
+direction: right
+
+n0: "Test runner\nMở context + thao tác" {
+  width: 192
+  height: 58
+}
+
+n1: "Browser\nDOM, router, render" {
+  width: 176
+  height: 58
+}
+
+n2: "Angular dev / preview\nserver" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1: "Điều khiển"
+n1 -> n2: "HTML / JS / CSS"
+```
+
+```d2 title="Assertion kết hợp UI và API test environment"
+direction: right
+
+angular: "Angular app\nHttpClient" {
+  width: 130
+  height: 58
+}
+
+api: "API test environment\nHoặc mock có chủ đích" {
+  width: 192
+  height: 58
+}
+
+browser: "Browser" {
+  width: 130
+  height: 58
+}
+
+assert: "Assertion" {
+  width: 130
+  height: 58
+}
+
+angular -> api
+api -> assert
+browser -> assert
 ```
 
 Cơ chế này giải thích cả giá trị lẫn giới hạn của E2E. Nó bắt được lỗi sai `baseHref`, lazy route không tải, interceptor không gắn token hoặc CSS che nút. Đổi lại, nó phụ thuộc vào tài nguyên ngoài, thời gian khởi động browser và dữ liệu có state. E2E không thay thế kiểm thử contract API, tải chịu lực hay kiểm tra bảo mật ở server.

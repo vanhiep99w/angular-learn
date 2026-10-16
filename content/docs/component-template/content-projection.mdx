@@ -39,15 +39,26 @@ description: Thiết kế component linh hoạt với ng-content, slot, fallback
 
 Nói ngắn gọn, component sở hữu **khung và hành vi chung**; nơi sử dụng sở hữu **nội dung cụ thể**. Điều này đặc biệt hữu ích khi một phần giao diện có cùng layout, viền, khả năng đóng hoặc accessibility, nhưng phần bên trong không thể gói vào một chuỗi đơn giản.
 
-```text
-Nơi sử dụng                              Component Alert
+```d2 title="Content projection: nơi dùng tạo nội dung, Alert chọn vị trí"
+direction: right
 
-<app-alert>                              <section role="alert">
-  <strong>Lưu ý</strong>      ─────►      <ng-content></ng-content>
-  <a href="/help">Xem thêm</a>             </section>
-</app-alert>
+caller: "Nơi dùng\n<app-alert>\n<strong>Lưu ý</strong>\n<a href=\"/help\">Xem\nthêm</a>" {
+  width: 200
+  height: 121
+}
 
-Nơi dùng quyết định node con; Alert quyết định node ấy xuất hiện ở đâu.
+slot: "Component Alert\n<section role=\"alert\">\n<ng-content>" {
+  width: 200
+  height: 79
+}
+
+dom: "DOM được project\nNội dung vẫn thuộc nơi\ndùng" {
+  width: 200
+  height: 79
+}
+
+caller -> slot: "Project node con"
+slot -> dom: "Chọn vị trí hiển thị"
 ```
 
 Không có projection, `AlertComponent` thường phải công bố quá nhiều input như `title`, `message`, `linkLabel`, `linkHref`, `icon` và nhiều cờ biến thể. Với projection, consumer có thể truyền một đoạn markup hoàn chỉnh, bao gồm link, component khác hoặc điều kiện `@if`, mà `AlertComponent` không cần biết chi tiết đó.

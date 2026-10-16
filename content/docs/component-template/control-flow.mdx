@@ -127,21 +127,52 @@ export class AvailabilityComponent {
 
 Mô hình đơn giản dưới đây giúp hình dung Angular làm gì khi state mà template đọc thay đổi:
 
-```text
-State của component thay đổi
-          │
-          ▼
-Angular đánh giá biểu thức trong block
-          │
-          ├── @if: chọn hoặc bỏ một nhánh
-          ├── @for: đối chiếu item bằng track key
-          └── @switch: chọn case khớp giá trị
-          │
-          ▼
-Angular tạo, cập nhật, di chuyển hoặc hủy node cần thiết
-          │
-          ▼
-Trình duyệt vẽ DOM mới
+```d2 title="Control flow cập nhật những node cần thiết"
+direction: right
+
+state: "State component đổi" {
+  width: 176
+  height: 58
+}
+
+evaluate: "Angular đánh giá\nbiểu thức block" {
+  width: 152
+  height: 58
+}
+
+if: "@if\nChọn/bỏ nhánh" {
+  width: 130
+  height: 58
+}
+
+for: "@for\nĐối chiếu track key" {
+  width: 176
+  height: 58
+}
+
+switch: "@switch\nChọn case" {
+  width: 130
+  height: 58
+}
+
+dom: "Tạo, cập nhật, di\nchuyển\nhoặc hủy node cần\nthiết" {
+  width: 160
+  height: 100
+}
+
+paint: "Browser vẽ DOM mới" {
+  width: 168
+  height: 58
+}
+
+state -> evaluate
+evaluate -> if
+evaluate -> for
+evaluate -> switch
+if -> dom
+for -> dom
+switch -> dom
+dom -> paint
 ```
 
 Block không “render lại toàn bộ trang” theo nghĩa xóa sạch mọi node. Đặc biệt với `@for`, Angular dùng tracking để liên hệ item mới với view và node DOM đã có. Nhưng chính xác node nào được giữ lại còn phụ thuộc vào state, khóa `track` và cấu trúc template.

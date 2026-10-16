@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import 'fumadocs-ui/css/style.css';
+@import '@vanhiep99w/docs-kit/styles/d2.css';
 
 html,
 :root {

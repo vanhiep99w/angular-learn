@@ -94,19 +94,48 @@ Nói ngắn gọn: chọn Angular khi lợi ích của quy ước chung và hệ
 
 Cách nhìn hữu ích nhất là: **UI là kết quả của trạng thái hiện tại**. Người dùng tác động lên UI; mã của bạn cập nhật trạng thái; Angular cập nhật phần giao diện phụ thuộc vào trạng thái đó. Bạn mô tả giao diện mong muốn bằng template, thay vì tự tìm và sửa từng nút DOM trong hầu hết tình huống.
 
-```text
-Người dùng
-    │ click, nhập liệu, điều hướng
-    ▼
-Component / service
-    │ cập nhật trạng thái hoặc nhận dữ liệu bất đồng bộ
-    ▼
-Trạng thái ứng dụng
-    │ được template đọc
-    ▼
-Angular đồng bộ phần UI phụ thuộc
-    ▼
-DOM trên trình duyệt
+```d2 title="Angular đồng bộ UI từ trạng thái ứng dụng (1/2)"
+direction: right
+
+n0: "Người dùng\nClick, nhập, điều\nhướng" {
+  width: 160
+  height: 79
+}
+
+n1: "Component / service\nXử lý hoặc nhận dữ\nliệu async" {
+  width: 176
+  height: 79
+}
+
+n2: "Trạng thái ứng dụng" {
+  width: 176
+  height: 58
+}
+
+n3: "Template đọc state\nAngular đồng bộ UI" {
+  width: 168
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Angular đồng bộ UI từ trạng thái ứng dụng (2/2)"
+direction: right
+
+n3: "Template đọc state\nAngular đồng bộ UI" {
+  width: 168
+  height: 58
+}
+
+n4: "DOM trên browser" {
+  width: 152
+  height: 58
+}
+
+n3 -> n4
 ```
 
 ### Component là đơn vị sở hữu một phần giao diện

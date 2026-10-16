@@ -34,13 +34,38 @@ description: Tạo, chạy, sinh mã, kiểm thử và cập nhật ứng dụng
 
 Thay vì tự ghép bundler, test runner và quy ước thư mục, CLI tạo sẵn cấu trúc nhất quán rồi chạy các *target* (tác vụ như `build`, `serve`, `test`) đã khai báo. Ví dụ, `ng build` không chỉ gọi một trình đóng gói: nó đọc cấu hình của project, biên dịch TypeScript, xử lý tài nguyên và ghi kết quả vào thư mục đầu ra.
 
-```text
-Lệnh ng
-  │
-  ├── ng new       → tạo workspace và ứng dụng ban đầu
-  ├── ng generate  → thêm mã theo schematic/generator
-  ├── ng serve     → chạy máy chủ phát triển và theo dõi thay đổi
-  └── ng build     → tạo gói triển khai theo cấu hình
+```d2 title="Các lệnh Angular CLI"
+direction: right
+
+ng: "Angular CLI\nng" {
+  width: 130
+  height: 58
+}
+
+new: "ng new\nWorkspace + app" {
+  width: 144
+  height: 58
+}
+
+generate: "ng generate\nSchematic/generator" {
+  width: 176
+  height: 58
+}
+
+serve: "ng serve\nDev server + watch" {
+  width: 168
+  height: 58
+}
+
+build: "ng build\nGói triển khai" {
+  width: 136
+  height: 58
+}
+
+ng -> new
+ng -> generate
+ng -> serve
+ng -> build
 ```
 
 <Callout type="idea" title="Đừng học thuộc mọi cờ lệnh">

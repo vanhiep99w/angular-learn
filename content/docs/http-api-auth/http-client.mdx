@@ -46,16 +46,43 @@ description: Cấu hình HttpClient, gửi request có kiểu, kiểm soát vòn
 
 Đặt URL, DTO và phép ánh xạ dữ liệu tại một data-access service hoặc repository. Component chỉ yêu cầu một ý nghĩa nghiệp vụ như “lấy danh sách công việc”, thay vì tự ghép URL và đọc JSON thô. Ranh giới này làm API dễ thay đổi và dễ kiểm thử hơn.
 
-```text
-┌────────────────┐  loadTasks()  ┌──────────────────┐  HttpClient  ┌──────────────┐
-│ Page / facade  │ ─────────────►│ TaskApi          │ ───────────► │ Interceptor  │
-│ state + UI     │ ◄─────────────│ DTO → app model  │ ◄─────────── │ + transport  │
-└────────────────┘   Task[]      └──────────────────┘              └──────┬───────┘
-                                                                          │
-                                                                          ▼
-                                                                    ┌──────────────┐
-                                                                    │ Backend API  │
-                                                                    └──────────────┘
+```d2 title="Page gọi API service và nhận app model"
+direction: right
+
+page: "Page / facade\nState + UI" {
+  width: 130
+  height: 58
+}
+
+api: "TaskApi\nDTO → app model" {
+  width: 144
+  height: 58
+}
+
+page -> api: "loadTasks()"
+api -> page: "Task[]"
+```
+
+```d2 title="API service dùng HttpClient và transport"
+direction: right
+
+api: "TaskApi" {
+  width: 130
+  height: 58
+}
+
+http: "HttpClient\nInterceptor +\ntransport" {
+  width: 130
+  height: 79
+}
+
+backend: "Backend API" {
+  width: 130
+  height: 58
+}
+
+api <-> http
+http <-> backend
 ```
 
 `DTO` (_Data Transfer Object_) là hình dạng dữ liệu ở biên API. Model của ứng dụng có thể khác DTO. Chẳng hạn backend trả `created_at` là chuỗi ISO, còn giao diện cần `createdAt: Date`. Ánh xạ một lần ở `TaskApi` giúp phần còn lại của ứng dụng không phụ thuộc vào cách backend đặt tên trường.
@@ -524,13 +551,41 @@ Upload progress phụ thuộc vào XHR backend. Như đã nêu ở phần cấu 
 
 Ví dụ trang chi tiết sản phẩm có `productId`. Mỗi giá trị ID tương ứng một dữ liệu hiện tại. Khi ID đổi, resource tải dữ liệu mới; UI đọc `isLoading()`, `hasValue()` và `error()` trực tiếp.
 
-```text
-productId() đổi
-      │
-      ▼
-params() tạo key mới ──► loader/stream mới ──► value, error, isLoading
-      │                        │                         │
-      └── request cũ bị hủy ◄──┘                         └── template render state mới
+```d2 title="Resource đổi key sẽ chuyển request và state"
+direction: right
+
+id: "productId() đổi" {
+  width: 144
+  height: 58
+}
+
+params: "params() tạo key mới" {
+  width: 184
+  height: 58
+}
+
+loader: "Loader / stream mới" {
+  width: 176
+  height: 58
+}
+
+cancel: "Hủy request cũ" {
+  width: 136
+  height: 58
+}
+
+state: "value, error,\nisLoading" {
+  width: 130
+  height: 58
+}
+
+ui: "Template render\nstate mới" {
+  width: 144
+  height: 58
+}
+
+id -> params -> loader -> state -> ui
+loader -> cancel
 ```
 
 Resource không phải cache toàn ứng dụng hoặc thay thế chung cho RxJS. Nó quản lý state async của một resource instance. Chính sách cache, invalidation sau mutation và phối hợp nhiều consumer vẫn cần được thiết kế ở service/store phù hợp.

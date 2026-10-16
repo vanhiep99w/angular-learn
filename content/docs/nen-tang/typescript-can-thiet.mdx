@@ -52,18 +52,32 @@ JavaScript cho phép viết giao diện rất nhanh, nhưng không yêu cầu ch
 
 TypeScript là JavaScript có thêm hệ thống kiểu tĩnh. Trước khi ứng dụng chạy, compiler đối chiếu mã với các kiểu đã mô tả và chỉ ra các mâu thuẫn có thể thấy được. Angular dùng TypeScript cho class component, service, dependency injection, forms và hầu hết API công khai. Vì vậy, biết TypeScript giúp bạn hiểu Angular chứ không chỉ giúp làm hết lỗi đỏ trong editor.
 
-```text
-Dữ liệu từ API / input / form
-             │
-             ▼
-      Kiểu TypeScript mô tả
-      dữ liệu được phép có
-             │
-             ▼
-Component và service xử lý
-             │
-             ▼
-Template hiển thị đúng nhánh
+```d2 title="TypeScript mô tả dữ liệu để code và template dùng"
+direction: right
+
+n0: "API / input / form" {
+  width: 168
+  height: 58
+}
+
+n1: "Kiểu TypeScript\nMô tả dữ liệu được\nphép" {
+  width: 168
+  height: 79
+}
+
+n2: "Component + service\nXử lý dữ liệu" {
+  width: 176
+  height: 58
+}
+
+n3: "Template hiển thị\nđúng nhánh" {
+  width: 160
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 ### Kiểu là hợp đồng, không phải dữ liệu lúc chạy

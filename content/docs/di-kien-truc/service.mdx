@@ -94,20 +94,26 @@ Các loại trên là **vai trò**, không phải số lớp bắt buộc. Một
 
 Angular không tạo một service duy nhất cho cả chương trình chỉ vì class có `@Injectable()`. Injector tạo instance theo provider mà consumer tìm được. Vì vậy, vị trí khai báo provider là một phần của thiết kế service: nó quyết định ai dùng chung instance và instance được hủy khi nào.
 
-```text
-CatalogPageComponent
-        │ inject(CatalogFacade)
-        ▼
-┌──────────────────────────────────────────────────────┐
-│ Route injector: providers: [CatalogFacade]           │
-│ Một facade/state cho cây route /catalog              │
-└───────────────────────┬──────────────────────────────┘
-                        │ inject(CatalogRepository)
-                        ▼
-┌──────────────────────────────────────────────────────┐
-│ Root injector: CatalogRepository, HttpClient         │
-│ Dùng chung hạ tầng truy cập dữ liệu cho ứng dụng     │
-└──────────────────────────────────────────────────────┘
+```d2 title="Facade theo route và hạ tầng dùng chung"
+direction: right
+
+n0: "CatalogPageComponent" {
+  width: 184
+  height: 58
+}
+
+n1: "Route injector\nCatalogFacade\nState cho cây /catalog" {
+  width: 200
+  height: 79
+}
+
+n2: "Root injector\nCatalogRepository +\nHttpClient\nHạ tầng dùng chung" {
+  width: 176
+  height: 100
+}
+
+n0 -> n1: "inject(CatalogFacade)"
+n1 -> n2: "inject(CatalogRepository)"
 ```
 
 Đọc sâu hơn về đường phân giải token ở [Dependency Injection](/docs/di-kien-truc/dependency-injection). Phần này tập trung vào quyết định scope của service.
@@ -181,21 +187,26 @@ Không nên mở kết nối mạng nặng trong constructor chỉ vì DI tạo 
 
 DI giải quyết cách một class nhận dependency. Kiến trúc service quyết định **hướng dependency**. Một hướng dễ bảo trì là UI gọi facade hoặc use case; lớp đó dùng repository/port; repository mới dùng HTTP, storage hoặc SDK bên ngoài.
 
-```text
-┌──────────────────────────────────────────────────────┐
-│ UI: page, component, template                        │
-│ Hiển thị state; chuyển thao tác người dùng thành lệnh│
-└───────────────────────────┬──────────────────────────┘
-                            ▼
-┌──────────────────────────────────────────────────────┐
-│ Facade / use case                                    │
-│ Điều phối state và áp dụng quy tắc feature           │
-└───────────────────────────┬──────────────────────────┘
-                            ▼
-┌──────────────────────────────────────────────────────┐
-│ Repository / adapter                                 │
-│ HTTP, cache, storage, DTO của nguồn bên ngoài        │
-└──────────────────────────────────────────────────────┘
+```d2 title="Phân lớp UI, facade và adapter"
+direction: right
+
+n0: "UI\nHiển thị state, phát\nlệnh" {
+  width: 184
+  height: 79
+}
+
+n1: "Facade / use case\nState + quy tắc\nfeature" {
+  width: 160
+  height: 79
+}
+
+n2: "Repository / adapter\nHTTP, cache, storage,\nDTO" {
+  width: 192
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
 ```
 
 Mũi tên là hướng mã được phép biết nhau. `CatalogRepository` không import component; `CatalogPageComponent` không tự biết `/api/catalog/products`. Nhờ vậy có thể thay endpoint hoặc UI mà không buộc phần còn lại thay đổi theo.

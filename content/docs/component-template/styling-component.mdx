@@ -84,12 +84,32 @@ export class StatusDotComponent {}
 
 `ViewEncapsulation` trả lời câu hỏi: stylesheet của component được áp dụng vào phần nào, và stylesheet bên ngoài có thể đi vào view đó đến mức nào? Nó không phải cơ chế bảo mật. Người dùng vẫn có thể xem DOM và CSS bằng DevTools.
 
-```text
-Selector trong CSS component
-          │
-          ├── Emulated  ──► Angular thêm thuộc tính để mô phỏng phạm vi
-          ├── ShadowDom ──► Trình duyệt tạo shadow root thật
-          └── None      ──► Selector trở thành CSS toàn cục
+```d2 title="Ba chế độ đóng gói CSS của component"
+direction: right
+
+css: "Selector trong\nCSS component" {
+  width: 136
+  height: 58
+}
+
+emulated: "Emulated\nAngular thêm thuộc\ntính\nmô phỏng phạm vi" {
+  width: 168
+  height: 100
+}
+
+shadow_mode: "ShadowDom\nBrowser tạo shadow\nroot thật" {
+  width: 168
+  height: 79
+}
+
+none: "None\nSelector CSS toàn cục" {
+  width: 192
+  height: 58
+}
+
+css -> emulated
+css -> shadow_mode
+css -> none
 ```
 
 ### Emulated: lựa chọn mặc định

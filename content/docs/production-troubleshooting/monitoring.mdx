@@ -75,26 +75,54 @@ Trước khi thêm SDK monitoring, viết từng câu hỏi đội cần trả l
 
 Mỗi sự kiện nên mang ngữ cảnh chung nhưng không mang dữ liệu người dùng thô. Trình duyệt đẩy event bất đồng bộ; collector xác thực và lọc; nền tảng observability tổng hợp thành dashboard, truy vấn và alert. Người trực ca dùng release, route và trace để kiểm chứng giả thuyết, thay vì coi alert là kết luận.
 
-```text
-Người dùng trên browser
-        │ route, vital, error, event, trace context
-        ▼
-┌─────────────────────┐     batch / beacon     ┌──────────────────────┐
-│ Angular telemetry   │ ─────────────────────► │ Collector / SDK      │
-│ lọc và gắn context  │                        │ rate limit, scrub    │
-└──────────┬──────────┘                        └──────────┬───────────┘
-           │                                              │
-           │ release ID, route, trace ID                  ▼
-           │                                   ┌──────────────────────┐
-           └─────────────────────────────────► │ Metrics / logs/traces│
-                                               │ dashboard + alert    │
-                                               └──────────┬───────────┘
-                                                          │ alert có link
-                                                          ▼
-                                               ┌──────────────────────┐
-                                               │ On-call: xác nhận,   │
-                                               │giảm tác động, học lại│
-                                               └──────────────────────┘
+```d2 title="Thu thập telemetry đã lọc và gắn context"
+direction: right
+
+n0: "Browser\nRoute, vital, error,\nevent, trace context" {
+  width: 184
+  height: 79
+}
+
+n1: "Angular telemetry\nLọc + gắn context" {
+  width: 160
+  height: 58
+}
+
+n2: "Collector / SDK\nRate limit + scrub" {
+  width: 168
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2: "Batch / beacon"
+```
+
+```d2 title="Telemetry nối dashboard và on-call với release"
+direction: right
+
+angular: "Angular telemetry" {
+  width: 160
+  height: 58
+}
+
+collector: "Collector / SDK" {
+  width: 144
+  height: 58
+}
+
+store: "Metrics / logs /\ntraces\nDashboard + alert" {
+  width: 160
+  height: 79
+}
+
+oncall: "On-call\nXác nhận, giảm tác\nđộng, học lại" {
+  width: 168
+  height: 79
+}
+
+angular -> store: "Release ID, route, trace ID"
+collector -> store
+store -> oncall: "Alert có link"
 ```
 
 ### Ngữ cảnh chung của mọi sự kiện

@@ -102,18 +102,32 @@ Parent template có:
 
 Angular kiểm tra `imports` của component cha. Nếu `Header` đã được import và selector khớp, Angular tạo instance `Header`, rồi render template của nó vào host element.
 
-```text
-Template của App
-        │
-        │ gặp <app-header>
-        ▼
-Selector "app-header" khớp Header
-        │
-        ▼
-Angular tạo Header instance
-        │
-        ▼
-Angular render header.html vào host
+```d2 title="Selector xác định host cho Header component"
+direction: right
+
+n0: "App template\ngặp <app-header>" {
+  width: 152
+  height: 58
+}
+
+n1: "Selector app-header\nkhớp Header" {
+  width: 176
+  height: 58
+}
+
+n2: "Tạo Header instance" {
+  width: 176
+  height: 58
+}
+
+n3: "Render header.html\nvào host" {
+  width: 168
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 DOM kết quả gần đúng là:
@@ -157,17 +171,32 @@ bootstrapApplication(AppComponent);
 
 Nếu root component có selector `app-root`, Angular dùng phần tử đã có đó làm host element của `AppComponent`.
 
-```text
-index.html có <app-root>
-        │
-        ▼
-bootstrapApplication(AppComponent)
-        │
-        ▼
-Angular gắn AppComponent vào <app-root>
-        │
-        ▼
-Template của AppComponent trở thành children của <app-root>
+```d2 title="Bootstrap gắn AppComponent vào host gốc"
+direction: right
+
+n0: "index.html\n<app-root>" {
+  width: 130
+  height: 58
+}
+
+n1: "bootstrapApplication\nAppComponent" {
+  width: 184
+  height: 58
+}
+
+n2: "Gắn instance\nvào <app-root>" {
+  width: 136
+  height: 58
+}
+
+n3: "Template trở thành\nchildren của host" {
+  width: 168
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Vì vậy `app-root`, `app-header` và `app-user-input` đều là host element. Khác biệt là `app-root` được viết sẵn trong HTML khởi đầu, còn host của component con thường được tạo khi Angular render template cha.

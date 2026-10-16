@@ -129,24 +129,54 @@ Không gọi `new PromoBannerComponent()` trực tiếp. Cách đó chỉ tạo 
 
 Sau khi component được chèn vào `ViewContainerRef`, nó tham gia cây view bình thường. Angular chạy change detection theo lịch của ứng dụng; input được đặt bằng `setInput()` có thể được component quan sát qua input signal hoặc `ngOnChanges`.
 
-```text
-Cấu hình lúc chạy
-       │ chọn type từ allowlist
-       ▼
-┌───────────────────────────────┐
-│ Component host                │
-│ ViewContainerRef widgetSlot   │
-└───────────────┬───────────────┘
-                │ createComponent(type, options)
-                ▼
-┌───────────────────────────────┐
-│ ComponentRef                  │
-│ instance + host view + handle │
-└───────┬───────────┬───────────┘
-        │           │
-        │           └── setInput / subscribe output
-        ▼
-Cây view Angular → render DOM → destroy khi host thay thế hoặc bị hủy
+```d2 title="Tạo ComponentRef từ type trong allowlist"
+direction: right
+
+config: "Cấu hình runtime\nChọn type từ allowlist" {
+  width: 200
+  height: 58
+}
+
+host: "Component host\nViewContainerRef\nwidgetSlot" {
+  width: 152
+  height: 79
+}
+
+ref: "ComponentRef\nInstance + host view +\nhandle" {
+  width: 200
+  height: 79
+}
+
+config -> host
+host -> ref: "createComponent"
+```
+
+```d2 title="ComponentRef điều khiển input, output và vòng đời view"
+direction: right
+
+ref: "ComponentRef" {
+  width: 130
+  height: 58
+}
+
+inputs: "setInput\nSubscribe output" {
+  width: 152
+  height: 58
+}
+
+dom: "Cây view Angular\nRender DOM" {
+  width: 152
+  height: 58
+}
+
+destroy: "Destroy khi host\nthay thế hoặc bị hủy" {
+  width: 184
+  height: 58
+}
+
+ref -> inputs
+ref -> dom
+dom -> destroy
 ```
 
 Trong ứng dụng dùng change detection mặc định hoặc signals, không cần gọi `detectChanges()` sau mọi `setInput()`. Chỉ dùng `reference.changeDetectorRef.detectChanges()` khi bạn đang tạo component ở một luồng rất đặc biệt và biết chính xác vì sao cần render đồng bộ. Lạm dụng nó làm thứ tự render khó đoán hơn.

@@ -59,29 +59,46 @@ Nó **không** là hàng rào bảo mật và không thay thế server. Người
 
 Khi giá trị đổi, Angular cập nhật control, chạy validator đồng bộ, rồi chỉ chạy validator bất đồng bộ nếu phần đồng bộ không có lỗi. Trong lúc chờ kết quả async, control có trạng thái `PENDING`. Kết quả của control con lại được tổng hợp lên group cha.
 
-```text
-Người dùng nhập giá trị
-         │
-         ▼
-┌────────────────────────────────────────┐
-│ FormControl: cập nhật value            │
-└───────────────────┬────────────────────┘
-                    │
-                    ▼
-┌────────────────────────────────────────┐
-│ Sync validators                        │
-│ null → có thể chạy async               │
-│ error map → INVALID ngay               │
-└───────────────────┬────────────────────┘
-                    │ hợp lệ ở bước sync
-                    ▼
-┌────────────────────────────────────────┐
-│ Async validator → PENDING              │
-│ kết quả cuối: VALID hoặc INVALID       │
-└───────────────────┬────────────────────┘
-                    │ tổng hợp trạng thái
-                    ▼
-       FormGroup, thông báo lỗi, submit
+```d2 title="Sync validation quyết định có chạy async validation"
+direction: right
+
+input: "Người dùng nhập\nFormControl cập nhật\nvalue" {
+  width: 184
+  height: 79
+}
+
+sync: "Sync validators\nTrả null?" {
+  width: 216
+  height: 90
+  shape: diamond
+}
+
+invalid: "Error map\nINVALID ngay" {
+  width: 130
+  height: 58
+}
+
+async: "Async validator\nPENDING" {
+  width: 144
+  height: 58
+}
+
+result: "VALID hoặc\nINVALID" {
+  width: 130
+  height: 58
+}
+
+group: "FormGroup\nLỗi + submit" {
+  width: 130
+  height: 58
+}
+
+input -> sync
+sync -> invalid: "Không"
+sync -> async: "Có"
+async -> result
+invalid -> group
+result -> group
 ```
 
 Bốn `status` thường gặp là `VALID`, `INVALID`, `PENDING` và `DISABLED`. `disabled` nghĩa là control không tham gia validation và cũng bị bỏ khỏi `form.value` của parent. `errors` là `null` khi không có lỗi; nếu không, nó là map với key do validator tạo ra. Dùng `hasError('required')` hoặc `getError('minlength')` thay vì so sánh cả object lỗi.

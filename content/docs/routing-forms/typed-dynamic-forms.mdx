@@ -73,27 +73,48 @@ Không phải cứ render bằng `@for` là cần `FormRecord`. Nếu danh sách
 
 Metadata không nên đi thẳng từ HTTP response vào template. Nó cần qua một ranh giới parse/normalize để UI không phải đoán loại input, default value hoặc validator có tồn tại hay không.
 
-```text
-Schema thô từ source code / API
-              │
-              ▼
-┌─────────────────────────────────────────────┐
-│ Parse + normalize                           │
-│ - kiểm tra kind, key, option, giới hạn      │
-│ - áp default và schemaVersion               │
-└──────────────────┬──────────────────────────┘
-                   │ Question[] hợp lệ
-                   ▼
-┌─────────────────────────────────────────────┐
-│ Form factory                                │
-│ metadata → FormControl → FormGroup/Record   │
-└──────────────────┬──────────────────────────┘
-                   │
-                   ▼
-Renderer Angular ──► input/select + lỗi + a11y
-                   │
-                   ▼
-raw value ──► map thành command ──► API validate lại
+```d2 title="Từ schema runtime đến form và command API (1/2)"
+direction: right
+
+n0: "Schema thô\nSource code / API" {
+  width: 160
+  height: 58
+}
+
+n1: "Parse + normalize\nkind, key, option,\ngiới hạn\nDefault +\nschemaVersion" {
+  width: 168
+  height: 121
+}
+
+n2: "Question[] hợp lệ\nForm factory\nMetadata → Control →\nGroup/Record" {
+  width: 184
+  height: 100
+}
+
+n3: "Angular renderer\nInput/select + lỗi +\na11y" {
+  width: 184
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Từ schema runtime đến form và command API (2/2)"
+direction: right
+
+n3: "Angular renderer\nInput/select + lỗi +\na11y" {
+  width: 184
+  height: 79
+}
+
+n4: "Raw value → command\nAPI validate lại" {
+  width: 176
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Một schema nhỏ có thể nằm trong component. Khi schema được dùng lại, hãy đưa type, parser, factory và mapper vào các file riêng theo feature. Điều quan trọng là mỗi lớp có trách nhiệm rõ ràng: parser tin cậy dữ liệu ở runtime, factory tạo cây control, renderer chỉ hiển thị, còn mapper tạo payload nghiệp vụ.

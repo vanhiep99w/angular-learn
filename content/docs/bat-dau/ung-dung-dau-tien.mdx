@@ -86,17 +86,32 @@ npm start -- --open
 
 Khi mở trang, trình duyệt tải JavaScript đã được Angular đóng gói. Điểm vào của ứng dụng thường là `src/main.ts`. Tệp này gọi `bootstrapApplication(...)` để tạo Angular application từ component gốc.
 
-```text
-Trình duyệt
-    │ tải JavaScript
-    ▼
-src/main.ts
-    │ bootstrapApplication(App, appConfig)
-    ▼
-Component gốc
-    │ đọc metadata và template
-    ▼
-DOM bên trong <app-root>
+```d2 title="Từ JavaScript tới component gốc"
+direction: right
+
+n0: "Browser tải JavaScript" {
+  width: 200
+  height: 58
+}
+
+n1: "src/main.ts\nbootstrapApplication(App,\nappConfig)" {
+  width: 224
+  height: 79
+}
+
+n2: "Component gốc\nmetadata + template" {
+  width: 176
+  height: 58
+}
+
+n3: "DOM trong <app-root>" {
+  width: 184
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Một ứng dụng standalone mới thường có đoạn khởi động tương tự sau. Tên class và đường dẫn import có thể khác theo phiên bản CLI hoặc kiểu tên tệp bạn đã chọn.
@@ -186,17 +201,32 @@ Ví dụ dùng `template` nội tuyến để bạn nhìn cả logic và HTML �
 
 `title` là chuỗi thông thường nên template nội suy nó qua `{{ title }}`. `clicks` là một **signal**, tức vùng chứa state mà Angular theo dõi. Khi nhấn nút, event binding `(click)` gọi `increment()`. Hàm này dùng `update` để tạo giá trị mới, và Angular render lại đúng phần template đang đọc `clicks()`.
 
-```text
-Người dùng bấm nút
-       │
-       ▼
-(click) gọi increment()
-       │
-       ▼
-clicks.update(...)
-       │
-       ▼
-{{ clicks() }} hiển thị giá trị mới
+```d2 title="Click cập nhật signal và giao diện"
+direction: right
+
+n0: "Người dùng bấm nút" {
+  width: 168
+  height: 58
+}
+
+n1: "(click) gọi\nincrement()" {
+  width: 130
+  height: 58
+}
+
+n2: "clicks.update(...)" {
+  width: 168
+  height: 58
+}
+
+n3: "{{ clicks() }}\nhiển thị giá trị mới" {
+  width: 184
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Hãy thử bấm nút vài lần. Nếu bộ đếm tăng mà bạn không hề gọi API DOM như `document.querySelector`, bạn đã thấy cơ chế khai báo của Angular: bạn mô tả giao diện dựa trên state, Angular đồng bộ DOM cho bạn.

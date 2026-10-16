@@ -86,29 +86,76 @@ Giả thuyết này dự đoán ba điều: Network có `401`, callback lỗi ch
 
 Dùng cùng một flow cho lỗi do người dùng báo, alert production hoặc regression ở môi trường thử nghiệm. Flow không thay thế kinh nghiệm, nhưng ngăn đội ngũ nhảy thẳng vào mã nguồn khi chưa biết lỗi nằm ở browser, mạng, API hay UI.
 
-```text
-Triệu chứng / alert
-        │
-        ▼
-Ghi URL, thời điểm, release, browser và tác động
-        │
-        ▼
-Tái hiện tối thiểu ── không được ──► giữ bằng chứng, so sánh môi trường
-        │
-        ▼
-Network + Console: request hay exception nào xuất hiện?
-        │
-        ▼
-Source map + breakpoint: nhánh TypeScript nào đã chạy?
-        │
-        ▼
-Kiểm tra state ──► template/DOM ──► change detection khi state đúng nhưng UI sai
-        │
-        ▼
-Sửa tại lớp sở hữu nguyên nhân + regression test
-        │
-        ▼
-Xác minh lại bước tái hiện, release và telemetry
+```d2 title="Điều tra lỗi từ bằng chứng tới xác minh (1/3)"
+direction: right
+
+n0: "Triệu chứng / alert" {
+  width: 176
+  height: 58
+}
+
+n1: "Ghi URL, thời điểm,\nrelease, browser, tác\nđộng" {
+  width: 192
+  height: 79
+}
+
+n2: "Tái hiện tối thiểu\nKhông được: giữ bằng\nchứng, so sánh môi\ntrường" {
+  width: 184
+  height: 100
+}
+
+n3: "Network + Console\nRequest / exception\nnào?" {
+  width: 176
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Điều tra lỗi từ bằng chứng tới xác minh (2/3)"
+direction: right
+
+n3: "Network + Console\nRequest / exception\nnào?" {
+  width: 176
+  height: 79
+}
+
+n4: "Source map +\nbreakpoint\nNhánh TypeScript đã\nchạy" {
+  width: 176
+  height: 100
+}
+
+n5: "State → template / DOM\nCD khi state đúng, UI\nsai" {
+  width: 200
+  height: 79
+}
+
+n6: "Sửa tại lớp sở hữu\nThêm regression test" {
+  width: 184
+  height: 58
+}
+
+n3 -> n4
+n4 -> n5
+n5 -> n6
+```
+
+```d2 title="Điều tra lỗi từ bằng chứng tới xác minh (3/3)"
+direction: right
+
+n6: "Sửa tại lớp sở hữu\nThêm regression test" {
+  width: 184
+  height: 58
+}
+
+n7: "Xác minh tái hiện\nRelease + telemetry" {
+  width: 176
+  height: 58
+}
+
+n6 -> n7
 ```
 
 ### Bộ dữ liệu tối thiểu cho một ca lỗi
@@ -412,20 +459,48 @@ State sai thường có hai dạng: giá trị chưa từng được ghi, hoặc
 
 Vẽ một dòng dữ liệu nhỏ trước khi thêm log:
 
-```text
-HTTP response
-     │
-     ▼
-OrdersService map DTO
-     │
-     ▼
-OrdersStore ghi orders / loading / error
-     │
-     ▼
-OrdersComponent đọc state
-     │
-     ▼
-Template render danh sách hoặc empty state
+```d2 title="Lần theo dữ liệu từ response đến template (1/2)"
+direction: right
+
+n0: "HTTP response" {
+  width: 130
+  height: 58
+}
+
+n1: "OrdersService\nMap DTO" {
+  width: 130
+  height: 58
+}
+
+n2: "OrdersStore\norders / loading /\nerror" {
+  width: 168
+  height: 79
+}
+
+n3: "OrdersComponent\nĐọc state" {
+  width: 144
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Lần theo dữ liệu từ response đến template (2/2)"
+direction: right
+
+n3: "OrdersComponent\nĐọc state" {
+  width: 144
+  height: 58
+}
+
+n4: "Template render list\nhoặc empty state" {
+  width: 184
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Mỗi state nên có một chủ sở hữu rõ ràng. Nếu service, component và interceptor cùng có thể ghi `loading`, việc debug trở thành cuộc đua thời gian. Tách state theo ý nghĩa (`loading`, `data`, `error`) và ghi ở một boundary rõ ràng giúp call stack có giá trị hơn.

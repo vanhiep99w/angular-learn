@@ -43,13 +43,34 @@ description: Dẫn xuất state bằng computed và thực hiện side effect c�
 
 Phân biệt hai loại này giúp tránh giữ hai bản dữ liệu có thể lệch nhau. Nếu `items` là nguồn sự thật, `total` không cần là một writable signal khác; nó chỉ là kết quả của phép tính trên `items`.
 
-```text
-items (state nguồn) ───► total (computed) ───► template
-       │                       ▲
-       └──► selectedCount ─────┘
+```d2 title="Computed dẫn xuất từ state nguồn"
+direction: right
 
-Thay đổi items → computed bị invalid → lần đọc sau tính lại khi cần
+items: "items\nState nguồn" {
+  width: 130
+  height: 58
+}
+
+count: "selectedCount" {
+  width: 130
+  height: 58
+}
+
+total: "total\ncomputed" {
+  width: 130
+  height: 58
+}
+
+template: "Template" {
+  width: 130
+  height: 58
+}
+
+items -> total -> template
+items -> count -> total
 ```
+
+Thay đổi `items` làm computed bị invalid; lần đọc sau sẽ tính lại khi cần.
 
 ### Ví dụ state bị trùng lặp
 
@@ -119,11 +140,32 @@ const displayedPrice = computed(() => {
 
 Khi `showDiscount()` là `false`, `displayedPrice` không đọc `discountRate()`. Do đó, thay `discountRate` không làm computed này invalid. Khi bật giảm giá rồi đọc lại `displayedPrice()`, Angular mới ghi nhận `discountRate` là dependency.
 
-```text
-showDiscount ──► displayedPrice
-listPrice    ──► displayedPrice
+```d2 title="Dependency computed thay đổi theo nhánh đang đọc"
+direction: right
 
-discountRate ──► displayedPrice  (chỉ khi showDiscount() là true)
+show: "showDiscount" {
+  width: 130
+  height: 58
+}
+
+price: "listPrice" {
+  width: 130
+  height: 58
+}
+
+rate: "discountRate" {
+  width: 130
+  height: 58
+}
+
+display: "displayedPrice" {
+  width: 136
+  height: 58
+}
+
+show -> display
+price -> display
+rate -> display: "Chỉ khi showDiscount() = true"
 ```
 
 Cơ chế này giảm tính toán thừa và tự bỏ dependency cũ khi nhánh điều kiện đổi. Đừng tự duy trì danh sách dependency; hãy để lần đọc signal thực tế quyết định nó.
@@ -271,17 +313,32 @@ console.log('sau set');
 
 Không viết logic dựa vào việc dòng log của effect chắc chắn xuất hiện trước hay sau một statement JavaScript cụ thể. Thứ tự hữu ích để ghi nhớ là:
 
-```text
-signal.set(...)
-     │
-     ▼
-Dependency của effect được thông báo là đã đổi
-     │
-     ▼
-Angular lên lịch / chạy một lượt change detection phù hợp
-     │
-     ▼
-Effect chạy với giá trị hiện tại và theo dõi dependency cho lượt sau
+```d2 title="Effect chạy khi dependency được thông báo đổi"
+direction: right
+
+n0: "signal.set(...)" {
+  width: 144
+  height: 58
+}
+
+n1: "Dependency effect\nĐược thông báo đổi" {
+  width: 168
+  height: 58
+}
+
+n2: "Angular lên lịch /\nchạy\nChange detection phù\nhợp" {
+  width: 184
+  height: 100
+}
+
+n3: "Effect đọc giá trị\nhiện tại\nTheo dõi dependency\nlượt sau" {
+  width: 176
+  height: 100
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Nếu nhiều dependency đổi trước khi effect có cơ hội chạy, effect quan sát trạng thái hiện tại khi nó chạy; không nên dùng nó như một hàng đợi để xử lý từng giá trị trung gian. Với yêu cầu xử lý mọi event theo thời gian, Observable/RxJS thường diễn tả đúng hơn.
@@ -528,8 +585,48 @@ Cleanup làm rõ một effect chỉ có một subscription đang hoạt động 
 
 Một effect ghi signal mà effect khác đọc tạo luồng điều khiển gián tiếp. Nhiều effect nối nhau dễ khó debug, gây thứ tự chạy không rõ và có thể tạo vòng lặp phản hồi.
 
-```text
-query ──► effect A ──► result signal ──► effect B ──► trạng thái khác
+```d2 title="Chuỗi effect ghi state dễ tạo coupling (1/2)"
+direction: right
+
+n0: "query" {
+  width: 130
+  height: 58
+}
+
+n1: "effect A" {
+  width: 130
+  height: 58
+}
+
+n2: "result signal" {
+  width: 130
+  height: 58
+}
+
+n3: "effect B" {
+  width: 130
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Chuỗi effect ghi state dễ tạo coupling (2/2)"
+direction: right
+
+n3: "effect B" {
+  width: 130
+  height: 58
+}
+
+n4: "Trạng thái khác" {
+  width: 144
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Tách rõ trách nhiệm: dùng `computed` cho biến đổi state đồng bộ; giữ logic bất đồng bộ trong RxJS/resource; chỉ dùng effect tại ranh giới ngoài cùng. Một effect thật sự cần cập nhật signal vẫn có thể hợp lệ, nhưng cần có lý do nghiệp vụ rõ ràng, điều kiện dừng và cleanup nếu tạo tài nguyên.

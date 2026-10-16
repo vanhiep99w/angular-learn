@@ -123,12 +123,36 @@ trái sang phải. Mỗi interceptor gọi `next()` để giao quyền cho inter
 sau interceptor cuối cùng là HTTP backend. Response và error quay lại qua các
 `Observable` theo chiều ngược lại.
 
-```text
-Request
-HttpClient → telemetry → auth → retry → HTTP backend
+```d2 title="Interceptor: request đi xuôi, response đi ngược"
+direction: right
 
-Response / error
-HttpClient ← telemetry ← auth ← retry ← HTTP backend
+client: "HttpClient" {
+  width: 130
+  height: 58
+}
+
+telemetry: "telemetry" {
+  width: 130
+  height: 58
+}
+
+auth: "auth" {
+  width: 130
+  height: 58
+}
+
+retry: "retry" {
+  width: 130
+  height: 58
+}
+
+backend: "HTTP backend" {
+  width: 130
+  height: 58
+}
+
+client -> telemetry -> auth -> retry -> backend
+backend -> retry -> auth -> telemetry -> client
 ```
 
 Nói chính xác hơn, `telemetry` bọc lời gọi `next()` của nó, `auth` bọc lời gọi

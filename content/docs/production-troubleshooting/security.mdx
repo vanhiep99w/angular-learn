@@ -77,22 +77,55 @@ Tác nhân không chỉ là “hacker” bên ngoài. Một tài khoản bình t
 
 Dữ liệu có thể đổi mức độ tin cậy khi đi qua nhiều hệ thống. Ví dụ, một bài viết do quản trị viên tạo vẫn nên được coi là không tin cậy khi được API trả lại: tài khoản quản trị có thể bị chiếm hoặc CMS có thể lưu HTML sai.
 
-```text
-┌────────────────┐     input / HTML / URL      ┌─────────────────┐
-│ Người dùng/CMS │ ───────────────────────────►│ API hoặc CDN    │
-└────────────────┘                             └────────┬────────┘
-                                                        │ JSON / HTML
-                                                        ▼
-┌────────────────┐   DOM đã escape/sanitize    ┌─────────────────┐
-│ Trình duyệt    │ ◄────────────────────────── │ Angular app     │
-│ (cookie, DOM)  │ ───── request có auth ────► │ template/client │
-└───────┬────────┘                             └────────┬────────┘
-        │                                               │
-        │ CSP, cookie policy, browser CORS              │ authz + validation
-        ▼                                               ▼
-┌────────────────┐                              ┌─────────────────┐
-│ Origin khác    │                              │ API/Database    │
-└────────────────┘                              └─────────────────┘
+```d2 title="Dữ liệu từ nguồn ngoài đến DOM browser"
+direction: right
+
+n0: "Người dùng / CMS" {
+  width: 152
+  height: 58
+}
+
+n1: "API hoặc CDN" {
+  width: 130
+  height: 58
+}
+
+n2: "Angular app\nTemplate / client" {
+  width: 160
+  height: 58
+}
+
+n0 -> n1: "Input / HTML / URL"
+n1 -> n2: "JSON / HTML"
+```
+
+```d2 title="Chính sách browser và xác thực ở API"
+direction: right
+
+browser: "Browser\nCookie + DOM" {
+  width: 130
+  height: 58
+}
+
+app: "Angular client" {
+  width: 136
+  height: 58
+}
+
+other: "Origin khác" {
+  width: 130
+  height: 58
+}
+
+api: "API / database" {
+  width: 136
+  height: 58
+}
+
+app -> browser: "DOM escape / sanitize"
+browser -> app: "Request có auth"
+browser -> other: "CSP, cookie policy,\nbrowser CORS"
+app -> api: "Authz + validation"
 ```
 
 Biểu đồ cho thấy browser thực thi một phần chính sách, nhưng API mới là nơi quyết định request có được phép hay không. CORS không thay thế authorization; nó chỉ là quy tắc browser áp dụng trước khi JavaScript đọc response cross-origin.

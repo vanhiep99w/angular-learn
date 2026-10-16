@@ -59,18 +59,26 @@ server.
 
 ### Ranh giới trách nhiệm
 
-```text
-┌────────────────────────── Angular client ──────────────────────────┐
-│ Form login · trạng thái UI · interceptor · guard · thông báo lỗi   │
-└──────────────────────────────────┬─────────────────────────────────┘
-                                   │ request kèm cookie hoặc token
-                                   ▼
-┌──────────────────────── API / authorization server ────────────────┐
-│ Xác minh credential · kiểm tra hết hạn · kiểm tra quyền · audit log│
-└──────────────────────────────────┬─────────────────────────────────┘
-                                   │ 200 / 401 / 403 / dữ liệu
-                                   ▼
-                            Angular cập nhật UI
+```d2 title="Client điều phối UI, server thực thi xác thực và quyền"
+direction: right
+
+n0: "Angular client\nLogin form, UI state,\ninterceptor, guard,\nlỗi" {
+  width: 192
+  height: 100
+}
+
+n1: "API / auth server\nCredential, hạn dùng,\nquyền, audit log" {
+  width: 192
+  height: 79
+}
+
+n2: "Angular cập nhật UI" {
+  width: 176
+  height: 58
+}
+
+n0 -> n1: "Cookie hoặc token"
+n1 -> n2: "200 / 401 / 403 / dữ liệu"
 ```
 
 <Callout type="warn" title="Client không phải điểm thực thi bảo mật">
@@ -131,15 +139,27 @@ Với single-page application, dùng **Authorization Code flow với PKCE**
 redirect. Kèm `state` để liên kết đúng request/response và `nonce` khi ứng dụng
 xác minh ID token. Tránh Implicit flow cũ cho ứng dụng mới.
 
-```text
-Angular                Identity provider                   API
-   │ tạo state, nonce, PKCE verifier                         │
-   ├──── redirect /authorize + code_challenge ──────────────►│
-   │◄──────────── redirect về callback?code=... ─────────────┤
-   │ đổi code bằng verifier / nhận phiên theo thiết kế       │
-   ├────────────────────────────────────────────────────────►│
-   │ gọi API với credential hợp lệ                           │
-   ├─────────────────────────────────────────────────────────►
+```d2 title="Authorization Code với PKCE (1/2)"
+shape: sequence_diagram
+
+angular: "Angular"
+idp: "Identity provider"
+api: "API"
+
+angular -> angular: "Tạo state, nonce, PKCE verifier"
+angular -> idp: "/authorize + code_challenge"
+idp -> angular: "Redirect callback?code=..."
+angular -> idp: "Đổi code + verifier / nhận phiên"
+```
+
+```d2 title="Authorization Code với PKCE (2/2)"
+shape: sequence_diagram
+
+angular: "Angular"
+idp: "Identity provider"
+api: "API"
+
+angular -> api: "Gọi API với credential hợp lệ"
 ```
 
 Nên dùng thư viện OIDC đã được bảo trì hoặc một BFF (Backend for Frontend) thay
@@ -157,21 +177,32 @@ guard có thể redirect nhầm về login ngay khi ứng dụng vừa khởi đ
 Ví dụ này giả định backend quản lý session bằng cookie `HttpOnly`; Angular không
 đọc cookie và không nhận session secret trong JSON.
 
-```text
-Người dùng          Angular                    Auth API                    API
-    │                  │                           │                         │
-    │ email/mật khẩu   │                           │                         │
-    ├─────────────────►│ POST /auth/login          │                         │
-    │                  ├──────────────────────────►│                         │
-    │                  │ Set-Cookie (HttpOnly)     │                         │
-    │                  │◄──────────────────────────┤                         │
-    │ mở /tasks        │                           │                         │
-    ├─────────────────►│ GET /auth/session         │                         │
-    │                  ├──────────────────────────►│                         │
-    │                  │ user tóm tắt hoặc 401     │                         │
-    │                  │◄──────────────────────────┤                         │
-    │                  ├──── GET /api/tasks, cookie tự gửi ─────────────────►│
-    │                  │◄────────────────────────── dữ liệu / 401 ───────────┤
+```d2 title="Đăng nhập bằng cookie HttpOnly (1/2)"
+shape: sequence_diagram
+
+user: "Người dùng"
+angular: "Angular"
+auth: "Auth API"
+api: "API"
+
+user -> angular: "Email / mật khẩu"
+angular -> auth: "POST /auth/login"
+auth -> angular: "Set-Cookie: HttpOnly"
+user -> angular: "Mở /tasks"
+```
+
+```d2 title="Đăng nhập bằng cookie HttpOnly (2/2)"
+shape: sequence_diagram
+
+user: "Người dùng"
+angular: "Angular"
+auth: "Auth API"
+api: "API"
+
+angular -> auth: "GET /auth/session"
+auth -> angular: "User tóm tắt hoặc 401"
+angular -> api: "GET /api/tasks + cookie tự gửi"
+api -> angular: "Dữ liệu hoặc 401"
 ```
 
 Ở lúc khởi động, gọi endpoint như `GET /auth/session` hoặc `GET /me` để server

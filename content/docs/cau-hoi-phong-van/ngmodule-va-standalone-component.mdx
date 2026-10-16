@@ -132,17 +132,42 @@ export class ProfileModule {}
 
 Luồng phụ thuộc của template là:
 
-```text
-UserCardComponent
-        │ được khai báo trong
-        ▼
-UsersModule
-        │ imports
-        ▼
-CommonModule
-        │ cung cấp DatePipe, NgIf, NgFor...
-        ▼
-Template của UserCardComponent dùng được date
+```d2 title="NgModule khai báo component và import dependency"
+direction: right
+
+n0: "UserCardComponent" {
+  width: 160
+  height: 58
+}
+
+n1: "UsersModule\ndeclarations" {
+  width: 130
+  height: 58
+}
+
+n2: "CommonModule" {
+  width: 130
+  height: 58
+}
+
+n0 -> n1: "Khai báo trong"
+n1 -> n2: "imports"
+```
+
+```d2 title="CommonModule cung cấp pipe và directive cho template"
+direction: right
+
+n0: "CommonModule\nDatePipe, NgIf, NgFor" {
+  width: 192
+  height: 58
+}
+
+n1: "Template\nUserCardComponent\nDùng được date" {
+  width: 160
+  height: 79
+}
+
+n0 -> n1: "Cung cấp"
 ```
 
 `exports` là phần dễ quên. `declarations` chỉ làm component dùng được bên trong `UsersModule`; muốn module khác dùng nó, module phải export component đó.
@@ -197,14 +222,32 @@ export class ProfilePageComponent {
 
 Luồng phụ thuộc ngắn hơn:
 
-```text
-ProfilePageComponent ── imports ──► UserCardComponent
-                                           │ imports
-                                           ▼
-                                        DatePipe
-                                           │
-                                           ▼
-                              Template dùng được date
+```d2 title="Dependency template của standalone component"
+direction: right
+
+n0: "ProfilePageComponent" {
+  width: 184
+  height: 58
+}
+
+n1: "UserCardComponent" {
+  width: 160
+  height: 58
+}
+
+n2: "DatePipe" {
+  width: 130
+  height: 58
+}
+
+n3: "Template dùng date" {
+  width: 168
+  height: 58
+}
+
+n0 -> n1: "imports"
+n1 -> n2: "imports"
+n2 -> n3
 ```
 
 Standalone không có nghĩa mỗi component phải tự import mọi thứ một cách máy móc. Một component có thể import một standalone component khác, hoặc import một `NgModule` cũ khi cần dùng các declaration mà module đó export.

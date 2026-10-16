@@ -85,21 +85,30 @@ Angular dùng dấu ngoặc trong template để biểu đạt bốn trường h
 
 Phần lớn component nên giữ luồng một chiều rõ ràng: component cung cấp state cho template; sự kiện từ template gọi một handler; handler thay đổi state; Angular phản ánh state mới ra template.
 
-```text
-┌──────────────────┐   property / interpolation   ┌──────────────────┐
-│ State component  │ ───────────────────────────► │ DOM / template   │
-│ name, signal,    │                              │ text, disabled,  │
-│ form control     │ ◄─────────────────────────── │ input, click     │
-└────────┬─────────┘       event / $event         └──────────────────┘
-         │
-         │ Handler cập nhật state
-         ▼
-┌──────────────────┐
-│ Angular đồng bộ  │
-│ phần giao diện   │
-│ phụ thuộc state  │
-└──────────────────┘
+```d2 title="Data binding nối state và DOM"
+direction: right
+
+state: "State component\nname, signal, form\ncontrol" {
+  width: 168
+  height: 79
+}
+
+dom: "DOM / template\nText, disabled, input,\nclick" {
+  width: 200
+  height: 79
+}
+
+handler: "Event handler\nCập nhật state" {
+  width: 136
+  height: 58
+}
+
+state -> dom: "Property /\ninterpolation"
+dom -> handler: "Event / \$event"
+handler -> state
 ```
+
+Angular đồng bộ phần giao diện phụ thuộc vào state; event handler cập nhật state qua `$event`.
 
 Two-way binding rút ngắn đoạn đường này cho các giá trị có thể chỉnh sửa, ví dụ ô nhập liệu. Tuy vậy, phía trong nó vẫn là một đầu vào và một thông báo thay đổi. Hiểu luồng một chiều trước sẽ giúp bạn biết khi nào two-way binding làm mã rõ hơn, khi nào nó che khuất logic cập nhật.
 

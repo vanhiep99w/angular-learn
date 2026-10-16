@@ -68,24 +68,48 @@ Cách học hiệu quả là **đọc một bài, thay đổi một phần của
 
 Router và form đều quản lý **trạng thái**, nhưng nguồn thay đổi của chúng khác nhau. Router biến URL thành cây component đang hiển thị. Form biến các thao tác nhập thành một mô hình dữ liệu có giá trị, trạng thái hợp lệ và lỗi.
 
-```text
-Người dùng thay đổi URL hoặc bấm liên kết
-                 │
-                 ▼
-┌────────────── Angular Router ──────────────┐
-│ khớp route → chạy guard/resolver → dựng UI │
-└──────────────────────┬─────────────────────┘
-                       │
-                       ▼
-              Component của màn hình
-                       │
-                       ▼
-┌────────────── Reactive Form ───────────────┐
-│ nhận input → cập nhật controls → validation│
-└──────────────────────┬─────────────────────┘
-                       │
-                       ▼
-              dữ liệu hợp lệ cho nghiệp vụ/API
+```d2 title="Routing chọn màn hình, form quản lý dữ liệu nhập (1/2)"
+direction: right
+
+n0: "URL đổi / bấm liên kết" {
+  width: 200
+  height: 58
+}
+
+n1: "Angular Router\nKhớp route →\nguard/resolver → UI" {
+  width: 176
+  height: 79
+}
+
+n2: "Component màn hình" {
+  width: 168
+  height: 58
+}
+
+n3: "Reactive Form\nInput → controls →\nvalidation" {
+  width: 168
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Routing chọn màn hình, form quản lý dữ liệu nhập (2/2)"
+direction: right
+
+n3: "Reactive Form\nInput → controls →\nvalidation" {
+  width: 168
+  height: 79
+}
+
+n4: "Dữ liệu hợp lệ\nCho nghiệp vụ / API" {
+  width: 176
+  height: 58
+}
+
+n3 -> n4
 ```
 
 ### Router: từ URL đến trạng thái giao diện

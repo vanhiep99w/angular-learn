@@ -135,20 +135,48 @@ export class StatusComponent {
 
 Ở ứng dụng Angular dùng Zone.js theo kiểu truyền thống, một event trong template như `(click)` là notification để Angular chạy change detection.
 
-```text
-Người dùng click
-      │
-      ▼
-finish() gán message mới
-      │
-      ▼
-Angular kiểm tra view có {{ message }}
-      │
-      ▼
-"Đang chờ" khác "Đã tải xong"
-      │
-      ▼
-Angular đổi text node trong DOM
+```d2 title="Angular chỉ đổi DOM khi binding khác (1/2)"
+direction: right
+
+n0: "Người dùng click" {
+  width: 152
+  height: 58
+}
+
+n1: "finish() gán message" {
+  width: 184
+  height: 58
+}
+
+n2: "Kiểm tra view\ncó {{ message }}" {
+  width: 152
+  height: 58
+}
+
+n3: "Đang chờ ≠ Đã tải xong" {
+  width: 200
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Angular chỉ đổi DOM khi binding khác (2/2)"
+direction: right
+
+n3: "Đang chờ ≠ Đã tải xong" {
+  width: 200
+  height: 58
+}
+
+n4: "Đổi text node DOM" {
+  width: 160
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Nếu `message` không đổi, Angular vẫn có thể kiểm tra binding ở lượt đó, nhưng không ghi lại text node.
@@ -173,21 +201,48 @@ export class StatusComponent {
 
 Khi template gọi `message()`, Angular ghi nhận view này là consumer của `message`.
 
-```text
-Lần render đầu
-StatusComponent template đọc message()
-      │
-      ▼
-Angular ghi nhận dependency
-      │
-      ▼
-message.set('Đã tải xong')
-      │
-      ▼
-Angular đánh dấu StatusComponent view cần đồng bộ
-      │
-      ▼
-Angular kiểm tra binding rồi chỉ đổi DOM khác biệt
+```d2 title="Signal theo dõi lần đọc và đánh dấu view (1/2)"
+direction: right
+
+n0: "Render đầu\nStatusComponent đọc\nmessage()" {
+  width: 176
+  height: 79
+}
+
+n1: "Angular ghi dependency" {
+  width: 200
+  height: 58
+}
+
+n2: "message.set\nĐã tải xong" {
+  width: 130
+  height: 58
+}
+
+n3: "Đánh dấu\nStatusComponent\nCần đồng bộ" {
+  width: 144
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Signal theo dõi lần đọc và đánh dấu view (2/2)"
+direction: right
+
+n3: "Đánh dấu\nStatusComponent\nCần đồng bộ" {
+  width: 144
+  height: 79
+}
+
+n4: "Kiểm tra binding\nChỉ đổi DOM khác biệt" {
+  width: 192
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Signal không trực tiếp tìm một text node và sửa nó. Signal thông báo state đổi; Angular vẫn thực hiện bước đồng bộ view với DOM.
@@ -226,11 +281,32 @@ Một component `OnPush` thường được kiểm tra khi có một notificatio
 
 Ví dụ có một cây UI như sau:
 
-```text
-AppComponent
-├── HeaderComponent
-├── SidebarComponent
-└── InvestmentResultsComponent  ← đọc investmentService.results()
+```d2 title="View đọc service signal trong cây component"
+direction: right
+
+app: "AppComponent" {
+  width: 130
+  height: 58
+}
+
+header: "HeaderComponent" {
+  width: 144
+  height: 58
+}
+
+sidebar: "SidebarComponent" {
+  width: 152
+  height: 58
+}
+
+results: "InvestmentResultsComponent\nĐọc\ninvestmentService.results()" {
+  width: 240
+  height: 79
+}
+
+app -> header
+app -> sidebar
+app -> results
 ```
 
 Khi `results` đổi, `InvestmentResultsComponent` là view liên quan trực tiếp. `HeaderComponent` và `SidebarComponent` không tự nhiên cần xử lý bảng kết quả. Signal và `OnPush` giúp Angular tránh nhiều công việc không liên quan, nhưng Angular vẫn phải đi qua đường cần thiết trong cây view để đến view đã được đánh dấu.
@@ -481,13 +557,22 @@ this._results.update((current) => [
 
 Một component page rất lớn phải kiểm tra nhiều binding cùng lúc khi bất kỳ state liên quan nào của nó tạo notification. Nếu các vùng UI độc lập, tách chúng thành component có ranh giới rõ ràng sẽ giúp Angular bỏ qua vùng không liên quan.
 
-```text
-DashboardPageComponent
-├── DashboardFiltersComponent     (OnPush)
-├── DashboardTableComponent       (OnPush)
-├── DashboardChartComponent       (OnPush)
-├── NotificationPanelComponent    (OnPush)
-└── UserProfileComponent          (OnPush)
+```d2 title="Dashboard chia thành các nhánh OnPush"
+direction: right
+page: "DashboardPageComponent" {
+  width: 210
+  height: 58
+}
+children: "Các component con OnPush" {
+  grid-columns: 2
+  grid-gap: 12
+  filters: "DashboardFiltersComponent" {width: 250; height: 50}
+  table: "DashboardTableComponent" {width: 250; height: 50}
+  chart: "DashboardChartComponent" {width: 250; height: 50}
+  notification: "NotificationPanelComponent" {width: 250; height: 50}
+  profile: "UserProfileComponent" {width: 250; height: 50}
+}
+page -> children
 ```
 
 Không tách component chỉ để tăng số file. Tách khi các phần có state, input hoặc nhịp cập nhật khác nhau. Ví dụ filter thay đổi thường xuyên không cần làm profile người dùng phải xử lý bảng dữ liệu.

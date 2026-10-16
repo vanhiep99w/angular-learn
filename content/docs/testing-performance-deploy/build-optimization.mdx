@@ -59,22 +59,68 @@ Một ứng dụng Angular có thể có **kích thước build** nhỏ nhưng v
 
 Khi chạy production build, Angular CLI đọc entry point, lần theo các `import`, biên dịch template và tối ưu đầu ra. Bundler loại phần mã không được dùng khi có thể (tree shaking), gộp hoặc tách module thành chunks, rút gọn mã và sinh tệp trong thư mục output. Cấu hình builder và phiên bản Angular quyết định chi tiết tên tệp, định dạng stats và thuật toán đóng gói; không nên giả định mọi dự án có cùng một danh sách chunks.
 
-```text
-Mã ứng dụng + thư viện + assets
-              │
-              ▼
-      Angular CLI production build
-              │
-      ┌───────┼───────────────────┐
-      ▼       ▼                   ▼
-  compile   tree shaking     minify / CSS optimize
-      │       │                   │
-      └───────┴─────────┬─────────┘
-                         ▼
-          initial chunks + lazy chunks + assets
-                         │
-                         ▼
-       CDN/browser cache ──► người dùng tải theo nhu cầu
+```d2 title="Production build tạo initial và lazy chunks"
+direction: right
+
+source: "Code + thư viện +\nassets" {
+  width: 160
+  height: 58
+}
+
+cli: "Angular CLI\nProduction build" {
+  width: 152
+  height: 58
+}
+
+compile: "Compile" {
+  width: 130
+  height: 58
+}
+
+shake: "Tree shaking" {
+  width: 130
+  height: 58
+}
+
+minify: "Minify / CSS optimize" {
+  width: 192
+  height: 58
+}
+
+chunks: "Initial + lazy chunks\nAssets" {
+  width: 192
+  height: 58
+}
+
+source -> cli
+cli -> compile
+cli -> shake
+cli -> minify
+compile -> chunks
+shake -> chunks
+minify -> chunks
+```
+
+```d2 title="Phân phối build output theo nhu cầu"
+direction: right
+
+n0: "Initial + lazy chunks\nAssets" {
+  width: 192
+  height: 58
+}
+
+n1: "CDN / browser cache" {
+  width: 176
+  height: 58
+}
+
+n2: "Người dùng tải\ntheo nhu cầu" {
+  width: 136
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
 ```
 
 Tree shaking chỉ hoạt động tốt khi dependency công bố module có thể phân tích tĩnh và ứng dụng import đúng phần cần dùng. Một package CommonJS, một import tập hợp quá lớn, hoặc side effect lúc nạp module có thể khiến bundler phải giữ lại nhiều mã hơn dự kiến. Hãy xem output thay vì tin rằng mọi import đều được loại bỏ tự động.
@@ -413,14 +459,26 @@ Source map là trade-off giữa khả năng điều tra và nguy cơ lộ source
 
 Khi nội dung tệp thay đổi, `outputHashing: "all"` tạo tên như `main.A1B2C3.js`. CDN có thể cache tệp hash lâu vì URL mới được sinh khi nội dung mới xuất hiện. HTML entry point phải được cập nhật nhanh hơn để trỏ đến hash mới.
 
-```text
-HTML entry (cache ngắn / cần revalidate)
-        │ tham chiếu
-        ▼
-main.A1B2C3.js, styles.D4E5F6.css (cache dài, immutable)
-        │
-        ▼
-Lần release sau tạo URL hash mới cho nội dung mới
+```d2 title="Hash URL giúp cache asset qua các release"
+direction: right
+
+n0: "HTML entry\nCache ngắn /\nrevalidate" {
+  width: 130
+  height: 79
+}
+
+n1: "main.A1B2C3.js\nstyles.D4E5F6.css\nCache dài, immutable" {
+  width: 184
+  height: 79
+}
+
+n2: "Release sau\nNội dung mới → URL\nhash mới" {
+  width: 168
+  height: 79
+}
+
+n0 -> n1: "Tham chiếu"
+n1 -> n2
 ```
 
 Không đặt bí mật vào `environment.ts`, JSON cấu hình public hay bất kỳ bundle nào. Mọi giá trị client nhận được đều có thể bị xem. Với URL API hoặc feature flag không bí mật cần đổi sau build, cân nhắc file cấu hình runtime được deploy cùng ứng dụng, được tải trước bootstrap và có cache policy rõ ràng. Trade-off là thêm request và cần xử lý lỗi/timing bootstrap; đổi lại không cần build lại chỉ để đổi endpoint công khai.

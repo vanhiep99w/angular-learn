@@ -82,44 +82,63 @@ Các `EnvironmentInjector` không phải là một injector duy nhất chứa t�
 
 Khi component hoặc directive yêu cầu một token, Angular tìm trong `ElementInjector` hiện tại trước, rồi đi lên các `ElementInjector` tổ tiên. Nếu vẫn không có provider, Angular tiếp tục theo chuỗi `EnvironmentInjector`: route hiện tại → application → platform. Nếu đến `NullInjector` mà vẫn không tìm thấy token, Angular ném `NullInjectorError`.
 
-```text
-Component con yêu cầu AUTH_API
+```d2 title="Tra cứu token: đi lên khi không có provider (1/2)"
+direction: right
 
-┌─────────────────────────────────────────────────────────────────┐
-│ ElementInjector: <checkout-page>                                │
-│ providers: [CheckoutSession]                                    │
-└─────────────────────────────────────────────────────────────────┘
-                               │ không có AUTH_API thì đi lên
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ ElementInjector: <app-root>                                     │
-│ providers: [ThemeService]                                       │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ EnvironmentInjector: route hiện tại (chỉ có khi route có         │
-│ providers)                                                       │
-│ providers: [OrderDraft]                                         │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ EnvironmentInjector: application                                │
-│ providers: [HttpClient, API_URL, AUTH_API]  ──► trả instance     │
-└─────────────────────────────────────────────────────────────────┘
-                               │ không có AUTH_API thì đi lên
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ Platform injector                                               │
-│ Provider ở cấp nền tảng Angular; ứng dụng thường ít tự cấu hình │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ NullInjector  ──► không có provider: ném NullInjectorError      │
-└─────────────────────────────────────────────────────────────────┘
+n0: "Component con\nYêu cầu AUTH_API" {
+  width: 152
+  height: 58
+}
+
+n1: "ElementInjector\ncheckout-page\nproviders:\nCheckoutSession" {
+  width: 144
+  height: 100
+}
+
+n2: "ElementInjector\napp-root\nproviders:\nThemeService" {
+  width: 144
+  height: 100
+}
+
+n3: "Route\nEnvironmentInjector\nChỉ khi route có\nproviders\nproviders: OrderDraft" {
+  width: 192
+  height: 121
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
+
+```d2 title="Tra cứu token: đi lên khi không có provider (2/2)"
+direction: right
+
+n3: "Route\nEnvironmentInjector\nChỉ khi route có\nproviders\nproviders: OrderDraft" {
+  width: 192
+  height: 121
+}
+
+n4: "App\nEnvironmentInjector\nHttpClient, API_URL,\nAUTH_API\nCó AUTH_API: trả\ninstance" {
+  width: 184
+  height: 142
+}
+
+n5: "Platform injector\nProvider nền tảng" {
+  width: 160
+  height: 58
+}
+
+n6: "NullInjector\nKhông có provider:\nNullInjectorError" {
+  width: 168
+  height: 79
+}
+
+n3 -> n4
+n4 -> n5
+n5 -> n6
+```
+
+Tra cứu dừng ngay khi tìm thấy provider. Chỉ tiếp tục lên injector kế tiếp nếu cấp hiện tại không cung cấp token; `Platform injector` thường ít được ứng dụng tự cấu hình.
 
 <Callout type="info" title="Đọc cây injector trong Angular DevTools">
   DevTools hiển thị các scope thực sự tồn tại trên đường tìm kiếm của component đang chọn. `Root` là `EnvironmentInjector` của application; `Platform` là injector cha của nó; `Null Injector` là điểm dừng cuối. Nếu ứng dụng dùng standalone component, bạn có thể thấy node như `Standalone_[AppComponent]`. Route không có `providers` thì không có route injector riêng để hiển thị.

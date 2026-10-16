@@ -55,15 +55,42 @@ description: Chọn CSR, prerender hoặc SSR; hiểu hydration, bảo vệ code
 | Prerender | Khi build/deploy | Trang marketing, tài liệu, danh mục ít thay đổi, URL hữu hạn | Nội dung có thể cũ cho tới build/revalidate tiếp theo; không biết request hoặc người dùng cụ thể |
 | SSR | Mỗi request đến server | Trang chi tiết công khai, SEO quan trọng, nội dung thay đổi thường xuyên hoặc phụ thuộc URL | Tăng tải và độ phức tạp runtime ở server; phải quản lý cache và lỗi backend |
 
-```text
-CSR
-Browser ── tải JS ──► Angular tạo HTML và gắn sự kiện
+```d2 title="CSR, prerender và SSR tạo HTML ở thời điểm khác nhau"
+direction: right
 
-Prerender
-Build ──► HTML tĩnh trên CDN ──► Browser hydrate khi tải JS
+csr: "CSR\nBrowser tải JS" {
+  width: 136
+  height: 58
+}
 
-SSR
-Request ──► Node server chạy Angular ──► HTML ──► Browser hydrate khi tải JS
+csrDom: "Angular tạo HTML\nGắn sự kiện" {
+  width: 152
+  height: 58
+}
+
+pre: "Prerender\nBuild tạo HTML tĩnh" {
+  width: 176
+  height: 58
+}
+
+cdn: "CDN → browser\nHydrate khi tải JS" {
+  width: 168
+  height: 58
+}
+
+ssr: "SSR\nRequest tới Node\nserver" {
+  width: 152
+  height: 79
+}
+
+html: "Angular trả HTML\nBrowser hydrate khi\ntải JS" {
+  width: 176
+  height: 79
+}
+
+csr -> csrDom
+pre -> cdn
+ssr -> html
 ```
 
 SSR và prerender chỉ giúp **HTML đầu** đến sớm hơn. Chúng không làm bundle JavaScript tự nhỏ đi, không thay thế cache API, và không bảo vệ dữ liệu nhạy cảm. Sau hydration, ứng dụng vẫn là Angular chạy trong browser; [Build và tối ưu bundle](/docs/testing-performance-deploy/build-optimization) vẫn cần được đo và tối ưu độc lập.
@@ -140,18 +167,28 @@ Các API, tên file và khả năng prerender params có thể khác giữa phi�
 
 Với route SSR, Angular chạy component tree trong tiến trình server. Các provider server-side lấy dữ liệu cần thiết, template sinh HTML và runtime trả HTML cho browser. Khi JavaScript tải xong, Angular client khởi tạo cùng route, đọc thông tin hydration trong HTML và nối lại ứng dụng với DOM hiện hữu.
 
-```text
-┌───────────┐ request /products/42 ┌──────────────────┐
-│ Browser   │ ───────────────────► │Angular SSR server│
-└─────┬─────┘                      └────────┬─────────┘
-      │                                     │ lấy dữ liệu
-      │ HTML + CSS + hydration metadata     ▼
-      │ ◄─────────────────────────────── API / database
-      ▼
-Hiển thị HTML ban đầu
-      │ tải JavaScript
-      ▼
-Angular client đối chiếu DOM, gắn listener và tiếp quản tương tác
+```d2 title="SSR trả HTML trước, client hydrate để tiếp quản (1/2)"
+shape: sequence_diagram
+
+browser: "Browser"
+server: "Angular SSR server"
+api: "API / database"
+
+browser -> server: "Request /products/42"
+server -> api: "Lấy dữ liệu"
+api -> server: "Dữ liệu render"
+server -> browser: "HTML + CSS + hydration metadata"
+```
+
+```d2 title="SSR trả HTML trước, client hydrate để tiếp quản (2/2)"
+shape: sequence_diagram
+
+browser: "Browser"
+server: "Angular SSR server"
+api: "API / database"
+
+browser -> browser: "Hiển thị HTML ban đầu; tải JS"
+browser -> browser: "Đối chiếu DOM, gắn listener, tiếp quản tương tác"
 ```
 
 Ở đây có hai lần chạy logic render: một lần trên server, một lần trong browser. Vì vậy template và dữ liệu ban đầu phải cho cùng một cấu trúc DOM. Ví dụ server render ba thẻ `<li>` nhưng client lập tức có bốn phần tử do một request khác, Angular không thể ghép chính xác các node đã có.
