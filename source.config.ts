@@ -7,6 +7,9 @@ export const docs = defineDocs({
 
 export default defineConfig({
   mdxOptions: {
-    remarkPlugins: [remarkD2],
+    remarkPlugins: [[remarkD2, {
+      // Pages' documented Next.js cache path; enable Build cache in its dashboard.
+      cacheDir: '.next/cache/docs-kit/d2',
+    }]],
   },
 });
