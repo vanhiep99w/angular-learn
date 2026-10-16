@@ -1,0 +1,731 @@
+---
+title: "Signals vs RxJS: Signals có thay thế được RxJS không?"
+description: "Câu trả lời phỏng vấn về Signals và RxJS trong Angular: khác biệt giữa state và stream, phần có thể thay thế, phần nên giữ RxJS và ví dụ kết hợp thực tế."
+---
+
+<Callout type="info" title="Trả lời ngắn">
+  **Signals có thể thay thế một số cách dùng RxJS, nhưng không thay thế toàn bộ RxJS.** State UI (trạng thái giao diện) và giá trị tính từ state thường đơn giản hơn với `signal` và `computed`. RxJS vẫn phù hợp khi cần chờ người dùng ngừng nhập rồi mới xử lý (debounce), điều phối request, xử lý từng sự kiện hoặc kiểm soát thứ tự tác vụ. Dữ liệu bất đồng bộ cũng có thể được đưa vào mô hình Signals qua các API resource; không phải cứ có async là bắt buộc phải viết pipeline RxJS.
+</Callout>
+
+## Mục lục
+
+- [Câu trả lời dùng trong phỏng vấn](#câu-trả-lời-dùng-trong-phỏng-vấn)
+- [Signal và RxJS khác nhau ở điểm nào](#signal-và-rxjs-khác-nhau-ở-điểm-nào)
+  - [Giá trị hiện tại và luồng theo thời gian](#giá-trị-hiện-tại-và-luồng-theo-thời-gian)
+  - [Pull và push không đồng nghĩa đồng bộ và bất đồng bộ](#pull-và-push-không-đồng-nghĩa-đồng-bộ-và-bất-đồng-bộ)
+  - [Bảng so sánh](#bảng-so-sánh)
+- [Phần nào Signals có thể thay thế](#phần-nào-signals-có-thể-thay-thế)
+  - [State UI đang được giữ bằng BehaviorSubject](#state-ui-đang-được-giữ-bằng-behaviorsubject)
+  - [Giá trị dẫn xuất chỉ phục vụ UI](#giá-trị-dẫn-xuất-chỉ-phục-vụ-ui)
+  - [Đọc dữ liệu bất đồng bộ theo tham số](#đọc-dữ-liệu-bất-đồng-bộ-theo-tham-số)
+- [Phần nào RxJS vẫn có lợi thế](#phần-nào-rxjs-vẫn-có-lợi-thế)
+  - [Chính sách thời gian và request chồng nhau](#chính-sách-thời-gian-và-request-chồng-nhau)
+  - [Từng sự kiện và thứ tự xử lý](#từng-sự-kiện-và-thứ-tự-xử-lý)
+  - [Lỗi và kết thúc của luồng](#lỗi-và-kết-thúc-của-luồng)
+- [Ví dụ phối hợp Signals và RxJS](#ví-dụ-phối-hợp-signals-và-rxjs)
+  - [Component tìm kiếm](#component-tìm-kiếm)
+  - [Luồng xử lý và ranh giới trách nhiệm](#luồng-xử-lý-và-ranh-giới-trách-nhiệm)
+- [Vì sao effect không tự thay thế switchMap](#vì-sao-effect-không-tự-thay-thế-switchmap)
+- [Interop không làm hai mô hình trở thành một](#interop-không-làm-hai-mô-hình-trở-thành-một)
+  - [toSignal tạo subscription chứ không loại bỏ RxJS](#tosignal-tạo-subscription-chứ-không-loại-bỏ-rxjs)
+  - [toObservable không phát lại mọi lần set](#toobservable-không-phát-lại-mọi-lần-set)
+- [Chọn gì cho từng bài toán](#chọn-gì-cho-từng-bài-toán)
+- [Các câu hỏi gài thường gặp](#các-câu-hỏi-gài-thường-gặp)
+  - [Có Signals rồi có cần học RxJS nữa không](#có-signals-rồi-có-cần-học-rxjs-nữa-không)
+  - [BehaviorSubject có phải chỉ là Signal với cú pháp khác](#behaviorsubject-có-phải-chỉ-là-signal-với-cú-pháp-khác)
+  - [Ứng dụng nhỏ có thể không viết RxJS trực tiếp không](#ứng-dụng-nhỏ-có-thể-không-viết-rxjs-trực-tiếp-không)
+  - [Signals có luôn nhanh hơn RxJS không](#signals-có-luôn-nhanh-hơn-rxjs-không)
+  - [Zoneless có yêu cầu bỏ RxJS không](#zoneless-có-yêu-cầu-bỏ-rxjs-không)
+  - [switchMap có bảo đảm server chưa xử lý request không](#switchmap-có-bảo-đảm-server-chưa-xử-lý-request-không)
+- [Lộ trình chuyển đổi trong dự án cũ](#lộ-trình-chuyển-đổi-trong-dự-án-cũ)
+  - [Phân loại dữ liệu](#phân-loại-dữ-liệu)
+  - [Chuyển state UI trước](#chuyển-state-ui-trước)
+  - [Giữ pipeline có chính sách rõ ràng](#giữ-pipeline-có-chính-sách-rõ-ràng)
+  - [Kiểm thử hành vi và vòng đời](#kiểm-thử-hành-vi-và-vòng-đời)
+- [Tóm tắt để nhớ](#tóm-tắt-để-nhớ)
+- [Tài liệu tham khảo](#tài-liệu-tham-khảo)
+- [Đọc tiếp](#đọc-tiếp)
+
+## Câu trả lời dùng trong phỏng vấn
+
+> Signals không thay thế toàn bộ RxJS. Signal giữ giá trị hiện tại và tích hợp trực tiếp với template Angular. RxJS làm việc với Observable, tức luồng các giá trị hoặc sự kiện theo thời gian.
+>
+> Tôi dùng `signal` và `computed` cho state UI và dữ liệu dẫn xuất. Nếu trước đây dùng `BehaviorSubject` chỉ để giữ tab đang chọn hoặc trạng thái mở modal, Signals thường thay được phần đó. Với tìm kiếm có debounce, hủy request cũ, hàng đợi lưu hoặc xử lý từng message, tôi vẫn ưu tiên RxJS. Tôi có thể dùng `toSignal` để đưa kết quả cuối về UI. Với việc tải dữ liệu theo một id, resource cũng là lựa chọn phù hợp nếu phiên bản Angular hỗ trợ.
+
+Điểm quan trọng khi trả lời là nêu được **ranh giới thay thế**. Nói “không thay được” mà không giải thích sẽ bỏ qua những phần Signals thực sự giúp đơn giản hóa. Nói “thay được hết vì Signals mới hơn” lại bỏ qua các quy tắc xử lý event.
+
+## Signal và RxJS khác nhau ở điểm nào
+
+RxJS là một thư viện, còn signal là một kiểu dữ liệu reactive của Angular. So sánh trực tiếp hữu ích nhất là **Signal với Observable**. Sau đó mới so sánh bộ API `signal`/`computed`/`effect` với các operator RxJS, tức các hàm biến một luồng thành luồng khác.
+
+Ở đây, **reactive** nghĩa là các nơi sử dụng dữ liệu có thể phản ứng khi dữ liệu thay đổi. Hai mô hình đều reactive, nhưng cách chúng biểu diễn dữ liệu khác nhau.
+
+### Giá trị hiện tại và luồng theo thời gian
+
+**State** là trạng thái hiện tại. Ví dụ, giỏ hàng lúc này có ba sản phẩm hoặc tab hiện tại là `details`.
+
+```ts
+import { signal } from '@angular/core';
+
+const selectedTab = signal<'overview' | 'details'>('overview');
+
+selectedTab.set('details');
+console.log(selectedTab()); // 'details'
+```
+
+Signal trả lời câu hỏi: **“Ngay lúc này giá trị là gì?”** Template, `computed` và `effect` có thể được Angular theo dõi khi đọc signal. Một lời gọi `console.log(selectedTab())` thông thường chỉ đọc giá trị; nó không tự chạy lại khi tab đổi.
+
+**Stream** là luồng các giá trị hoặc sự kiện theo thời gian. Ví dụ, hai lần nhấn nút lưu là hai sự kiện riêng, dù cả hai đều mang cùng dữ liệu.
+
+```ts
+import { Subject } from 'rxjs';
+
+const saveClicks$ = new Subject<void>();
+
+saveClicks$.subscribe(() => console.log('Một lần nhấn lưu'));
+
+saveClicks$.next(); // Một lần nhấn lưu
+saveClicks$.next(); // Một lần nhấn lưu
+saveClicks$.complete();
+```
+
+Observable trả lời câu hỏi: **“Khi giá trị hoặc sự kiện đến, cần xử lý nó thế nào?”** Một **subscriber** là nơi đã đăng ký nhận các lần phát đó. Một **subscription** là kết nối có vòng đời giữa nguồn và subscriber.
+
+Observable không tự lưu toàn bộ lịch sử. Signal cũng có thể giữ một array chứa lịch sử nếu bạn chủ động xây dựng array đó. Sự khác biệt nằm ở **contract**, tức những quy tắc mà API cam kết. Trong các ví dụ trên, đọc state hiện tại khác với nhận và xử lý từng lần phát.
+
+### Pull và push không đồng nghĩa đồng bộ và bất đồng bộ
+
+**Pull** nghĩa là nơi sử dụng chủ động đọc giá trị, chẳng hạn template gọi `selectedTab()`. **Push** nghĩa là nguồn chủ động phát giá trị tới subscriber, chẳng hạn `saveClicks$.next()`.
+
+```text
+Signal:     template ── đọc selectedTab() ──► giá trị hiện tại
+Observable: nguồn phát ── next(value) ──────► subscriber
+```
+
+Signal vẫn thông báo cho các **consumer** (những nơi đọc nó trong ngữ cảnh reactive) khi giá trị thay đổi. Vì vậy, gọi nó là “pull” không có nghĩa Angular phải liên tục hỏi xem state có đổi không. Đây là mô hình để phân biệt cách nhận giá trị, không phải toàn bộ cơ chế bên trong.
+
+Observable có thể phát **đồng bộ**:
+
+```ts
+import { of } from 'rxjs';
+
+console.log('Trước subscribe');
+of(1, 2, 3).subscribe((value) => console.log(value));
+console.log('Sau subscribe');
+
+// Trước subscribe → 1 → 2 → 3 → Sau subscribe
+```
+
+Một signal cũng có thể nhận dữ liệu sau một tác vụ **bất đồng bộ**:
+
+```ts
+import { signal } from '@angular/core';
+
+const count = signal(0);
+
+Promise.resolve(3).then((value) => count.set(value));
+```
+
+Lời gọi `count()` vẫn đọc state đồng bộ. Điều bất đồng bộ là việc tạo ra dữ liệu mới. Vì thế, đừng dùng công thức “Signals = sync, RxJS = async” để chọn công cụ.
+
+### Bảng so sánh
+
+| Tiêu chí | Signal và các API liên quan | Observable và RxJS |
+| --- | --- | --- |
+| Dữ liệu chính | Một giá trị hiện tại. | Một chuỗi notification theo thời gian. |
+| Cách nhận giá trị | Gọi getter như `count()`. | Subscribe, hoặc để `AsyncPipe`/`toSignal` subscribe. |
+| Dữ liệu dẫn xuất | `computed` theo dõi các signal được đọc; tính khi cần và lưu lại kết quả. | `map`, `combineLatest` và các operator biến đổi luồng. |
+| Cập nhật cùng giá trị | Signal mặc định so sánh bằng `Object.is`; cùng giá trị không tạo thay đổi mới. | `Subject`/`BehaviorSubject` vẫn phát mỗi lần `next`; dùng `distinctUntilChanged` nếu muốn bỏ giá trị trùng. |
+| Chính sách thời gian | `signal`/`computed` không có sẵn debounce, retry hay hàng đợi tác vụ. | Có `debounceTime`, `retry`, `concatMap` và các operator liên quan. |
+| Lỗi và kết thúc | Signal thông thường không có kênh `error`/`complete`; có thể biểu diễn chúng trong state. | Có notification `next`, `error`, `complete`. |
+| Tích hợp UI Angular | Template đọc signal trực tiếp; Angular ghi nhận những signal mà template đã đọc. | Thường dùng `AsyncPipe` hoặc bridge sang Signal. |
+| Dữ liệu async | Có thể cập nhật signal từ callback, hoặc dùng resource để quản lý state async. | Phối hợp nguồn dữ liệu, thời gian, lỗi và subscription bằng pipeline. |
+
+**Operator** là hàm biến một Observable thành Observable khác. Một **pipeline** là chuỗi operator được ghép bằng `pipe(...)`. Phần tiếp theo dùng các thuật ngữ này để phân biệt phần state có thể chuyển sang Signals với phần chính sách nên giữ trong RxJS.
+
+## Phần nào Signals có thể thay thế
+
+### State UI đang được giữ bằng BehaviorSubject
+
+Giả sử service chỉ cần nhớ tab đang chọn và cho UI biết có đang ở tab chi tiết hay không. Với RxJS, bạn có thể viết:
+
+```ts
+import { Injectable } from '@angular/core';
+import { BehaviorSubject, map } from 'rxjs';
+
+type TabId = 'overview' | 'details';
+
+@Injectable({ providedIn: 'root' })
+export class TabsRxState {
+  private readonly selectedTabSubject =
+    new BehaviorSubject<TabId>('overview');
+
+  readonly selectedTab$ = this.selectedTabSubject.asObservable();
+  readonly isDetails$ = this.selectedTab$.pipe(
+    map((tab) => tab === 'details'),
+  );
+
+  select(tab: TabId): void {
+    this.selectedTabSubject.next(tab);
+  }
+}
+```
+
+Nếu consumer chỉ cần state hiện tại, bản dùng Signals diễn tả cùng nhu cầu UI mà không cần subscription:
+
+```ts
+import { computed, Injectable, signal } from '@angular/core';
+
+type TabId = 'overview' | 'details';
+
+@Injectable({ providedIn: 'root' })
+export class TabsSignalState {
+  private readonly _selectedTab = signal<TabId>('overview');
+
+  readonly selectedTab = this._selectedTab.asReadonly();
+  readonly isDetails = computed(() => this._selectedTab() === 'details');
+
+  select(tab: TabId): void {
+    this._selectedTab.set(tab);
+  }
+}
+```
+
+Template đọc `state.selectedTab()` và `state.isDetails()` thay cho các biểu thức dùng `AsyncPipe`. `asReadonly()` chỉ công khai quyền đọc; việc ghi vẫn đi qua `select()` của service.
+
+Đây là một trường hợp **Signals thay được cách dùng RxJS cụ thể**. Bạn bỏ RxJS khỏi phần state này vì không còn cần contract của Observable, không phải vì `BehaviorSubject` đã lỗi thời.
+
+<Callout type="warn" title="Giống nhu cầu UI không có nghĩa giống contract">
+  Nếu code đang dùng mỗi lần `selectedTabSubject.next(...)` để kích hoạt một hành động, hãy kiểm tra trước khi chuyển. Gọi `select('details')` hai lần vẫn có thể phát hai notification với `BehaviorSubject`; signal mặc định không coi lần ghi thứ hai là một thay đổi. Action cần chạy mỗi lần nên được biểu diễn riêng với state tab hiện tại.
+</Callout>
+
+### Giá trị dẫn xuất chỉ phục vụ UI
+
+Một **giá trị dẫn xuất** là dữ liệu tính được từ state khác, như tổng tiền bằng giá nhân số lượng:
+
+```ts
+import { computed, signal } from '@angular/core';
+
+const price = signal(100_000);
+const quantity = signal(2);
+const total = computed(() => price() * quantity());
+
+console.log(total()); // 200000
+quantity.set(3);
+console.log(total()); // 300000
+```
+
+Trước đây, nếu `price` và `quantity` là Observable, bạn có thể dùng `combineLatest` rồi `map` để tạo `total$`. Khi cả hai nguồn chỉ là state đồng bộ để UI đọc, `computed` thường trực tiếp hơn.
+
+`computed` tự ghi nhận những signal được đọc trong hàm tính. Nó chỉ tính khi cần đọc và tái sử dụng kết quả khi các signal nguồn mà nó phụ thuộc chưa thay đổi. Không cần một `effect` riêng để chép kết quả vào một writable signal khác.
+
+Tuy nhiên, `computed` không thay mọi `map` hay `combineLatest`. Nếu cần kết hợp message WebSocket với event route, hoặc xử lý từng emission của nguồn, hãy giữ các operator trong pipeline Observable.
+
+### Đọc dữ liệu bất đồng bộ theo tham số
+
+Một trang hồ sơ cần tải user theo `userId` thường quan tâm đến user hiện tại, trạng thái đang tải và lỗi. Đây là **state bất đồng bộ theo tham số**, không nhất thiết cần một pipeline RxJS viết tay.
+
+Các API resource cung cấp một cách tiếp cận Signal-first: dữ liệu async được quản lý bên trong, còn bên ngoài đọc state bằng signal.
+
+| API | Nguồn dữ liệu | Vai trò |
+| --- | --- | --- |
+| `resource` | Hàm tải (loader) trả `Promise`, hoặc nguồn cập nhật liên tục theo API của phiên bản Angular. | Quản lý giá trị, loading, error và vòng đời tải theo tham số. |
+| `httpResource` | HTTP qua hạ tầng `HttpClient`. | Tải dữ liệu HTTP reactive và cung cấp response/status dưới dạng Signals. |
+| `rxResource` | Hàm `stream` trả Observable. | Dùng nguồn RxJS nhưng cung cấp giao diện resource cho UI. |
+
+Ví dụ với `httpResource`:
+
+```ts
+import { httpResource } from '@angular/common/http';
+import { Component, signal } from '@angular/core';
+
+interface User {
+  id: string;
+  name: string;
+}
+
+@Component({
+  selector: 'app-user-profile',
+  standalone: true,
+  template: `
+    @if (user.isLoading()) {
+      <p>Đang tải hồ sơ...</p>
+    } @else if (user.hasValue()) {
+      <h2>{{ user.value().name }}</h2>
+    } @else if (user.error()) {
+      <p role="alert">Không thể tải hồ sơ.</p>
+    }
+  `,
+})
+export class UserProfileComponent {
+  readonly userId = signal('42');
+
+  readonly user = httpResource<User>(
+    () => `/api/users/${encodeURIComponent(this.userId())}`,
+  );
+}
+```
+
+Khi `userId` đổi, resource phát request mới và hủy request cũ còn đang chờ. `hasValue()` bảo vệ việc đọc `value()` khi resource chưa có dữ liệu hoặc đang lỗi. Cách này thay được phần code tự phối hợp “id đổi → gọi GET → cập nhật loading/data/error”.
+
+Ví dụ này đã được kiểm tra biên dịch với Angular 21.2.0. Với dự án cũ, kiểm tra phiên bản Angular có API `httpResource` và trạng thái stable/experimental của nó. Hạ tầng HTTP cũng cần được cấu hình phù hợp với phiên bản dự án, thường qua `provideHttpClient()`.
+
+<Callout type="warn" title="Resource không phải hàng đợi lệnh ghi">
+  Dùng resource cho việc đọc dữ liệu theo tham số. Angular khuyến nghị tránh dùng `httpResource` cho mutation như `POST` hoặc `PUT`. Những thao tác như đặt hàng hoặc lưu giao dịch cần chính sách riêng cho từng lần thực hiện; việc tham số đổi rồi hủy tác vụ cũ có thể không đúng yêu cầu nghiệp vụ.
+</Callout>
+
+Resource làm giảm một số chỗ phải viết RxJS trực tiếp. Nó không cung cấp một bản thay thế tương đương cho mọi operator RxJS. Riêng `rxResource` vẫn dùng Observable làm nguồn dữ liệu.
+
+## Phần nào RxJS vẫn có lợi thế
+
+### Chính sách thời gian và request chồng nhau
+
+Với ô tìm kiếm, yêu cầu thường là: chờ người dùng ngừng gõ 300 ms, bỏ query trùng rồi chỉ nhận kết quả của request được chọn mới nhất. RxJS có các operator tương ứng là `debounceTime`, `distinctUntilChanged` và `switchMap`.
+
+Signal cơ bản không tự mang các chính sách này. Bạn có thể tự viết timer và logic hủy, hoặc dùng abstraction khác. Khi các quy tắc đã có operator phù hợp, một pipeline RxJS thường dễ đọc và kiểm thử hơn.
+
+Khi tác vụ mới đến trước khi tác vụ cũ xong, cần chọn chính sách rõ ràng:
+
+| Operator | Chính sách | Ví dụ |
+| --- | --- | --- |
+| `switchMap` | Unsubscribe Observable bên trong trước đó và chuyển sang Observable mới. | Tải kết quả theo query hoặc route id mới nhất. |
+| `concatMap` | Xếp tác vụ mới vào hàng đợi, chạy lần lượt. | Gửi các thay đổi cần giữ thứ tự. |
+| `mergeMap` | Cho các tác vụ chạy đồng thời; có thể giới hạn số tác vụ. | Tải nhiều dữ liệu độc lập. |
+| `exhaustMap` | Bỏ qua tác vụ mới khi tác vụ hiện tại chưa kết thúc. | Chặn submit lặp khi request đang chạy. |
+
+Một **Observable bên trong** là luồng được tạo từ một giá trị của luồng ngoài. Ví dụ, mỗi query tạo một `http.get(...)`; query là nguồn ngoài, HTTP request là nguồn trong.
+
+Như vậy, chỉ đổi `query$` thành `query` signal chưa trả lời được câu hỏi “request mới đến thì làm gì với request cũ?”. Chính sách đó phải còn tồn tại ở RxJS, resource hoặc code bạn chủ động thiết kế.
+
+### Từng sự kiện và thứ tự xử lý
+
+Hai lần nhấn lưu có thể cùng mang chuỗi `'save'`, nhưng vẫn là hai hành động:
+
+```ts
+import { Subject } from 'rxjs';
+
+const commands$ = new Subject<'save'>();
+commands$.subscribe((command) => console.log(command));
+
+commands$.next('save'); // 'save'
+commands$.next('save'); // 'save'
+commands$.complete();
+```
+
+Đổi chúng thành một signal giữ lệnh mới nhất không bảo toàn ý nghĩa đó:
+
+```ts
+import { signal } from '@angular/core';
+
+const latestCommand = signal<'save' | null>(null);
+
+latestCommand.set('save');
+latestCommand.set('save'); // Cùng giá trị: không có thay đổi signal mới.
+```
+
+Một `effect` theo dõi `latestCommand` không có contract chạy một lần cho mỗi lần nhấn lưu. Ngay cả với các giá trị khác nhau, nhiều lần ghi liên tiếp còn có thể được quan sát dưới dạng state cuối sau khi Angular ổn định các cập nhật.
+
+Nếu mọi event đều cần xử lý, giữ nguồn event và xử lý chúng trước khi đưa kết quả về state UI. Ví dụ, một pipeline có thể nhận mọi message chat rồi tích lũy thành danh sách; danh sách đó được chuyển sang Signal để render. Điều cần tránh là chỉ giữ message cuối và kỳ vọng UI consumer nhận đủ toàn bộ message trước đó.
+
+### Lỗi và kết thúc của luồng
+
+Observable có ba loại notification:
+
+- `next(value)`: nhận giá trị mới.
+- `error(error)`: subscription kết thúc vì lỗi.
+- `complete()`: subscription kết thúc bình thường.
+
+Ví dụ, một tiến trình import có thể phát nhiều bản ghi rồi `complete`. Consumer cần biết lúc nào toàn bộ nguồn đã xong để chạy bước tiếp theo. `retry`, `catchError` và các operator kết hợp luồng làm việc trên contract này.
+
+Signal thông thường chỉ có một giá trị hiện tại. Nếu UI cần biết đang tải, thành công hay lỗi, hãy biểu diễn chúng trong state:
+
+```ts
+type LoadState<T> =
+  | { status: 'loading' }
+  | { status: 'success'; data: T }
+  | { status: 'error'; message: string };
+```
+
+Đây là state để render, không phải notification `error`/`complete` của Observable. Signal không có kênh lỗi riêng cũng không có nghĩa mọi getter đều không thể ném lỗi; `computed`, resource hoặc signal tạo bằng interop vẫn có thể ném lỗi khi đọc trong những trường hợp cụ thể.
+
+## Ví dụ phối hợp Signals và RxJS
+
+Ví dụ sau giữ text input bằng Signal, dùng RxJS cho quy tắc tìm kiếm rồi đưa kết quả về Signal. Component không gọi `subscribe()` thủ công, nhưng pipeline RxJS vẫn hoạt động bên dưới.
+
+Ví dụ dùng standalone component và cú pháp template Angular hiện đại có `@let`; đã được kiểm tra kiểu và template với Angular 21.2.0, RxJS 7.8.2. Cần cấu hình `HttpClient`, thường bằng `provideHttpClient()` trong application config. Endpoint `/api/products` được giả định trả về một array các `Product`.
+
+### Component tìm kiếm
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  inject,
+  signal,
+} from '@angular/core';
+import { toObservable, toSignal } from '@angular/core/rxjs-interop';
+import {
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  map,
+  of,
+  startWith,
+  switchMap,
+} from 'rxjs';
+
+interface Product {
+  id: number;
+  name: string;
+}
+
+type SearchState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; products: Product[] }
+  | { status: 'error'; message: string };
+
+@Component({
+  selector: 'app-product-search',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <label for="product-query">Tìm sản phẩm</label>
+    <input
+      #queryInput
+      id="product-query"
+      type="search"
+      [value]="query()"
+      (input)="query.set(queryInput.value)"
+    />
+
+    @let result = state();
+
+    @switch (result.status) {
+      @case ('idle') {
+        <p>Nhập ít nhất 2 ký tự.</p>
+      }
+      @case ('loading') {
+        <p>Đang tìm...</p>
+      }
+      @case ('success') {
+        <ul>
+          @for (product of result.products; track product.id) {
+            <li>{{ product.name }}</li>
+          } @empty {
+            <li>Không có kết quả.</li>
+          }
+        </ul>
+      }
+      @case ('error') {
+        <p role="alert">{{ result.message }}</p>
+      }
+    }
+  `,
+})
+export class ProductSearchComponent {
+  private readonly http = inject(HttpClient);
+
+  readonly query = signal('');
+  private readonly query$ = toObservable(this.query);
+
+  private readonly searchState$ = this.query$.pipe(
+    map((query) => query.trim()),
+    debounceTime(300),
+    distinctUntilChanged(),
+    switchMap((query) => {
+      if (query.length < 2) {
+        return of<SearchState>({ status: 'idle' });
+      }
+
+      return this.http.get<Product[]>('/api/products', {
+        params: { q: query },
+      }).pipe(
+        map((products): SearchState => ({ status: 'success', products })),
+        startWith<SearchState>({ status: 'loading' }),
+        catchError(() => of<SearchState>({
+          status: 'error',
+          message: 'Không thể tìm sản phẩm. Hãy thử lại.',
+        })),
+      );
+    }),
+  );
+
+  readonly state = toSignal(this.searchState$, {
+    initialValue: { status: 'idle' } satisfies SearchState,
+  });
+}
+```
+
+### Luồng xử lý và ranh giới trách nhiệm
+
+```text
+Input ghi query Signal
+        │
+        ▼
+toObservable → debounceTime → distinctUntilChanged → switchMap(HTTP)
+                                                          │
+                                                          ▼
+                                                SearchState Observable
+                                                          │
+                                                          ▼
+                                              toSignal → template đọc
+```
+
+Mỗi phần có một nhiệm vụ:
+
+1. `query` giữ text hiện tại. UI có thể đọc nó ngay mà không subscribe.
+2. `toObservable(query)` đưa state vào pipeline RxJS.
+3. `debounceTime(300)` chờ 300 ms không có giá trị mới đi vào operator.
+4. `distinctUntilChanged()` bỏ qua query trùng với query vừa phát qua nó.
+5. `switchMap` thay request cũ bằng request cho query mới đi tới nó. Với `HttpClient`, unsubscribe hủy request đang chờ phía client.
+6. `catchError` nằm **trong request**, nên lỗi một lần tìm kiếm không đóng nguồn query. Gõ query khác vẫn tìm kiếm tiếp được.
+7. `toSignal` subscribe một lần và giữ `SearchState` mới nhất để template đọc. Subscription tự được dọn khi component bị destroy.
+
+`idle`, `loading`, `success` và `error` là các trạng thái tường minh. Nhờ đó, UI phân biệt được “không có kết quả” với “request thất bại”.
+
+<Callout type="warn" title="Hủy request xảy ra sau debounce trong ví dụ này">
+  `switchMap` chỉ thấy query sau `debounceTime` và `distinctUntilChanged`. Nó không hủy request ngay tại mỗi event gõ phím. Trong khoảng chờ 300 ms, request cũ vẫn có thể hoàn thành. Nếu yêu cầu là hủy ngay khi input đổi, hãy thiết kế lại pipeline để query mới hủy cả timer và request cũ, chẳng hạn đặt timer bên trong `switchMap` ngoài.
+</Callout>
+
+`toObservable` theo dõi state input, nên ví dụ này không phải một event log của từng lần gõ. Nếu cần nhận chính xác mọi event input, tạo stream từ event hoặc dùng `FormControl.valueChanges` thay vì chuyển signal text thành event stream.
+
+## Vì sao effect không tự thay thế switchMap
+
+Một cách viết dễ gặp là gọi HTTP trong `effect`. Đoạn dưới đây cố ý minh họa cách **chưa có chính sách hủy và lỗi**:
+
+```ts
+import { HttpClient } from '@angular/common/http';
+import { Component, effect, inject, signal } from '@angular/core';
+
+@Component({
+  selector: 'app-naive-search',
+  standalone: true,
+  template: ``,
+})
+export class NaiveSearchComponent {
+  private readonly http = inject(HttpClient);
+
+  readonly query = signal('');
+  readonly results = signal<string[]>([]);
+
+  constructor() {
+    effect(() => {
+      const query = this.query();
+
+      this.http.get<string[]>('/api/product-names', {
+        params: { q: query },
+      }).subscribe((names) => this.results.set(names));
+    });
+  }
+}
+```
+
+Giả sử request cho `'ang'` chạy chậm, còn request cho `'angular'` chạy nhanh:
+
+```text
+Request A: query = ang       ─────────────────► kết quả A về sau
+Request B: query = angular       ───────► kết quả B về trước
+
+results = B, sau đó A ghi đè B → màn hình hiển thị kết quả query cũ
+```
+
+Đây là **race condition**: thứ tự tác vụ hoàn thành quyết định kết quả, thay vì quy tắc nghiệp vụ “chỉ dùng query được chọn mới nhất”.
+
+`effect` không tự unsubscribe các subscription tạo bên trong callback. Khi effect chạy lại hoặc bị destroy, HTTP subscription trên không được tự hủy chỉ vì nó được tạo trong effect. Mã trên cũng chưa debounce và chưa xử lý HTTP error.
+
+Bạn **có thể** dùng `onCleanup` để unsubscribe, hoặc dùng `AbortController` với `fetch`. Như vậy, vẫn có thể thiết kế việc hủy tác vụ khi dùng Signals. Tuy nhiên, bạn phải tự thiết kế các chính sách còn lại. Với bài toán tìm kiếm, pipeline RxJS hoặc resource phù hợp thường diễn tả ý định rõ hơn.
+
+Dùng `effect` cho việc đồng bộ state với API bên ngoài, như cập nhật thư viện biểu đồ hoặc lưu tùy chọn. Đừng coi nó là một tên gọi khác của `switchMap` hay dùng nó để chép dữ liệu dẫn xuất giữa các signal.
+
+## Interop không làm hai mô hình trở thành một
+
+**Interop** là các API giúp hai mô hình làm việc cùng nhau. Trong Angular, `toSignal` và `toObservable` được import từ `@angular/core/rxjs-interop`.
+
+### toSignal tạo subscription chứ không loại bỏ RxJS
+
+`toSignal(source$)` chuyển **giá trị mới nhất** từ Observable thành state mà UI đọc được. Nó vẫn tạo một subscription RxJS ngay khi được gọi.
+
+Các điểm cần nhớ:
+
+- Tạo bridge một lần, thường ở field initializer hoặc constructor của component/service. Đây là **injection context**, nơi Angular có thể cung cấp `Injector` và thông tin vòng đời.
+- Nếu tạo ở nơi khác, có thể truyền `Injector` qua options; đừng gọi lại `toSignal` trong getter hoặc biểu thức template.
+- Subscription mặc định bị hủy khi context sở hữu nó bị destroy. Service root thường sống cùng ứng dụng, không cùng một page.
+- Dùng `initialValue` nếu UI cần một giá trị trước lần phát đầu. Nếu không cung cấp, signal có thể trả `undefined` khi chưa có dữ liệu.
+- Chỉ dùng `requireSync: true` nếu nguồn chắc chắn phát đồng bộ lúc subscribe. Một `BehaviorSubject` đang hoạt động thường phù hợp; HTTP không phù hợp.
+- Nếu nguồn `error`, signal ném lỗi **khi được đọc**. Hãy xử lý lỗi trước bridge nếu UI cần render một trạng thái lỗi.
+- Khi nguồn `complete`, signal tiếp tục giữ giá trị cuối. Nó không cung cấp notification complete riêng cho template.
+
+Nếu mọi event đều có tác dụng riêng, hãy xử lý chúng trong pipeline trước khi gọi `toSignal`. Đừng đưa stream lệnh thanh toán vào `toSignal` rồi dùng `effect` để xử lý từng lệnh.
+
+### toObservable không phát lại mọi lần set
+
+`toObservable` dùng effect để theo dõi signal. Nhiều lần ghi trước khi effect chạy có thể được **ổn định thành state cuối**, thay vì trở thành từng notification riêng.
+
+```ts
+import { Component, signal } from '@angular/core';
+import {
+  takeUntilDestroyed,
+  toObservable,
+} from '@angular/core/rxjs-interop';
+
+@Component({
+  selector: 'app-bridge-demo',
+  standalone: true,
+  template: ``,
+})
+export class BridgeDemoComponent {
+  readonly value = signal(0);
+
+  constructor() {
+    toObservable(this.value)
+      .pipe(takeUntilDestroyed())
+      .subscribe((value) => console.log(value));
+
+    this.value.set(1);
+    this.value.set(2);
+    this.value.set(3);
+    // Chuỗi ghi này được quan sát dưới dạng state cuối: 3.
+    // Không có bảo đảm subscriber nhận riêng 1, 2 rồi 3.
+  }
+}
+```
+
+Giá trị đầu đã được effect quan sát trước đó có thể được phát đồng bộ khi một subscriber mới tham gia. Những thay đổi sau đi qua effect và được phát bất đồng bộ. Vì vậy, `toObservable(signal)` không tương đương việc gọi `subject.next(...)` ở từng điểm ghi.
+
+Chọn `toObservable` khi cần đưa **state hiện tại** vào RxJS. Chọn nguồn event riêng nếu mỗi hành động phải được xử lý chính xác một lần.
+
+## Chọn gì cho từng bài toán
+
+| Bài toán | Lựa chọn thường phù hợp | Vì sao |
+| --- | --- | --- |
+| Tab đang chọn, modal mở/đóng, số lượng sản phẩm | `signal` | Cần một giá trị hiện tại. |
+| Tổng tiền, danh sách lọc từ state đã có | `computed` | Kết quả tính được từ state nguồn. |
+| Tải chi tiết theo id, cần loading/data/error/reload | Resource hoặc RxJS + `toSignal` | Chọn theo API phiên bản và nguồn dữ liệu hiện có. |
+| Observable có sẵn, template chỉ cần render | `AsyncPipe` hoặc `toSignal` | Cả hai quản lý subscription; không cần đổi chỉ để đổi cú pháp. |
+| Tìm kiếm có debounce và thay request cũ | Pipeline RxJS, có thể kết thúc bằng `toSignal` | Chính sách thời gian và hủy tác vụ cần rõ ràng. |
+| Lưu tuần tự hoặc giới hạn tác vụ đồng thời | RxJS với operator phù hợp | Giữ chính sách hàng đợi và đồng thời. |
+| Message WebSocket cần xử lý từng lần, retry hoặc ghép nguồn | RxJS ở tầng xử lý; Signal cho state UI sau xử lý | Không nén event quan trọng thành một giá trị cuối quá sớm. |
+| Đồng bộ state vào thư viện biểu đồ | `effect` hoặc API effect sau render phù hợp | Cần gọi method trực tiếp của thư viện bên ngoài, không tạo dữ liệu dẫn xuất. |
+
+Nếu feature chỉ có state UI đơn giản, không cần tạo Observable cho mọi field. Nếu pipeline RxJS hiện tại đã rõ ràng và dùng `AsyncPipe` tốt, cũng không cần thêm Signals vào mọi chỗ.
+
+## Các câu hỏi gài thường gặp
+
+### Có Signals rồi có cần học RxJS nữa không
+
+Có, nhất là khi làm việc với `HttpClient`, Reactive Forms, router và các service trả Observable. Signals giảm số chỗ phải dùng RxJS cho state UI. Bạn vẫn cần hiểu subscription, lỗi, cleanup và chính sách của các operator để đọc và sửa những pipeline còn lại.
+
+Không cần học thuộc mọi operator. Bắt đầu với `map`, `debounceTime`, `distinctUntilChanged`, bốn operator điều phối tác vụ và `catchError`.
+
+### BehaviorSubject có phải chỉ là Signal với cú pháp khác
+
+Không. Cả hai đều có thể giữ giá trị hiện tại, nhưng `BehaviorSubject` còn có contract Observable: subscribe, phát `next`, lỗi và complete. Nó cũng có `getValue()` để đọc giá trị hiện tại khi subject ở trạng thái phù hợp.
+
+Angular theo dõi các signal được đọc trong `computed`, effect và template. Signal có phép so sánh giá trị mặc định; consumer có thể chỉ quan sát state đã ổn định. Vì thế, đừng đổi mọi `BehaviorSubject` thành Signal bằng tìm và thay thế; hãy kiểm tra consumer đang cần state hay từng notification.
+
+### Ứng dụng nhỏ có thể không viết RxJS trực tiếp không
+
+Có. Bạn có thể dùng Signals cho UI và dùng resource hoặc `async`/`await` với `fetch` cho việc tải dữ liệu đơn giản. Khi dùng `fetch`, vẫn phải xử lý lỗi, hủy request và tích hợp HTTP theo yêu cầu dự án.
+
+“Không viết pipeline RxJS trực tiếp” khác với “RxJS không còn tồn tại trong ứng dụng”. Một API hoặc thư viện vẫn có thể dùng RxJS bên dưới; `toSignal` và `rxResource` rõ ràng vẫn làm việc với Observable.
+
+### Signals có luôn nhanh hơn RxJS không
+
+Không thể kết luận như vậy. `computed` có lưu kết quả và Angular theo dõi nơi sử dụng Signals. Chi phí thực tế còn phụ thuộc vào dữ liệu, số consumer, operator, rendering và cách code được tổ chức.
+
+`AsyncPipe` cũng có thể đánh dấu view `OnPush` để cập nhật khi Observable phát. Hãy chọn mô hình theo contract trước, rồi đo hiệu năng bằng một tình huống sử dụng cụ thể. Đừng dùng câu “Signals nhanh hơn” để biện minh cho một migration toàn dự án.
+
+### Zoneless có yêu cầu bỏ RxJS không
+
+Không. Zoneless thay đổi cách Angular nhận thông báo để đồng bộ UI; nó không cấm Observable. `AsyncPipe` và việc cập nhật signal được template đọc vẫn là các cách thông báo hợp lệ.
+
+Điểm cần kiểm tra là callback `subscribe()` chỉ gán vào field JavaScript thông thường. Trong ứng dụng zoneless, phép gán đó tự nó không phải notification cho Angular. Dùng `AsyncPipe`, cập nhật signal hoặc thông báo rõ bằng API change detection phù hợp.
+
+### switchMap có bảo đảm server chưa xử lý request không
+
+Không. `switchMap` unsubscribe luồng cũ. Với `HttpClient`, việc này hủy request đang chờ phía client, nhưng server có thể đã nhận và thực hiện tác vụ.
+
+Vì vậy, không dùng “hủy request” như một cơ chế hoàn tác thanh toán hoặc chống tạo đơn trùng. Các thao tác ghi quan trọng cần chính sách phía server, như **idempotency key**: khóa để server nhận biết những lần gửi lại thuộc cùng một thao tác và tránh thực hiện trùng.
+
+## Lộ trình chuyển đổi trong dự án cũ
+
+<Steps>
+<Step>
+
+### Phân loại dữ liệu
+
+Với mỗi `Subject`/`BehaviorSubject` hoặc Observable, hỏi consumer đang cần gì:
+
+- State hiện tại, như tab hoặc bộ lọc đã chọn.
+- Từng event, như submit, refresh hoặc message.
+- Kết quả async theo tham số.
+- Một pipeline có yêu cầu về thời gian, lỗi hoặc thứ tự.
+
+Đặc biệt kiểm tra trường hợp `.next()` cùng giá trị vẫn đang được dùng để kích hoạt hành động.
+
+</Step>
+<Step>
+
+### Chuyển state UI trước
+
+Chuyển một feature nhỏ từ `BehaviorSubject` sang writable signal private và readonly signal public. Dùng `computed` cho dữ liệu tính từ state nguồn.
+
+Nếu service cần tương thích với API Observable cũ, có thể công khai một bridge `toObservable` được tạo một lần. Chỉ làm vậy khi consumer chấp nhận contract state đã ổn định, không cần từng lần `next` như trước.
+
+</Step>
+<Step>
+
+### Giữ pipeline có chính sách rõ ràng
+
+Giữ debounce, retry, hàng đợi và logic điều phối request trong RxJS nếu chúng vẫn diễn tả đúng nhu cầu. Dùng `toSignal` ở ranh giới UI khi muốn đọc kết quả bằng signal.
+
+Không cần đổi một pipeline đang dùng `AsyncPipe` tốt. Với việc tải dữ liệu theo id, cân nhắc resource riêng sau khi kiểm tra API của phiên bản Angular.
+
+</Step>
+<Step>
+
+### Kiểm thử hành vi và vòng đời
+
+Kiểm tra ít nhất các tình huống:
+
+- Hai hành động liên tiếp có cùng payload.
+- Nhiều lần cập nhật state trước khi effect chạy.
+- Query đổi nhanh, response cũ về sau response mới.
+- Một request lỗi, sau đó người dùng thử với query khác.
+- Component bị destroy khi request hoặc timer còn đang chạy.
+- Hai consumer dùng cùng dữ liệu có vô tình tạo hai HTTP request không.
+
+Migration thành công phải giữ đúng hành vi nghiệp vụ, không chỉ làm số dòng code giảm đi.
+
+</Step>
+</Steps>
+
+## Tóm tắt để nhớ
+
+- **Signal**: giữ giá trị hiện tại để đọc và dẫn xuất state. **Observable**: cung cấp các notification theo thời gian để xử lý.
+- Signals thường thay được `BehaviorSubject` dùng thuần cho state UI, và `computed` thay được một số phép dẫn xuất UI trước đây viết bằng operator.
+- Resource có thể đơn giản hóa việc đọc dữ liệu async theo tham số. Không phải mọi async đều cần pipeline RxJS viết tay.
+- RxJS vẫn phù hợp khi cần từng event, debounce, retry, hàng đợi hoặc chính sách tác vụ chồng nhau.
+- `toSignal`/`toObservable` giúp phối hợp hai phía. Chúng không bảo đảm chuyển qua lại mà vẫn giữ mọi event và thời điểm phát.
+
+Câu chốt khi phỏng vấn: **“Tôi dùng Signals cho state hiện tại, RxJS cho luồng cần chính sách xử lý theo thời gian; chọn ranh giới theo yêu cầu của từng feature.”**
+
+## Tài liệu tham khảo
+
+- [Angular Signals](https://angular.dev/guide/signals): giá trị hiện tại, computed, dependency tracking và equality.
+- [RxJS interop với Angular Signals](https://angular.dev/ecosystem/rxjs-interop): subscription, initial value và thời điểm phát của bridge.
+- [Side effects với effect](https://angular.dev/guide/signals/effect): mục đích sử dụng và cleanup.
+- [Async reactivity với resource](https://angular.dev/guide/signals/resource): state async, params và hủy tác vụ tải.
+- [HTTP reactive với httpResource](https://angular.dev/guide/http/http-resource): đọc HTTP theo Signals và lưu ý về mutation.
+- [HttpClient và vòng đời request](https://angular.dev/guide/http/making-requests#http-observables): cold Observable, subscription và cancellation.
+- [Mã nguồn BehaviorSubject của RxJS 7.8.2](https://github.com/ReactiveX/rxjs/blob/7.8.2/src/internal/BehaviorSubject.ts) và [Subject](https://github.com/ReactiveX/rxjs/blob/7.8.2/src/internal/Subject.ts): phát current value và hành vi của mỗi lần `next`.
+
+## Đọc tiếp
+
+<Cards>
+  <Card title="Signals và RxJS" href="/docs/reactivity-state/signals-rxjs" description="Hướng dẫn chi tiết về ranh giới, interop và resource trong Angular." />
+  <Card title="Computed và effect" href="/docs/reactivity-state/computed-effect" description="Phân biệt dữ liệu dẫn xuất với side effect có vòng đời." />
+  <Card title="RxJS căn bản" href="/docs/reactivity-state/rxjs-can-ban" description="Ôn Observable, operator, lỗi và cách quản lý subscription." />
+</Cards>

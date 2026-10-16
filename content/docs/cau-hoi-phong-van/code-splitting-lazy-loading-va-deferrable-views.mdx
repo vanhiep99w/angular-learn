@@ -1,0 +1,712 @@
+---
+title: Code splitting, lazy loading và Deferrable Views
+description: Phân biệt code splitting với lazy loading và sử dụng Angular Deferrable Views để hoãn code, render UI và tối ưu trải nghiệm tải trang.
+---
+
+<Callout type="info" title="Mục tiêu của tài liệu">
+  Code splitting tạo ra các phần JavaScript có thể tải riêng. Lazy loading quyết định khi nào tải những phần đó. Deferrable Views dùng `@defer` để đặt một lazy boundary ngay trong template Angular. Ba khái niệm liên quan chặt chẽ nhưng không đồng nghĩa.
+</Callout>
+
+## Mục lục
+
+- [Ba khái niệm cần phân biệt](#ba-khái-niệm-cần-phân-biệt)
+  - [Code splitting là kết quả build](#code-splitting-là-kết-quả-build)
+  - [Lazy loading là thời điểm tải](#lazy-loading-là-thời-điểm-tải)
+  - [Deferrable Views là ranh giới trong template](#deferrable-views-là-ranh-giới-trong-template)
+- [Hai mức lazy loading trong Angular](#hai-mức-lazy-loading-trong-angular)
+  - [Route lazy loading](#route-lazy-loading)
+  - [View lazy loading](#view-lazy-loading)
+  - [Kết hợp hai tầng](#kết-hợp-hai-tầng)
+- [Điều kiện để dependency được defer](#điều-kiện-để-dependency-được-defer)
+  - [Dependency đủ điều kiện](#dependency-đủ-điều-kiện)
+  - [Những phần vẫn eager](#những-phần-vẫn-eager)
+  - [Chunk output không có hình dạng cố định](#chunk-output-không-có-hình-dạng-cố-định)
+- [Vòng đời của một defer block](#vòng-đời-của-một-defer-block)
+  - [Placeholder loading content và error](#placeholder-loading-content-và-error)
+  - [Trigger hiển thị](#trigger-hiển-thị)
+  - [Prefetch code trước khi render](#prefetch-code-trước-khi-render)
+- [Ví dụ hoàn chỉnh](#ví-dụ-hoàn-chỉnh)
+  - [Cấu hình route lazy](#cấu-hình-route-lazy)
+  - [Hoãn biểu đồ trong trang](#hoãn-biểu-đồ-trong-trang)
+  - [Timeline thực thi](#timeline-thực-thi)
+- [Phân biệt với control flow và data loading](#phân-biệt-với-control-flow-và-data-loading)
+  - [Defer và if](#defer-và-if)
+  - [Code loading và data loading](#code-loading-và-data-loading)
+  - [Defer không phải cơ chế unload](#defer-không-phải-cơ-chế-unload)
+- [SSR SSG và hydration](#ssr-ssg-và-hydration)
+- [Thiết kế hiệu năng và trải nghiệm](#thiết-kế-hiệu-năng-và-trải-nghiệm)
+  - [Bảo vệ LCP và tránh layout shift](#bảo-vệ-lcp-và-tránh-layout-shift)
+  - [Giữ trạng thái truy cập được](#giữ-trạng-thái-truy-cập-được)
+  - [Tránh request waterfall](#tránh-request-waterfall)
+- [Kiểm thử và xác minh](#kiểm-thử-và-xác-minh)
+  - [Kiểm tra chunk trong trình duyệt](#kiểm-tra-chunk-trong-trình-duyệt)
+  - [Kiểm thử từng trạng thái](#kiểm-thử-từng-trạng-thái)
+- [Chọn ranh giới phù hợp](#chọn-ranh-giới-phù-hợp)
+- [Các nhầm lẫn thường gặp](#các-nhầm-lẫn-thường-gặp)
+- [Tóm tắt](#tóm-tắt)
+- [Tài liệu tham khảo](#tài-liệu-tham-khảo)
+- [Đọc tiếp](#đọc-tiếp)
+
+## Ba khái niệm cần phân biệt
+
+Một ứng dụng có thể được chia thành nhiều chunk nhưng vẫn tải tất cả ngay khi khởi động. Ngược lại, code chỉ có thể được lazy-load nếu bundler đã tạo ra một ranh giới có thể tải riêng. Vì vậy cần đọc quá trình theo thứ tự:
+
+```text
+Source code
+    │
+    │ Angular compiler + bundler phân tích import và template
+    ▼
+Initial chunks + lazy chunks
+    │
+    │ Router hoặc @defer quyết định thời điểm request
+    ▼
+Trình duyệt tải, parse và evaluate code
+    │
+    │ Angular tạo view/component khi cần
+    ▼
+UI xuất hiện
+```
+
+### Code splitting là kết quả build
+
+**Code splitting** là việc build output được chia thành nhiều JavaScript chunk. Một số chunk cần cho startup. Các chunk khác có thể được tải sau.
+
+Dynamic `import()` là một ranh giới phổ biến:
+
+```ts
+const reports = () => import('./reports/reports-page.component');
+```
+
+Angular Router dùng dynamic import trong `loadComponent` và `loadChildren`. Angular compiler cũng có thể sinh dynamic import cho dependency đủ điều kiện bên trong `@defer`.
+
+Code splitting không tự giảm tổng lượng code của tính năng. Nó chủ yếu thay đổi cách code được đóng gói. **Tree shaking** mới là quá trình loại code không được dùng khỏi build.
+
+### Lazy loading là thời điểm tải
+
+**Lazy loading** là chính sách chỉ tải một chunk khi người dùng hoặc runtime cần nó. Ví dụ:
+
+- Chỉ tải feature quản trị khi URL đi tới `/admin`.
+- Chỉ tải biểu đồ khi người dùng cuộn tới vùng thống kê.
+- Chỉ tải editor khi người dùng bấm **Chỉnh sửa**.
+
+Lazy loading chuyển một phần chi phí ra khỏi startup. Chi phí đó không biến mất; nó xuất hiện ở lần sử dụng đầu tiên. Vì vậy cần đo cả thời gian mở ứng dụng lẫn thời gian mở feature lazy.
+
+<Callout type="warn" title="Tách chunk không bảo đảm trải nghiệm nhanh hơn">
+  Một chunk quá nhỏ có thể tạo request và trạng thái loading không đáng có. Một chunk quá lớn có thể làm lần mở feature đầu tiên chậm. Ranh giới tốt dựa trên hành trình người dùng và số đo, không dựa trên mục tiêu “càng nhiều chunk càng tốt”.
+</Callout>
+
+### Deferrable Views là ranh giới trong template
+
+**Deferrable View** là phần giao diện được khai báo bằng `@defer`. Angular trì hoãn tải dependency và render nội dung chính cho tới khi trigger xảy ra.
+
+```html
+@defer (on viewport) {
+  <app-product-reviews />
+} @placeholder {
+  <div class="reviews-skeleton">Đang chờ phần đánh giá…</div>
+}
+```
+
+Trong ví dụ này, `ProductReviewsComponent` có thể được tách thành lazy code. Khi placeholder đi vào viewport, Angular tải dependency rồi thay placeholder bằng nội dung thật.
+
+`@defer` đồng thời cung cấp hai phần:
+
+1. Một **code boundary** do compiler tạo cho các dependency đủ điều kiện.
+2. Một **render policy** gồm trigger, placeholder, loading và error state.
+
+## Hai mức lazy loading trong Angular
+
+Angular thường có hai ranh giới lazy tự nhiên: route và một vùng UI nằm bên trong route.
+
+### Route lazy loading
+
+Router tách cả page hoặc feature theo URL:
+
+```ts
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: 'analytics',
+    loadComponent: () =>
+      import('./analytics/analytics-page.component').then(
+        (m) => m.AnalyticsPageComponent,
+      ),
+  },
+  {
+    path: 'admin',
+    loadChildren: () =>
+      import('./admin/admin.routes').then((m) => m.ADMIN_ROUTES),
+  },
+];
+```
+
+Dùng `loadComponent` cho một standalone page. Dùng `loadChildren` khi feature có nhiều route con, layout, guard hoặc provider chung.
+
+Route lazy loading phù hợp khi toàn bộ màn hình chưa cần trước một lần điều hướng. URL là tín hiệu tự nhiên cho biết người dùng đã chọn feature.
+
+### View lazy loading
+
+`@defer` tách một phần của page đã được tải. Nó phù hợp với UI:
+
+- Nằm dưới màn hình đầu.
+- Chỉ mở sau thao tác.
+- Nặng nhưng không quan trọng cho nội dung ban đầu.
+- Có thể thay bằng placeholder trong một khoảng thời gian ngắn.
+
+Ví dụ một page sản phẩm cần summary ngay, nhưng reviews có thể chờ tới lúc người dùng cuộn xuống:
+
+```html
+<app-product-summary />
+
+@defer (on viewport) {
+  <app-product-reviews />
+} @placeholder {
+  <section class="reviews-placeholder" aria-label="Đánh giá sản phẩm">
+    Cuộn xuống để tải đánh giá.
+  </section>
+}
+```
+
+### Kết hợp hai tầng
+
+Route lazy loading và Deferrable Views không loại trừ nhau. Một feature có thể được tải theo URL, rồi tiếp tục hoãn widget nặng bên trong feature.
+
+```text
+Initial application
+└── App shell + route config
+
+Đi tới /analytics
+└── Analytics route chunk
+    ├── Page shell
+    ├── Summary cần ngay
+    └── @defer boundary
+        └── Chart chunk chỉ tải khi trigger xảy ra
+```
+
+Cách này giảm initial application bundle và giảm cả chi phí render ban đầu của route `/analytics`. Trade-off là lần mở route có thể có hai pha request. Nếu trigger xảy ra ngay sau navigation, người dùng có thể gặp request waterfall: route chunk tải xong rồi chart chunk mới bắt đầu tải.
+
+## Điều kiện để dependency được defer
+
+Không phải mọi thứ đặt trong `@defer` đều tự động đi vào lazy chunk.
+
+### Dependency đủ điều kiện
+
+Component, directive và pipe được dùng trực tiếp trong nội dung chính của `@defer` cần thỏa hai điều kiện:
+
+1. Dependency là **standalone**.
+2. Dependency không được tham chiếu bên ngoài các `@defer` block trong cùng file, kể cả qua query như `ViewChild`.
+
+Ví dụ đủ điều kiện:
+
+```ts
+import { Component } from '@angular/core';
+import { SalesChartComponent } from './sales-chart.component';
+
+@Component({
+  standalone: true,
+  selector: 'app-dashboard-page',
+  imports: [SalesChartComponent],
+  template: `
+    @defer (on viewport) {
+      <app-sales-chart />
+    } @placeholder {
+      <div class="chart-skeleton">Vùng biểu đồ</div>
+    }
+  `,
+})
+export class DashboardPageComponent {}
+```
+
+Mặc dù source file import `SalesChartComponent` và đặt nó trong `imports`, Angular compiler nhận ra dependency chỉ được dùng trong block defer và tạo dynamic import phù hợp.
+
+Component chứa template có thể thuộc mô hình standalone hoặc NgModule. Tuy nhiên, dependency được defer trực tiếp phải standalone. Các dependency bắc cầu của `SalesChartComponent` vẫn có thể đến từ NgModule.
+
+### Những phần vẫn eager
+
+Các trường hợp sau làm code được tải sớm hoặc làm giảm lợi ích lazy loading:
+
+- Component, directive hoặc pipe không standalone.
+- Dependency còn được dùng ngoài `@defer` trong cùng file.
+- Parent component có `ViewChild(SalesChartComponent)` hoặc query tương tự.
+- Một eager component ở nơi khác cũng import dependency đó.
+- Dependency được kéo vào eager graph qua một barrel file hoặc một đường import khác.
+
+Ngoài ra, nội dung của ba sub-block sau luôn eager:
+
+- `@placeholder`
+- `@loading`
+- `@error`
+
+Vì vậy placeholder nên nhẹ. Nếu placeholder dùng một animation library lớn, phần code đó có thể làm initial bundle nặng lên dù nội dung chính đã được defer.
+
+<Callout type="idea" title="Dependency bắc cầu">
+  `SalesChartComponent` phải standalone để được defer trực tiếp. Thư viện hoặc NgModule mà chính component đó dùng không bắt buộc phải standalone; chúng có thể đi theo lazy graph của component.
+</Callout>
+
+### Chunk output không có hình dạng cố định
+
+Angular tạo dynamic import cho dependency được defer, nhưng bundler quyết định output cuối cùng. Không nên giả định:
+
+- Mỗi `@defer` luôn tạo đúng một file chunk.
+- Mỗi component luôn có chunk riêng.
+- Thứ tự tải các dependency trong một block luôn cố định.
+- Tên chunk giữ nguyên qua các phiên bản build.
+
+Một block có nhiều component chỉ render nội dung chính sau khi các import cần thiết đã hoàn tất. Bundler có thể gộp dependency, tạo shared chunk hoặc tái sử dụng chunk đã được tải bởi feature khác.
+
+Nói ngắn gọn: `@defer` tạo **khả năng** tách và trì hoãn dependency. Production build cùng Network panel mới cho biết hình dạng thực tế.
+
+## Vòng đời của một defer block
+
+Một block thường đi qua các trạng thái sau:
+
+```text
+Trang render
+    │
+    ▼
+@placeholder hoặc vùng trống
+    │ trigger xảy ra
+    ▼
+Tải deferred dependencies
+    │
+    ├── đang chờ đủ lâu ──► @loading
+    │
+    ├── thành công ───────► nội dung chính của @defer
+    │
+    └── tải thất bại ─────► @error
+```
+
+### Placeholder loading content và error
+
+Ví dụ đầy đủ:
+
+```html
+@defer (on viewport) {
+  <app-recommendations />
+} @placeholder (minimum 300ms) {
+  <div class="recommendations-skeleton">Gợi ý dành cho bạn</div>
+} @loading (after 150ms; minimum 300ms) {
+  <p role="status">Đang tải gợi ý…</p>
+} @error {
+  <p role="alert">Không thể tải giao diện gợi ý.</p>
+}
+```
+
+Vai trò của từng phần:
+
+| Block | Thời điểm xuất hiện | Lưu ý |
+| --- | --- | --- |
+| `@placeholder` | Trước khi trigger xảy ra | Optional nhưng hữu ích để giữ layout; dependency của nó eager. |
+| `@loading` | Sau trigger, trong lúc dependency đang tải | `after` tránh spinner nháy quá nhanh; `minimum` giữ trạng thái đủ lâu để không flicker. |
+| Nội dung `@defer` | Sau khi dependency tải thành công | Đây là phần có thể được lazy-load. |
+| `@error` | Khi việc tải deferred dependency thất bại | Không thay thế error state của API bên trong component. |
+
+`minimum` điều khiển thời gian hiển thị UI. Nó không làm request mạng nhanh hơn và không phải debounce cho trigger.
+
+### Trigger hiển thị
+
+Nếu không chỉ định trigger, `@defer` dùng `on idle`: Angular bắt đầu tải khi trình duyệt có thời gian nhàn.
+
+| Trigger | Khi kích hoạt | Trường hợp phù hợp |
+| --- | --- | --- |
+| `on idle` | Trình duyệt đi vào thời gian nhàn | Nội dung có khả năng cần sớm nhưng không nằm trên critical path. |
+| `on viewport` | Placeholder hoặc element tham chiếu đi vào viewport | Section nằm dưới màn hình đầu. |
+| `on interaction` | Người dùng tương tác bằng click hoặc bàn phím | Editor, tab chi tiết, panel chỉ mở theo yêu cầu. |
+| `on hover` | Vùng trigger nhận hover hoặc focus tương ứng | Chuẩn bị UI có khả năng sắp được mở. |
+| `on immediate` | Sau khi phần không defer render xong | Tách công việc khỏi render đầu nhưng vẫn tải rất sớm. |
+| `on timer(2s)` | Hết khoảng thời gian chỉ định | Nội dung có thể chờ một mốc thời gian rõ ràng. |
+| `when expression` | Biểu thức lần đầu trở thành truthy | Trigger theo state ứng dụng. |
+
+Nhiều trigger cách nhau bằng dấu chấm phẩy và hoạt động theo logic **OR**:
+
+```html
+@defer (on viewport; on timer(5s)) {
+  <app-recommendations />
+} @placeholder {
+  <div>Gợi ý sản phẩm</div>
+}
+```
+
+Block tải khi placeholder vào viewport **hoặc** khi hết 5 giây, điều kiện nào đến trước.
+
+`when` là trigger một chiều. Khi biểu thức đã từng truthy và block được tải, đổi biểu thức về false không đưa giao diện trở lại placeholder.
+
+Với `viewport`, `interaction` và `hover`, placeholder có thể làm trigger ngầm. Trong trường hợp đó, placeholder cần một root element rõ ràng. Khi muốn quan sát phần tử khác, truyền template reference của phần tử đó vào trigger.
+
+### Prefetch code trước khi render
+
+Trigger chính quyết định lúc **render**. Prefetch trigger quyết định lúc **tải code**. Hai thời điểm có thể tách rời:
+
+```html
+@defer (on interaction; prefetch on idle) {
+  <app-advanced-editor />
+} @placeholder {
+  <button type="button">Mở trình soạn thảo nâng cao</button>
+}
+```
+
+Luồng của ví dụ:
+
+1. Khi browser idle, Angular tải code của editor ở nền.
+2. Placeholder button vẫn được hiển thị.
+3. Khi người dùng tương tác, Angular render editor.
+4. Nếu prefetch đã hoàn thành, người dùng ít phải chờ network hơn.
+
+Prefetch cải thiện độ trễ tại thời điểm tương tác, nhưng dùng thêm băng thông trước khi chắc chắn người dùng cần feature. Không nên prefetch mọi defer block trên một trang lớn.
+
+## Ví dụ hoàn chỉnh
+
+Ví dụ sau dùng cả route lazy loading và Deferrable View. Page analytics có summary cần ngay. Biểu đồ chi tiết chỉ xuất hiện khi người dùng yêu cầu.
+
+### Cấu hình route lazy
+
+```ts title="app.routes.ts"
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: 'analytics',
+    loadComponent: () =>
+      import('./analytics/analytics-page.component').then(
+        (m) => m.AnalyticsPageComponent,
+      ),
+  },
+];
+```
+
+`AnalyticsPageComponent` và dependency eager của page không cần nằm trong initial graph của ứng dụng.
+
+### Hoãn biểu đồ trong trang
+
+```ts title="analytics/analytics-page.component.ts"
+import { Component } from '@angular/core';
+import { AnalyticsChartComponent } from './analytics-chart.component';
+import { AnalyticsSummaryComponent } from './analytics-summary.component';
+
+@Component({
+  standalone: true,
+  selector: 'app-analytics-page',
+  imports: [
+    AnalyticsSummaryComponent,
+    AnalyticsChartComponent,
+  ],
+  template: `
+    <h1>Analytics</h1>
+    <app-analytics-summary />
+
+    <section aria-live="polite" aria-atomic="true">
+      @defer (on interaction; prefetch on idle) {
+        <app-analytics-chart />
+      } @placeholder (minimum 200ms) {
+        <button type="button">Mở biểu đồ chi tiết</button>
+      } @loading (after 150ms; minimum 300ms) {
+        <p role="status">Đang tải biểu đồ…</p>
+      } @error {
+        <p role="alert">Không thể tải giao diện biểu đồ.</p>
+      }
+    </section>
+  `,
+})
+export class AnalyticsPageComponent {}
+```
+
+Giả sử cả hai component con đều standalone:
+
+- `AnalyticsSummaryComponent` được dùng ngoài block nên đi cùng graph eager của route analytics.
+- `AnalyticsChartComponent` chỉ được dùng trong `@defer`, nên compiler có thể tách nó và dependency bắc cầu thành lazy graph tiếp theo.
+- Placeholder, loading và error markup thuộc code eager của page.
+
+### Timeline thực thi
+
+```text
+Khởi động ứng dụng
+  └── tải app shell
+
+Đi tới /analytics
+  └── tải AnalyticsPage route graph
+      ├── render heading
+      ├── render AnalyticsSummaryComponent
+      └── render button placeholder
+
+Browser idle
+  └── prefetch AnalyticsChart graph, chưa render chart
+
+Người dùng bấm button
+  └── render AnalyticsChartComponent
+      └── component bắt đầu các tác vụ runtime của chính nó
+```
+
+Nếu người dùng bấm trước khi prefetch xong, block có thể đi qua loading state. Nếu prefetch đã hoàn tất, việc chuyển từ placeholder sang chart nhanh hơn.
+
+## Phân biệt với control flow và data loading
+
+### Defer và if
+
+`@if` quyết định có render một nhánh template hay không. Nó không tự tạo code-splitting boundary cho dependency:
+
+```html
+@if (showChart()) {
+  <app-analytics-chart />
+}
+```
+
+Nếu `AnalyticsChartComponent` là dependency thông thường của component cha, code của nó có thể đã được tải dù `showChart()` đang false.
+
+`@defer` có thể trì hoãn cả code lẫn render:
+
+```html
+@defer (when showChart()) {
+  <app-analytics-chart />
+}
+```
+
+Tuy nhiên, block defer không quay lại trạng thái chưa tải khi `showChart()` trở thành false. Nếu cần tải một lần nhưng vẫn cho phép đóng/mở UI, có thể kết hợp hai lớp state:
+
+```html
+@defer (when chartHasBeenOpened()) {
+  @if (chartIsOpen()) {
+    <app-analytics-chart />
+  }
+}
+```
+
+`chartHasBeenOpened()` chỉ chuyển sang true lần đầu người dùng mở chart. `chartIsOpen()` tiếp tục điều khiển việc hiện hoặc ẩn chart sau khi code đã sẵn sàng.
+
+### Code loading và data loading
+
+`@defer` quản lý việc tải dependency của template. Nó không tự prefetch dữ liệu API.
+
+Nếu `AnalyticsChartComponent` gọi API khi được tạo, request dữ liệu bắt đầu sau lúc component render. `prefetch on idle` chỉ tải JavaScript và tài nguyên code liên quan; nó không tự gọi endpoint của chart.
+
+```text
+Prefetch trigger
+  └── tải JavaScript/CSS của component
+
+Render trigger
+  └── tạo component
+      └── logic component có thể bắt đầu tải API data
+```
+
+Muốn chuẩn bị dữ liệu trước, hãy thiết kế riêng bằng Router resolver, resource, cache service hoặc một request có chủ đích. Đừng giả định prefetch code đồng nghĩa prefetch data.
+
+Tương tự, `@error` xử lý lỗi tải deferred dependency. Lỗi HTTP bên trong `AnalyticsChartComponent` cần state lỗi của chính component hoặc facade.
+
+### Defer không phải cơ chế unload
+
+Khi trigger đã xảy ra, `@defer` không quan sát viewport để tự gỡ code hoặc quay về placeholder. JavaScript đã tải thường nằm trong module cache của trình duyệt. Nội dung chính của block tiếp tục tồn tại theo vòng đời view chứa nó.
+
+Nếu cần render danh sách rất lớn chỉ trong vùng nhìn thấy, hãy xem virtual scrolling. Nếu cần đóng/mở một widget, dùng control flow hoặc state của component sau khi dependency đã được tải.
+
+## SSR SSG và hydration
+
+Với SSR hoặc SSG mặc định, server render `@placeholder`, hoặc không render gì nếu block không có placeholder. Các trigger như viewport hay interaction không chạy trên server. Sau khi client hydrate placeholder, trigger mới bắt đầu hoạt động.
+
+Điều này có ba hệ quả:
+
+- Nội dung quan trọng cho SEO hoặc màn hình đầu có thể không có trong HTML server nếu đặt trong `@defer` thông thường.
+- Placeholder cần có kích thước và nội dung hợp lý để tránh layout shift khi client thay thế nó.
+- Browser-only trigger không phải tín hiệu server có thể sử dụng trong lần render HTML.
+
+Incremental hydration cho phép server render nội dung chính của một defer block nhưng client trì hoãn hydrate vùng đó tới `hydrate` trigger:
+
+```html
+@defer (on viewport; hydrate on interaction) {
+  <app-product-gallery />
+} @placeholder {
+  <div class="gallery-placeholder">Thư viện ảnh</div>
+}
+```
+
+Regular trigger áp dụng cho lần render phía client. Hydrate trigger điều khiển thời điểm Angular tiếp quản nội dung đã được server render trong lần tải đầu. API và cấu hình incremental hydration phụ thuộc phiên bản Angular, nên hãy kiểm tra tài liệu của đúng phiên bản dự án trước khi áp dụng.
+
+<Callout type="warn" title="Không dùng defer như một mẹo SEO">
+  Quyết định SSR, defer và hydration phải dựa trên nội dung nào cần có trong HTML ban đầu, phần nào cần tương tác sớm và chi phí JavaScript thực tế. Một placeholder đẹp không thay thế nội dung chủ đạo mà crawler hoặc người dùng cần ngay.
+</Callout>
+
+## Thiết kế hiệu năng và trải nghiệm
+
+### Bảo vệ LCP và tránh layout shift
+
+Không nên defer nội dung quyết định **Largest Contentful Paint (LCP)**, nút hành động chính hoặc thông tin người dùng cần ngay trên màn hình đầu. Tách phần critical sang request thứ hai có thể làm chỉ số và trải nghiệm xấu hơn.
+
+Khi defer một vùng dưới viewport, placeholder nên giữ gần đúng kích thước nội dung thật:
+
+```css
+.chart-skeleton {
+  min-block-size: 24rem;
+  border-radius: 0.75rem;
+  background: linear-gradient(90deg, #eee, #f7f7f7, #eee);
+}
+```
+
+Khoảng trống ổn định giúp giảm **Cumulative Layout Shift (CLS)** khi chart thay placeholder. Đừng dùng spinner cao vài pixel để thay cho một widget cao hàng trăm pixel.
+
+### Giữ trạng thái truy cập được
+
+Placeholder và loading state là UI thật, nên cần semantics thật:
+
+- Dùng `<button>` cho trigger tương tác thay vì `<div>` có click handler.
+- Dùng `role="status"` cho thông báo loading không khẩn cấp.
+- Dùng `role="alert"` cho lỗi cần được thông báo ngay.
+- Cân nhắc `aria-live="polite"` quanh vùng bị thay đổi.
+- Giữ focus hợp lý khi placeholder button bị thay bằng nội dung chính.
+
+`on hover` không nên là con đường duy nhất tới nội dung vì thiết bị cảm ứng và người dùng bàn phím không có hành vi hover giống chuột. Angular có thể quan sát focus cho trigger này, nhưng UI vẫn cần affordance rõ ràng.
+
+### Tránh request waterfall
+
+Waterfall xảy ra khi request sau chỉ bắt đầu sau khi request trước hoàn tất:
+
+```text
+Route chunk ───────────────► evaluate page
+                              Defer trigger
+                              Chart chunk ───────────────► render chart
+                                                          API request ─────► data
+```
+
+Một số cách xử lý:
+
+- Giữ widget nhỏ và quan trọng trong route chunk thay vì defer máy móc.
+- Prefetch widget khi browser idle hoặc khi người dùng có tín hiệu sắp mở.
+- Bắt đầu tải data ở facade/route nếu dữ liệu có khả năng được dùng cao.
+- Tránh nhiều block lồng nhau dùng cùng trigger rồi tạo chuỗi chunk.
+- Gộp các dependency luôn được dùng cùng nhau nếu chia nhỏ không mang lại lợi ích.
+
+Prefetch chỉ nên dùng khi xác suất sử dụng đủ cao. Nếu hầu hết người dùng không bao giờ mở chart, prefetch ngay lúc idle có thể làm mất lợi ích tiết kiệm băng thông.
+
+## Kiểm thử và xác minh
+
+### Kiểm tra chunk trong trình duyệt
+
+Đừng kết luận từ source code rằng component đã được defer thành công. Hãy xác minh:
+
+1. Chạy production build.
+2. Mở DevTools **Network**, lọc JavaScript và tắt cache trong lúc thử.
+3. Reload route với defer block nhưng chưa kích hoạt trigger.
+4. Xác nhận lazy dependency chưa được tải, trừ khi có prefetch chủ động.
+5. Kích hoạt viewport, interaction hoặc state tương ứng.
+6. Quan sát request chunk và việc chuyển qua placeholder/loading/content.
+7. Kiểm tra lại với mạng chậm và trường hợp chunk tải lỗi.
+
+```bash
+ng build --configuration production
+```
+
+Khi cần phân tích graph sâu hơn và builder hỗ trợ:
+
+```bash
+ng build --configuration production --stats-json
+```
+
+Hot Module Replacement có thể tải các defer chunk sớm trong môi trường development. Khi cần kiểm tra đúng hành vi trigger bằng dev server, tắt HMR:
+
+```bash
+ng serve --no-hmr
+```
+
+Production build và Network vẫn là bằng chứng đáng tin cậy hơn cho output phát hành.
+
+### Kiểm thử từng trạng thái
+
+Angular TestBed cho phép điều khiển defer block thủ công:
+
+```ts
+import {
+  DeferBlockBehavior,
+  DeferBlockState,
+  TestBed,
+} from '@angular/core/testing';
+import { AnalyticsPageComponent } from './analytics-page.component';
+
+describe('AnalyticsPageComponent', () => {
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [AnalyticsPageComponent],
+      deferBlockBehavior: DeferBlockBehavior.Manual,
+    }).compileComponents();
+  });
+
+  it('hiển thị các trạng thái của biểu đồ', async () => {
+    const fixture = TestBed.createComponent(AnalyticsPageComponent);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent)
+      .toContain('Mở biểu đồ chi tiết');
+
+    const [block] = await fixture.getDeferBlocks();
+
+    await block.render(DeferBlockState.Loading);
+    expect(fixture.nativeElement.textContent)
+      .toContain('Đang tải biểu đồ');
+
+    await block.render(DeferBlockState.Complete);
+    expect(fixture.nativeElement.querySelector('app-analytics-chart'))
+      .not.toBeNull();
+  });
+});
+```
+
+Unit test xác nhận template ở từng state. Nó không chứng minh production build đã tách chunk đúng hoặc request xảy ra đúng thời điểm trên trình duyệt thật. Phần đó cần production build, integration test hoặc E2E test.
+
+## Chọn ranh giới phù hợp
+
+| Nhu cầu | Công cụ thường phù hợp | Lý do |
+| --- | --- | --- |
+| Toàn bộ page chỉ cần sau khi đổi URL | `loadComponent` | Route là boundary rõ ràng cho một standalone page. |
+| Feature có nhiều page con | `loadChildren` | Tải cả route config của feature và giữ cấu trúc URL riêng. |
+| Widget nặng nằm trong page đã tải | `@defer` | Đặt trigger và UI states ngay tại vùng template. |
+| Chỉ cần ẩn/hiện UI, code vốn đã cần sớm | `@if` | Không thêm lazy boundary và loading state không cần thiết. |
+| Nội dung critical trên màn hình đầu | Eager render | Tránh request muộn làm xấu LCP và khả năng tương tác. |
+| Feature có khả năng sắp được dùng | `@defer` với prefetch có chọn lọc | Tải code sớm hơn nhưng vẫn render theo thao tác. |
+| Cần tải API trước khi page hoạt động | Resolver, resource hoặc cache policy riêng | Code prefetch không tự tải dữ liệu. |
+
+Một quy tắc thực dụng:
+
+1. Tách theo route trước vì đó là ranh giới sản phẩm rõ nhất.
+2. Trong route, chỉ defer widget đủ nặng và không cần cho render đầu.
+3. Dùng prefetch khi số đo cho thấy lần tương tác đầu chậm và xác suất sử dụng cao.
+4. Giữ nội dung critical eager thay vì tối ưu chỉ để giảm con số initial.
+
+## Các nhầm lẫn thường gặp
+
+| Nhầm lẫn | Thực tế |
+| --- | --- |
+| Code splitting và lazy loading là một | Splitting tạo chunk; lazy loading quyết định khi nào request chunk. |
+| `@if` false thì component không nằm trong bundle | `@if` chủ yếu điều khiển render; dependency vẫn có thể eager. |
+| Đặt component vào `@defer` là chắc chắn có lazy chunk | Dependency phải standalone, không bị tham chiếu eager và còn phụ thuộc bundler graph. |
+| `@placeholder`, `@loading`, `@error` cũng lazy | Ba sub-block này eager. Chỉ nội dung chính đủ điều kiện được defer. |
+| `prefetch` làm component xuất hiện | Prefetch tải code; trigger chính mới quyết định render. |
+| `prefetch` tải luôn dữ liệu API | Nó chỉ tải dependency code; data cần policy riêng. |
+| `when` false sẽ quay lại placeholder | Sau lần truthy đầu tiên, defer block không tự revert. |
+| Rời viewport sẽ unload component và JavaScript | `@defer` không phải virtual scrolling hoặc cơ chế unload. |
+| Mỗi block tạo đúng một chunk | Compiler tạo dynamic imports; bundler quyết định cách gộp, chia và dùng chung chunk. |
+| Lazy loading luôn cải thiện hiệu năng | Nó có thể chuyển độ trễ sang lần tương tác đầu hoặc tạo waterfall. Phải đo cả hai phía. |
+
+## Tóm tắt
+
+- Code splitting chia build output thành chunks. Lazy loading trì hoãn request chunk tới lúc cần.
+- Router tạo lazy boundary theo URL bằng `loadComponent` và `loadChildren`.
+- Deferrable Views tạo lazy boundary trong template bằng `@defer`.
+- Dependency được defer trực tiếp phải standalone và không bị tham chiếu eager trong cùng file.
+- Placeholder, loading và error state được tải eager; giữ chúng nhẹ và ổn định layout.
+- Trigger chính quyết định lúc render. Prefetch trigger quyết định lúc tải code trước.
+- `@defer` không tự tải API data, không thay `@if`, không unload code và không bảo đảm một hình dạng chunk cố định.
+- Có thể kết hợp route lazy loading với `@defer`, nhưng cần tránh request waterfall và nội dung critical bị tải quá muộn.
+- Luôn xác minh bằng production build, Network panel và test trạng thái thay vì chỉ đọc template.
+
+## Tài liệu tham khảo
+
+- [Deferred loading with defer](https://angular.dev/guide/templates/defer): điều kiện dependency, trigger, prefetch, UI states và SSR.
+- [Defer block API](https://angular.dev/api/core/%40defer): cú pháp đầy đủ của block và trigger.
+- [Route loading strategies](https://angular.dev/guide/routing/loading-strategies): eager route, `loadComponent` và `loadChildren`.
+- [Incremental hydration](https://angular.dev/guide/incremental-hydration): kết hợp defer block với hydrate trigger trong ứng dụng SSR.
+
+## Đọc tiếp
+
+<Cards>
+  <Card title="Build và tối ưu bundle" href="/docs/testing-performance-deploy/build-optimization" description="Đo initial bundle, lazy chunks và regression bằng production build." />
+  <Card title="Nested và lazy routes" href="/docs/routing-forms/nested-lazy-routes" description="Thiết kế route tree và lazy boundary theo feature." />
+  <Card title="Lazy loading service" href="/docs/cau-hoi-phong-van/service-lazy-loading-va-provider-scope" description="Tách vị trí bundle khỏi provider scope và thời điểm tạo service." />
+  <Card title="SSR và hydration" href="/docs/testing-performance-deploy/ssr-hydration" description="Hiểu HTML server, hydration và các ranh giới chạy trên client." />
+</Cards>

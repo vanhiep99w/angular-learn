@@ -1,0 +1,494 @@
+---
+title: Lazy loading service và phạm vi provider
+description: Phân biệt vị trí code trong bundle, thời điểm Angular tạo service và phạm vi của root, route, component provider.
+---
+
+<Callout type="info" title="Mục tiêu của tài liệu">
+  Lazy loading và Dependency Injection thường xuất hiện cùng nhau, nhưng chúng không phải một cơ chế. Trang này tách riêng ba vấn đề: code service được tải lúc nào, injector nào sở hữu provider và constructor của service chạy lúc nào.
+</Callout>
+
+## Mục lục
+
+- [Ba lớp cần tách riêng](#ba-lớp-cần-tách-riêng)
+  - [Bundle và thời điểm tải code](#bundle-và-thời-điểm-tải-code)
+  - [Injector và phạm vi provider](#injector-và-phạm-vi-provider)
+  - [Instance và thời điểm chạy constructor](#instance-và-thời-điểm-chạy-constructor)
+- [Root provider không đồng nghĩa initial chunk](#root-provider-không-đồng-nghĩa-initial-chunk)
+  - [Root service chỉ được dùng trong lazy component](#root-service-chỉ-được-dùng-trong-lazy-component)
+  - [Khi service đi vào initial hoặc shared chunk](#khi-service-đi-vào-initial-hoặc-shared-chunk)
+- [Route provider thay đổi phạm vi DI](#route-provider-thay-đổi-phạm-vi-di)
+  - [Đặt provider bên trong lazy route config](#đặt-provider-bên-trong-lazy-route-config)
+  - [Route provider không tự tạo lazy boundary](#route-provider-không-tự-tạo-lazy-boundary)
+- [Khi root provider và route provider cùng tồn tại](#khi-root-provider-và-route-provider-cùng-tồn-tại)
+- [Luồng thực thi hoàn chỉnh](#luồng-thực-thi-hoàn-chỉnh)
+  - [Lần đầu mở lazy route](#lần-đầu-mở-lazy-route)
+  - [Rời route và quay lại](#rời-route-và-quay-lại)
+- [Các nhầm lẫn thường gặp](#các-nhầm-lẫn-thường-gặp)
+  - [Chunk được tải là service được tạo ngay](#chunk-được-tải-là-service-được-tạo-ngay)
+  - [Lazy component biến service thành route scoped](#lazy-component-biến-service-thành-route-scoped)
+  - [Route provider luôn tạo instance mới mỗi lần vào](#route-provider-luôn-tạo-instance-mới-mỗi-lần-vào)
+  - [providedIn root luôn làm bundle ban đầu lớn hơn](#providedin-root-luôn-làm-bundle-ban-đầu-lớn-hơn)
+- [Chọn scope theo nhu cầu](#chọn-scope-theo-nhu-cầu)
+- [Cách kiểm tra trong dự án](#cách-kiểm-tra-trong-dự-án)
+  - [Kiểm tra chunk trên trình duyệt](#kiểm-tra-chunk-trên-trình-duyệt)
+  - [Kiểm tra injector và instance](#kiểm-tra-injector-và-instance)
+- [Tóm tắt](#tóm-tắt)
+- [Tài liệu tham khảo](#tài-liệu-tham-khảo)
+- [Đọc tiếp](#đọc-tiếp)
+
+## Ba lớp cần tách riêng
+
+Khi nói “service được lazy load”, ba hiện tượng khác nhau thường bị gộp thành một:
+
+1. **Code splitting:** file JavaScript chứa class service chưa được tải ở lần mở ứng dụng đầu tiên.
+2. **Provider scope:** root, route hay component injector chịu trách nhiệm phân giải token và giữ instance.
+3. **Lazy instantiation:** Angular chưa chạy factory hoặc constructor cho đến khi có nơi thực sự inject token.
+
+Ba lớp này liên quan với nhau nhưng không quyết định thay nhau:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ Bundler                                                     │
+│ Static import hay dynamic import quyết định graph/chunk     │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ code đã được tải và evaluate
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Angular DI                                                  │
+│ providedIn / providers quyết định injector sở hữu provider  │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ consumer gọi inject(Token)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Runtime                                                     │
+│ Injector chạy factory, tạo và cache instance                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+<Callout type="idea" title="Công thức để nhớ">
+  `import()` quyết định **khi nào code có thể được tải**. `providedIn` và `providers` quyết định **injector nào sở hữu instance**. `inject()` quyết định **khi nào instance thực sự cần được tạo**.
+</Callout>
+
+### Bundle và thời điểm tải code
+
+Bundler bắt đầu từ entry point như `main.ts` rồi đi theo các static import. Phần code đi tới được qua graph này thường thuộc initial bundle hoặc một chunk tải lúc khởi động.
+
+```ts
+// Static import: ReportPage nằm trong graph hiện tại.
+import { ReportPage } from './reports/report-page.component';
+
+export const routes: Routes = [
+  { path: 'reports', component: ReportPage },
+];
+```
+
+Dynamic `import()` tạo một ranh giới bất đồng bộ. Code phía sau ranh giới có thể được tách khỏi initial bundle:
+
+```ts
+export const routes: Routes = [
+  {
+    path: 'reports',
+    loadComponent: () =>
+      import('./reports/report-page.component').then(
+        (m) => m.ReportPage,
+      ),
+  },
+];
+```
+
+Bundler mới là thành phần quyết định file output chính xác. Một service có thể nằm cùng chunk với page, trong một shared chunk của nhiều lazy feature, hoặc trong initial chunk nếu còn một đường import eager khác.
+
+### Injector và phạm vi provider
+
+Provider là công thức cho Angular biết cách tạo giá trị của một token. Nơi đăng ký provider quyết định phạm vi tìm kiếm và chia sẻ instance.
+
+| Nơi đăng ký | Injector sở hữu | Consumer thường chia sẻ instance |
+| --- | --- | --- |
+| `providedIn: 'root'` | Root `EnvironmentInjector` | Toàn ứng dụng, trừ subtree có provider gần hơn che nó. |
+| `providers` của route | `EnvironmentInjector` của route | Component của route, route con, guard và resolver trong phạm vi tương ứng. |
+| `providers` của component | `ElementInjector` của component | Component đó và cây con nhìn thấy provider. |
+
+Scope DI không mô tả vị trí file JavaScript. Một root service vẫn có thể nằm sau dynamic import. Ngược lại, một route-scoped service vẫn có thể bị tải trong initial bundle nếu route config gốc static import class đó.
+
+### Instance và thời điểm chạy constructor
+
+Đăng ký provider chưa đồng nghĩa Angular đã gọi constructor. Injector thường chỉ tạo instance khi token được phân giải lần đầu:
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class AuditService {
+  constructor() {
+    console.log('AuditService được tạo');
+  }
+}
+```
+
+Nếu không component, service, guard, resolver hoặc initializer nào inject `AuditService`, constructor không cần chạy. Nếu `AppComponent` inject nó, instance được tạo sớm. Nếu chỉ lazy page inject nó, thời điểm tạo sẽ muộn hơn.
+
+Code của class phải được tải trước khi Angular có thể tạo class đó. Tuy nhiên, chiều ngược lại không đúng: tải chunk chỉ evaluate module; nó không bắt buộc tạo mọi service có trong chunk.
+
+## Root provider không đồng nghĩa initial chunk
+
+`providedIn: 'root'` mô tả root injector. Nó không phải chỉ thị cho bundler rằng service phải đi vào initial chunk.
+
+### Root service chỉ được dùng trong lazy component
+
+Giả sử `ReportStore` chỉ được import bởi một page lazy:
+
+```ts title="reports/report-store.ts"
+import { Injectable } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class ReportStore {
+  constructor() {
+    console.log('Tạo ReportStore');
+  }
+}
+```
+
+```ts title="reports/report-page.component.ts"
+import { Component, inject } from '@angular/core';
+import { ReportStore } from './report-store';
+
+@Component({
+  standalone: true,
+  selector: 'app-report-page',
+  template: `<p>Trang báo cáo</p>`,
+})
+export class ReportPage {
+  private readonly store = inject(ReportStore);
+}
+```
+
+```ts title="app.routes.ts"
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: 'reports',
+    loadComponent: () =>
+      import('./reports/report-page.component').then(
+        (m) => m.ReportPage,
+      ),
+  },
+];
+```
+
+Nếu không có đường import eager nào khác tới `ReportStore`, class này thuộc graph lazy của `ReportPage`. Khi người dùng mở `/reports`, Router tải code cần thiết. Sau đó `ReportPage` gọi `inject(ReportStore)`, và **root injector** tạo rồi giữ instance.
+
+```text
+Mở ứng dụng
+  └── chưa cần graph của ReportPage
+
+Đi tới /reports
+  └── tải lazy graph
+        ├── ReportPage
+        └── ReportStore class
+              │ inject(ReportStore)
+              ▼
+        root EnvironmentInjector tạo và giữ instance
+```
+
+Service được tải muộn nhưng vẫn là root-scoped. Lazy loading không tự chuyển nó sang route injector.
+
+### Khi service đi vào initial hoặc shared chunk
+
+Cùng một `ReportStore` có thể chuyển sang initial graph nếu code eager import hoặc inject nó:
+
+```ts
+// AppComponent được tải lúc bootstrap.
+import { ReportStore } from './reports/report-store';
+
+@Component({ /* ... */ })
+export class AppComponent {
+  private readonly reports = inject(ReportStore);
+}
+```
+
+Một số đường tham chiếu thường làm thay đổi vị trí bundle:
+
+- Root component hoặc một eager service import `ReportStore`.
+- `ApplicationConfig` tham chiếu trực tiếp đến class trong `providers` hoặc factory.
+- Một initializer inject service khi ứng dụng khởi động.
+- Một barrel file export nhiều thành phần của feature rồi bị code eager import theo cách giữ lại service.
+- Nhiều lazy feature cùng dùng service, khiến bundler tách nó thành shared chunk.
+
+Shared chunk không nhất thiết được tải lúc bootstrap. Nó có thể là chunk dùng chung chỉ được tải khi lazy feature đầu tiên cần tới. Vì vậy, đừng suy luận chỉ từ tên file output; hãy kiểm tra request thực tế trong Network.
+
+<Callout type="warn" title="Tree-shaking khác lazy loading">
+  `providedIn: 'root'` hỗ trợ tree-shaking: service hoàn toàn không được dùng có thể bị loại khỏi production build. Một service được dùng trong lazy feature không bị loại; nó chỉ có thể được đặt sau ranh giới lazy. “Không có trong bundle” và “có trong lazy chunk” là hai kết quả khác nhau.
+</Callout>
+
+## Route provider thay đổi phạm vi DI
+
+Chỉ khi khai báo provider ở route, service mới trở thành route-scoped. Ranh giới lazy và ranh giới DI nên được đặt cùng feature khi feature thực sự cần một instance riêng.
+
+### Đặt provider bên trong lazy route config
+
+Đầu tiên, route gốc chỉ dynamic import file routes của feature:
+
+```ts title="app.routes.ts"
+import { Routes } from '@angular/router';
+
+export const routes: Routes = [
+  {
+    path: 'admin',
+    loadChildren: () =>
+      import('./admin/admin.routes').then((m) => m.ADMIN_ROUTES),
+  },
+];
+```
+
+Facade của feature không tự đăng ký ở root:
+
+```ts title="admin/admin-facade.ts"
+import { Injectable } from '@angular/core';
+
+@Injectable()
+export class AdminFacade {
+  constructor() {
+    console.log('Tạo AdminFacade');
+  }
+}
+```
+
+File route lazy đăng ký facade:
+
+```ts title="admin/admin.routes.ts"
+import { Routes } from '@angular/router';
+import { AdminFacade } from './admin-facade';
+
+export const ADMIN_ROUTES: Routes = [
+  {
+    path: '',
+    providers: [AdminFacade],
+    loadComponent: () =>
+      import('./admin-page.component').then((m) => m.AdminPage),
+  },
+];
+```
+
+Kết quả có hai đặc điểm độc lập:
+
+- `admin.routes.ts` được tải qua `import()`, nên `AdminFacade` thuộc lazy graph của feature nếu không có import eager khác.
+- `providers: [AdminFacade]` làm route injector sở hữu instance. Root injector không sở hữu provider này.
+
+`AdminPage`, component con, guard hoặc resolver nằm trong phạm vi route có thể inject cùng `AdminFacade`. Một component ở feature không liên quan sẽ không tìm thấy token này nếu không có provider khác ở tổ tiên.
+
+### Route provider không tự tạo lazy boundary
+
+Cấu hình sau vẫn tạo route-scoped service, nhưng static import đã đưa class service vào graph của `app.routes.ts`:
+
+```ts title="app.routes.ts"
+import { Routes } from '@angular/router';
+import { AdminFacade } from './admin/admin-facade';
+
+export const routes: Routes = [
+  {
+    path: 'admin',
+    providers: [AdminFacade],
+    loadComponent: () =>
+      import('./admin/admin-page.component').then((m) => m.AdminPage),
+  },
+];
+```
+
+Ở đây:
+
+- `AdminFacade` vẫn thuộc route injector.
+- Constructor vẫn chỉ chạy khi token được inject.
+- Nhưng code của `AdminFacade` có thể đã nằm trong initial graph vì static import ở file route gốc.
+
+Muốn cả route config và provider của feature ở sau lazy boundary, đặt chúng trong file được tải bằng `loadChildren`, như ví dụ trước.
+
+## Khi root provider và route provider cùng tồn tại
+
+Có thể một class vừa tự cung cấp ở root vừa được cung cấp lại ở route:
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class CheckoutStore {}
+```
+
+```ts
+export const CHECKOUT_ROUTES: Routes = [
+  {
+    path: '',
+    providers: [CheckoutStore],
+    loadComponent: () =>
+      import('./checkout-page.component').then((m) => m.CheckoutPage),
+  },
+];
+```
+
+Route provider gần consumer hơn nên **che** root provider cho subtree đó:
+
+```text
+Component dưới /checkout
+  └── route injector có CheckoutStore → dùng route instance
+
+Component ngoài /checkout
+  └── không thấy route injector
+        └── root injector có CheckoutStore → dùng root instance
+```
+
+Nếu cả hai vùng đều inject token, ứng dụng có thể có hai instance `CheckoutStore`. Nếu chỉ route inject token, root provider tồn tại dưới dạng định nghĩa nhưng root instance có thể chưa bao giờ được tạo.
+
+<Callout type="warn" title="Chỉ shadow provider khi có chủ đích">
+  Cung cấp lại cùng một class thường làm state bị tách mà người đọc không nhận ra. Nếu feature cần implementation khác, dùng `InjectionToken` hoặc tên class thể hiện vai trò rõ ràng. Nếu feature chỉ cần root singleton, bỏ provider ở route.
+</Callout>
+
+Bảng sau tổng hợp các trường hợp chính:
+
+| Cấu hình | Vị trí code thường gặp | Injector giữ instance | Số instance có thể có |
+| --- | --- | --- | --- |
+| Root service được eager component dùng | Initial graph | Root | Một root instance. |
+| Root service chỉ được lazy feature dùng | Lazy hoặc shared graph | Root | Một root instance sau lần inject đầu. |
+| Route service nằm trong lazy route file | Lazy graph | Route | Một instance cho route injector đó. |
+| Route service bị import từ route config gốc | Initial graph | Route | Vẫn route-scoped dù code tải sớm. |
+| Root service được cung cấp lại ở route | Tùy import graph | Route trong subtree, root bên ngoài | Có thể có cả root và route instance. |
+
+## Luồng thực thi hoàn chỉnh
+
+### Lần đầu mở lazy route
+
+Với ví dụ `ReportStore` root-scoped nhưng chỉ dùng trong lazy page, trình tự thường là:
+
+1. Trình duyệt tải initial JavaScript và Angular bootstrap ứng dụng.
+2. Angular tạo root `EnvironmentInjector`. `ReportStore` chưa cần có instance.
+3. Người dùng đi tới `/reports`.
+4. Router gọi dynamic `import()` và trình duyệt tải lazy graph.
+5. JavaScript evaluate class `ReportPage` và `ReportStore`.
+6. Router tạo `ReportPage`.
+7. Field initializer gọi `inject(ReportStore)`.
+8. Angular tìm token từ injector gần nhất lên root.
+9. Root injector chạy factory, gọi constructor và cache instance.
+10. Các consumer sau nhận lại cùng root instance.
+
+Bước 4 và bước 9 không phải một bước. Nếu lazy graph được preload nhưng không có consumer inject service, code đã tải mà constructor vẫn chưa chạy.
+
+### Rời route và quay lại
+
+Sau khi một chunk được tải, JavaScript module thường được trình duyệt giữ trong module cache. Rời route không “gỡ” bytecode của chunk khỏi ứng dụng. Lần quay lại thường không tạo một network request giống lần đầu, trừ khi trang bị reload, cache bị vô hiệu hóa hoặc phiên bản deploy thay đổi.
+
+Đối với instance:
+
+- Root instance thường sống đến khi Angular application bị hủy.
+- Component provider gắn rõ nhất với vòng đời của component instance.
+- Route provider có phạm vi nhìn thấy theo route tree, nhưng không nên mặc định hiểu là “luôn tạo mới mỗi lần vào URL”. Router có thể giữ route config, route injector hoặc detached route tùy phiên bản và `RouteReuseStrategy`.
+
+<Callout type="warn" title="Scope không phải cam kết reset state">
+  Nếu nghiệp vụ yêu cầu mỗi lần tạo page phải có state hoàn toàn mới, component provider thường là ranh giới dễ dự đoán hơn. Nếu cần route provider cho guard, resolver và nhiều page con, hãy thiết kế thao tác reset rõ ràng và kiểm tra hành vi Router của phiên bản dự án.
+</Callout>
+
+## Các nhầm lẫn thường gặp
+
+### Chunk được tải là service được tạo ngay
+
+Không. Tải chunk chỉ làm code sẵn sàng. Angular tạo service khi một consumer phân giải token. Preloading cũng có thể tải code từ trước mà không gọi constructor service.
+
+### Lazy component biến service thành route scoped
+
+Không. Component được lazy load chỉ thay đổi đường tải code. Service có `providedIn: 'root'` vẫn do root injector sở hữu, trừ khi có provider gần hơn ở route hoặc component.
+
+### Route provider luôn tạo instance mới mỗi lần vào
+
+Không nên dựa vào giả định này. Route scope xác định vùng phân giải token. Việc injector được giữ hay dọn phụ thuộc vào Router, phiên bản Angular và chiến lược reuse/cleanup của ứng dụng.
+
+### providedIn root luôn làm bundle ban đầu lớn hơn
+
+Không. Initial bundle phụ thuộc import graph. Root service chỉ được tham chiếu từ lazy graph vẫn có thể được tải muộn. Nếu service xuất hiện trong initial chunk, hãy tìm đường static import hoặc consumer eager thay vì chỉ nhìn `providedIn`.
+
+## Chọn scope theo nhu cầu
+
+Chọn scope dựa trên nơi state và hành vi cần được chia sẻ. Sau đó mới thiết kế lazy boundary cho bundle.
+
+| Nhu cầu | Scope thường phù hợp | Ví dụ |
+| --- | --- | --- |
+| Một identity dùng toàn ứng dụng | Root | Session đăng nhập, telemetry, API repository không giữ state màn hình. |
+| Nhiều page con trong một feature dùng chung state | Route | Wizard, bộ lọc admin, context của workspace. |
+| Mỗi component instance cần state riêng | Component | Editor, dialog, widget lặp nhiều lần. |
+| Chỉ muốn trì hoãn tải code của một root singleton | Giữ root, đặt consumer sau dynamic import | Repository chỉ được màn hình báo cáo lazy sử dụng. |
+| Muốn feature có instance khác với toàn app | Route hoặc component provider có chủ đích | Store riêng cho từng vùng UI. |
+
+Một repository không giữ state UI thường có thể tiếp tục dùng `providedIn: 'root'`, kể cả khi hiện tại chỉ một lazy feature sử dụng nó. Không cần chuyển xuống route chỉ để tối ưu bundle.
+
+Ngược lại, một facade giữ state của wizard không nên lên root chỉ vì cú pháp ngắn hơn. Root scope làm state sống và được chia sẻ rộng hơn nhu cầu thực tế.
+
+<Callout type="idea" title="Quy tắc thiết kế">
+  Chọn provider scope theo **quyền sở hữu state**. Chọn lazy boundary theo **chi phí tải code**. Khi hai ranh giới trùng nhau thì đặt chúng cùng feature; khi không trùng, đừng ép một cơ chế làm nhiệm vụ của cơ chế kia.
+</Callout>
+
+## Cách kiểm tra trong dự án
+
+Không nên đoán chunk từ decorator. Hãy kiểm tra cả output build và hành vi runtime.
+
+### Kiểm tra chunk trên trình duyệt
+
+1. Chạy production build của ứng dụng Angular.
+2. Mở trang gốc trong DevTools và chọn tab **Network**.
+3. Lọc request JavaScript và bật **Disable cache** trong lúc thử nghiệm.
+4. Reload trang ở một route eager.
+5. Xác nhận chunk feature chưa được tải.
+6. Điều hướng tới lazy route và quan sát request mới.
+7. Tìm service trong source map hoặc build stats nếu cần biết chunk nào chứa class.
+
+Angular CLI thường có thể tạo build stats để phân tích sâu hơn:
+
+```bash
+ng build --stats-json
+```
+
+Tên và cách chia chunk là chi tiết của bundler nên có thể đổi sau khi nâng Angular hoặc thay cấu hình. Điều cần xác nhận là bytecode có bị tải ở startup hay chỉ sau hành động mong muốn.
+
+### Kiểm tra injector và instance
+
+Tạm thời gắn ID cho mỗi instance:
+
+```ts
+@Injectable({ providedIn: 'root' })
+export class DebugStore {
+  private static nextId = 0;
+  readonly id = ++DebugStore.nextId;
+
+  constructor() {
+    console.log('Tạo DebugStore instance', this.id);
+  }
+}
+```
+
+Nếu route cung cấp lại `DebugStore`, log có thể cho thấy ID khác giữa consumer trong route và consumer bên ngoài. Angular DevTools cũng có **Injector Tree** để kiểm tra token được phân giải từ injector nào.
+
+Khi debug, kiểm tra riêng hai câu hỏi:
+
+- Network có tải code service ở thời điểm mong muốn không?
+- DI có trả đúng instance từ đúng injector không?
+
+Một câu trả lời đúng không bảo đảm câu còn lại đúng.
+
+## Tóm tắt
+
+- `providedIn: 'root'` đặt provider ở root injector; nó không ép service vào initial chunk.
+- Static import và dynamic `import()` tạo import graph để bundler quyết định initial, lazy hoặc shared chunk.
+- Angular thường tạo service ở lần phân giải token đầu tiên, không phải ngay khi đăng ký provider hay tải chunk.
+- Service root-scoped chỉ được lazy page dùng có thể được tải muộn nhưng vẫn là root singleton.
+- `providers` của route mới tạo route-scoped provider. Lazy loading một component không tự làm điều đó.
+- Cung cấp lại root service ở route sẽ shadow root provider và có thể tạo hai instance.
+- Chọn scope theo owner của state; chọn lazy boundary theo chi phí bundle; kiểm tra hai việc độc lập bằng Network và Injector Tree.
+
+## Tài liệu tham khảo
+
+- [Hierarchical injectors](https://angular.dev/guide/di/hierarchical-dependency-injection): root, route/component injector và quy tắc tìm provider.
+- [Route loading strategies](https://angular.dev/guide/routing/loading-strategies): eager route, `loadComponent`, `loadChildren` và dynamic import.
+- [Define routes](https://angular.dev/guide/routing/define-routes): route-level providers và phạm vi route con.
+- [Creating and using services](https://angular.dev/guide/di/creating-and-using-services): khai báo, tree-shaking và sử dụng service.
+- [Angular DevTools Injector Tree](https://angular.dev/tools/devtools/injectors): quan sát injector sở hữu và đường phân giải token.
+
+## Đọc tiếp
+
+<Cards>
+  <Card title="Dependency Injection" href="/docs/di-kien-truc/dependency-injection" description="Hiểu injector hierarchy, provider resolution và các scope DI." />
+  <Card title="Thiết kế service" href="/docs/di-kien-truc/service" description="Chọn trách nhiệm, owner của state và API service phù hợp." />
+  <Card title="Nested và lazy routes" href="/docs/routing-forms/nested-lazy-routes" description="Thiết kế route tree và giữ ranh giới lazy thực sự." />
+  <Card title="Build optimization" href="/docs/testing-performance-deploy/build-optimization" description="Đo và tối ưu bundle production thay vì suy luận từ source code." />
+</Cards>
