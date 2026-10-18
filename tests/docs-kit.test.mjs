@@ -42,11 +42,11 @@ test('migration ledger points to authored D2 captions, including split diagrams'
   }
 });
 
-test('installed 0.9.6, MDX registry, CSS and page layout schema align', async () => {
+test('installed 0.9.8, MDX registry, CSS and page layout schema align', async () => {
   const manifest = JSON.parse(await readFile('package.json', 'utf8'));
   const installed = JSON.parse(await readFile('node_modules/@vanhiep99w/docs-kit/package.json', 'utf8'));
-  assert.equal(manifest.dependencies['@vanhiep99w/docs-kit'], '0.9.6');
-  assert.equal(installed.version, '0.9.6');
+  assert.equal(manifest.dependencies['@vanhiep99w/docs-kit'], '0.9.8');
+  assert.equal(installed.version, '0.9.8');
   const registry = await readFile('mdx-components.tsx', 'utf8');
   const css = await readFile('app/global.css', 'utf8');
   for (const [lang, component] of Object.entries({ ...features, d2: 'D2Diagram', 'd2-interactive': 'D2InteractiveDiagram' })) {
@@ -84,7 +84,7 @@ test('vetted catalog icon is unchanged and embedded in both SVG themes', async (
   const file = 'content/docs/testing-performance-deploy/profiling-performance.mdx';
   let checked = false;
   const inspect = () => (tree) => visit(tree, 'mdxJsxFlowElement', (node) => {
-    if (node.name !== 'D2Diagram') return;
+    if (!['D2Diagram', 'D2InteractiveDiagram'].includes(node.name)) return;
     for (const attr of node.attributes.filter((a) => /^(light|dark)Svg$/.test(a.name))) {
       const svg = attr.value.data.estree.body[0].expression.value;
       if (svg.includes('Chrome dispatch')) {

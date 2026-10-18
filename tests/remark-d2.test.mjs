@@ -26,7 +26,7 @@ test('renders D2 to themed SVGs at compile time and reuses disk cache', async ()
   const first = await transform(fence);
   const node = first.tree.children[0];
   assert.equal(node.type, 'mdxJsxFlowElement');
-  assert.equal(node.name, 'D2Diagram');
+  assert.equal(node.name, 'D2InteractiveDiagram');
   const result = props(node);
   assert.equal(result.caption, 'Guard và resolver');
   assert.match(result.lightSvg, /^<svg/);

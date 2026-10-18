@@ -5,7 +5,7 @@ import { remarkCodeWalkthrough } from '@vanhiep99w/docs-kit/code-walkthrough';
 import { remarkProtocolExchange } from '@vanhiep99w/docs-kit/protocol-exchange';
 import { remarkSpanWaterfall } from '@vanhiep99w/docs-kit/span-waterfall';
 
-// Share the exact production pipeline with focused MDX tests. Static stays default.
+// Share the exact production pipeline with focused MDX tests; viewer defaults come from docs-kit.
 export const d2Options = {
   // Preserve this curriculum's compact SVG dimensions across docs-kit upgrades.
   scale: 0.75,
