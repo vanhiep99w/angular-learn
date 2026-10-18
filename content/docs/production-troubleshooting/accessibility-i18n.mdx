@@ -64,25 +64,53 @@ Mục tiêu thực tế là đảm bảo mọi chức năng có **tên**, **vai 
 
 Đưa hai yêu cầu vào cùng vòng đời feature, thay vì đợi audit trước release. Flow dưới đây cho một form tạo đơn hàng; cùng nguyên tắc áp dụng cho route, bảng dữ liệu và modal.
 
-```text
-Yêu cầu nghiệp vụ và ngôn ngữ nguồn
-               │
-               ▼
-Semantic HTML + hợp đồng keyboard + chuỗi có ngữ cảnh
-               │
-               ▼
-Template Angular: i18n / label / trạng thái lỗi
-               │
-               ├──► extract translation ──► bản dịch theo locale
-               │
-               ▼
-Unit/component test + quét tự động
-               │
-               ▼
-Kiểm thử thủ công: keyboard, screen reader, zoom, RTL
-               │
-               ▼
-Build từng locale, smoke test và phát hành
+```d2 title="Thiết kế accessibility và nội dung đa ngôn ngữ"
+direction: right
+
+requirements: "Yêu cầu nghiệp vụ\nNgôn ngữ nguồn" {
+  width: 160
+  height: 58
+}
+
+contract: "Semantic HTML\nKeyboard + chuỗi có\nngữ cảnh" {
+  width: 176
+  height: 79
+}
+
+template: "Angular template\ni18n, label, trạng\nthái lỗi" {
+  width: 168
+  height: 79
+}
+
+translations: "Extract translation\nBản dịch theo locale" {
+  width: 184
+  height: 58
+}
+
+requirements -> contract -> template
+template -> translations
+```
+
+```d2 title="Kiểm chứng trước khi phát hành từng locale"
+direction: right
+
+n0: "Unit / component test\nQuét tự động" {
+  width: 192
+  height: 58
+}
+
+n1: "Test thủ công\nKeyboard, screen\nreader, zoom, RTL" {
+  width: 160
+  height: 79
+}
+
+n2: "Build từng locale\nSmoke test + phát hành" {
+  width: 200
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
 ```
 
 <Callout type="idea" title="Nguyên tắc thiết kế">

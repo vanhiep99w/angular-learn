@@ -67,29 +67,48 @@ Provider là cấu hình nói với Angular cách tạo hoặc trả về một 
 
 Trong ứng dụng standalone, provider cấp ở cấu hình khởi tạo thường thuộc phạm vi ứng dụng. Provider cấp ở route/feature có thể tạo phạm vi hẹp hơn. Provider khai báo trên component chỉ dành cho component đó và cây con của nó. Khi mã yêu cầu một token, Angular bắt đầu tìm từ injector gần nơi dùng, rồi đi lên các injector cha cho đến khi tìm thấy provider phù hợp.
 
-```text
-bootstrapApplication / app.config
-        │
-        ▼
-┌─────────────────────────────────┐
-│ Injector phạm vi ứng dụng       │
-│ HttpClient, cấu hình dùng chung │
-└────────────────┬────────────────┘
-                 │ kế thừa
-                 ▼
-┌─────────────────────────────────┐
-│ Injector route hoặc feature     │
-│ CatalogFacade, quyền feature    │
-└────────────────┬────────────────┘
-                 │ kế thừa
-                 ▼
-┌─────────────────────────────────┐
-│ Injector component (nếu có)     │
-│ bộ lọc hoặc state riêng         │
-└────────────────┬────────────────┘
-                 │
-                 ▼
-      Component yêu cầu token
+```d2 title="Phạm vi provider và kế thừa injector (1/2)"
+direction: right
+
+n0: "bootstrapApplication\napp.config" {
+  width: 184
+  height: 58
+}
+
+n1: "App injector\nHttpClient + cấu hình\nchung" {
+  width: 192
+  height: 79
+}
+
+n2: "Route / feature\ninjector\nCatalogFacade + quyền" {
+  width: 192
+  height: 79
+}
+
+n3: "Component injector nếu\ncó\nState riêng" {
+  width: 200
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2: "Kế thừa"
+n2 -> n3: "Kế thừa"
+```
+
+```d2 title="Phạm vi provider và kế thừa injector (2/2)"
+direction: right
+
+n3: "Component injector nếu\ncó\nState riêng" {
+  width: 200
+  height: 79
+}
+
+n4: "Component yêu cầu\ntoken" {
+  width: 160
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Ví dụ, `HttpClient` thường phù hợp với phạm vi ứng dụng vì nhiều feature dùng cùng cấu hình HTTP. Ngược lại, state bộ lọc của một màn hình danh mục có thể phù hợp với provider ở feature hoặc component, vì rời màn hình thì state đó không cần tồn tại nữa.
@@ -104,23 +123,26 @@ DI không tự tạo ra kiến trúc tốt. Một component vẫn có thể inje
 
 Một cách nhìn thực dụng cho một feature như `catalog` là:
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│ UI: page, component, template                           │
-│ đọc state; phát thao tác của người dùng                 │
-└───────────────────────────┬─────────────────────────────┘
-                            │ gọi use case / facade
-                            ▼
-┌─────────────────────────────────────────────────────────┐
-│ Logic feature: service, quy tắc, state điều phối        │
-│ quyết định tải, lọc, chọn hoặc cập nhật dữ liệu         │
-└───────────────────────────┬─────────────────────────────┘
-                            │ dùng contract hoặc token
-                            ▼
-┌─────────────────────────────────────────────────────────┐
-│ Hạ tầng: repository, HttpClient, storage, analytics     │
-│ nói chuyện với API hoặc trình duyệt                     │
-└─────────────────────────────────────────────────────────┘
+```d2 title="UI gọi logic feature qua contract"
+direction: right
+
+n0: "UI\nĐọc state, phát ý định" {
+  width: 200
+  height: 58
+}
+
+n1: "Logic feature\nTải, lọc, chọn, cập\nnhật" {
+  width: 176
+  height: 79
+}
+
+n2: "Hạ tầng\nRepository, HTTP,\nstorage, analytics" {
+  width: 168
+  height: 79
+}
+
+n0 -> n1: "Use case / facade"
+n1 -> n2: "Contract / token"
 ```
 
 Không phải feature nhỏ nào cũng cần đủ ba lớp. Một trang chỉ hiển thị dữ liệu tĩnh có thể chỉ cần component. Khi feature có nhiều màn hình, luồng bất đồng bộ hoặc quy tắc dùng lại, tách logic feature khỏi UI sẽ giảm việc lặp lại và giúp kiểm thử không cần render template.

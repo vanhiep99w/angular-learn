@@ -34,13 +34,35 @@ Mỗi lần người dùng đi đến một URL, Angular Router tìm route phù 
 
 Ví dụ, trang `/admin` cần phiên đăng nhập hợp lệ; `CanActivate` phù hợp để quyết định có vào trang hay chuyển đến `/login`. Trang `/users/42` cần hồ sơ của người dùng `42`; resolver có thể nạp hồ sơ trước để `UserDetailComponent` nhận dữ liệu ngay khi xuất hiện.
 
-```text
-Người dùng mở /users/42
-          │
-          ▼
-Router khớp route ──► chạy guard ──► chạy resolver ──► tạo component
-                         │                 │
-                   chặn/redirect      dữ liệu sẵn sàng
+```d2 title="Luồng điều hướng: guard quyết định, resolver chuẩn bị dữ liệu"
+vars: {
+  d2-config: {
+    sketch: true
+    layout-engine: elk
+  }
+}
+direction: right
+
+*: {
+  width: 140
+  height: 58
+}
+router: "Mở /users/42\nRouter khớp route" {
+  width: 160
+}
+guard: "Guard\ncho phép?" {
+  shape: diamond
+  width: 160
+  height: 100
+}
+resolver: "Resolver\nlấy dữ liệu"
+component: "Tạo component\nvới dữ liệu"
+blocked: "Chặn hoặc\nchuyển hướng"
+
+router -> guard
+guard -> resolver: Có
+resolver -> component
+guard -> blocked: Không
 ```
 
 ### Khi nào dùng guard hoặc resolver
@@ -392,14 +414,32 @@ Guard chạy trong mã JavaScript tải về trình duyệt. Người dùng có 
 
 Ví dụ, `adminGuard` có thể ẩn hoặc redirect khỏi `/admin`, nhưng endpoint `DELETE /api/users/42` vẫn phải xác thực token và kiểm tra quyền admin ở server. Tương tự, resolver gọi `GET /api/users/42` không được phép là nơi duy nhất kiểm tra quyền sở hữu người dùng.
 
-```text
-Client guard: quyết định UI/navigation
-        │
-        ▼
-HTTP request ───────────────► API/server: xác thực + phân quyền
-                                      │
-                                      ▼
-                              trả dữ liệu hoặc 401/403
+```d2 title="Guard không thay thế quyền truy cập trên server"
+direction: right
+
+n0: "Client guard\nUI / navigation" {
+  width: 144
+  height: 58
+}
+
+n1: "HTTP request" {
+  width: 130
+  height: 58
+}
+
+n2: "API / server\nXác thực + phân quyền" {
+  width: 192
+  height: 58
+}
+
+n3: "Dữ liệu hoặc 401 / 403" {
+  width: 200
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 <Callout type="error" title="Quy tắc bảo mật">

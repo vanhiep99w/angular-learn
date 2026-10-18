@@ -66,27 +66,48 @@ Template-driven forms vẫn hữu ích cho form nhỏ và chủ yếu khai báo 
 
 Reactive Forms vẫn là luồng dữ liệu rõ ràng, không phải cơ chế hai chiều không kiểm soát. Người dùng phát sự kiện `input`; directive form ghi vào control; control chạy validation và phát trạng thái mới; Angular phản ánh lỗi, giá trị hoặc thuộc tính `disabled` trở lại template.
 
-```text
-Người dùng nhập "Bút bi"
-          │
-          ▼
-<input formControlName="name">
-          │ FormControlName ghi giá trị
-          ▼
-┌────────────────────────────────────────────┐
-│ form.controls.name: FormControl<string>    │
-│ value, errors, dirty, touched, valid       │
-└──────────────────┬─────────────────────────┘
-                   │ cập nhật FormGroup cha
-                   ▼
-┌────────────────────────────────────────────┐
-│ form: FormGroup                            │
-│ value, status và validator của toàn form   │
-└──────────────────┬─────────────────────────┘
-                   │
-        template đọc errors / valid
-                   ▼
-Thông báo lỗi, nút Lưu và payload khi submit
+```d2 title="Reactive form đồng bộ control, group và UI (1/2)"
+direction: right
+
+n0: "Nhập Bút bi\n<input\nformControlName=\"name\">" {
+  width: 208
+  height: 79
+}
+
+n1: "FormControlName\nGhi giá trị control" {
+  width: 176
+  height: 58
+}
+
+n2: "form.controls.name\nFormControl<string>\nvalue, errors, dirty,\ntouched, valid" {
+  width: 192
+  height: 100
+}
+
+n3: "FormGroup cha\nValue, status,\nvalidator toàn form" {
+  width: 176
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Reactive form đồng bộ control, group và UI (2/2)"
+direction: right
+
+n3: "FormGroup cha\nValue, status,\nvalidator toàn form" {
+  width: 176
+  height: 79
+}
+
+n4: "Template đọc errors /\nvalid\nLỗi, nút Lưu, submit\npayload" {
+  width: 192
+  height: 100
+}
+
+n3 -> n4
 ```
 
 Điểm quan trọng là **không đọc giá trị từ `document.querySelector()` để tạo payload**. Khi form model đã là nguồn sự thật, mọi thao tác ghi dữ liệu nên đi qua API của control. Nhờ vậy trạng thái, validator và giao diện luôn nhận được cùng một thay đổi.

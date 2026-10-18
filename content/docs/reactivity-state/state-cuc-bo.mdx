@@ -48,20 +48,44 @@ description: Tổ chức state theo component và feature bằng Signals, local 
 
 Từ “cục bộ” không chỉ nói về vị trí file. Nó nói về **phạm vi tiêu thụ** và **vòng đời**: chỉ các phần gần feature cần dữ liệu, và dữ liệu nên biến mất khi feature không còn tồn tại. Một `signal` đặt trong component là state cục bộ. Một service được cung cấp trên component gốc của feature cũng là state cục bộ, dù service nằm ở file riêng.
 
-```text
-Trang TaskPage được tạo
-        │
-        ▼
-TaskPage / TaskStore giữ query, tasks, status
-        │
-        ├──► TaskToolbar đọc query và gửi ý định đổi bộ lọc
-        └──► TaskList đọc tasks và gửi ý định hoàn thành việc
-        │
-        ▼
-Rời trang TaskPage
-        │
-        ▼
-Component và provider cục bộ bị hủy; state của instance đó kết thúc
+```d2 title="State cục bộ sống cùng page sở hữu"
+direction: right
+
+page: "TaskPage tạo" {
+  width: 130
+  height: 58
+}
+
+state: "TaskPage / TaskStore\nquery, tasks, status" {
+  width: 184
+  height: 58
+}
+
+toolbar: "TaskToolbar\nĐọc query, gửi ý định\nlọc" {
+  width: 192
+  height: 79
+}
+
+list: "TaskList\nĐọc tasks, gửi ý định\nhoàn thành" {
+  width: 192
+  height: 79
+}
+
+leave: "Rời TaskPage" {
+  width: 130
+  height: 58
+}
+
+destroy: "Hủy component +\nprovider\nKết thúc state\ninstance" {
+  width: 144
+  height: 100
+}
+
+page -> state
+state -> toolbar
+state -> list
+state -> leave
+leave -> destroy
 ```
 
 Điểm xuất phát tốt nhất là state nhỏ nhất có thể đáp ứng giao diện hiện tại. Việc này không phủ nhận state dùng chung hay global state; nó trì hoãn chi phí phối hợp của chúng đến lúc thật sự cần.
@@ -114,12 +138,64 @@ Scope không tự tạo persistence. Ngược lại, `providedIn: 'root'` chỉ 
 
 Vòng đời nên khớp với ý nghĩa của dữ liệu. Một form “tạo công việc” thường nên xóa nội dung khi đóng dialog. Một bộ lọc của trang danh sách có thể nên giữ khi component con re-render, nhưng không nhất thiết phải giữ khi rời route. Không có câu trả lời kỹ thuật tự động; đây là quyết định trải nghiệm cần được ghi rõ.
 
-```text
-signal trong component ─────────────► hủy cùng component
-provider trên component feature ────► hủy cùng feature host
-provider trên route ────────────────► hủy khi route injector bị loại bỏ
-providedIn: 'root' ─────────────────► tồn tại đến khi ứng dụng bị hủy/reload
-storage hoặc server ────────────────► có thể qua reload, tùy chính sách
+```d2 title="Vòng đời state theo phạm vi sở hữu"
+direction: right
+
+component: "Signal trong component" {
+  width: 200
+  height: 58
+}
+
+componentEnd: "Hủy cùng component" {
+  width: 168
+  height: 58
+}
+
+feature: "Provider trên feature\nhost" {
+  width: 192
+  height: 58
+}
+
+featureEnd: "Hủy cùng feature host" {
+  width: 192
+  height: 58
+}
+
+route: "Provider trên route" {
+  width: 176
+  height: 58
+}
+
+routeEnd: "Khi route injector bị\nloại bỏ" {
+  width: 192
+  height: 58
+}
+
+root: "providedIn: root" {
+  width: 152
+  height: 58
+}
+
+rootEnd: "Đến khi app hủy /\nreload" {
+  width: 160
+  height: 58
+}
+
+storage: "Storage hoặc server" {
+  width: 176
+  height: 58
+}
+
+persist: "Có thể qua reload\nTùy chính sách" {
+  width: 160
+  height: 58
+}
+
+component -> componentEnd
+feature -> featureEnd
+route -> routeEnd
+root -> rootEnd
+storage -> persist
 ```
 
 Nếu state cục bộ bị hủy đúng lúc, subscription và effect gắn với injection context đó cũng có cơ hội được dọn dẹp theo vòng đời Angular. Tuy nhiên, các tài nguyên tự tạo ngoài Angular vẫn cần cơ chế cleanup riêng phù hợp với API của chúng.
@@ -225,17 +301,48 @@ function toggleTask(id: number): void {
 
 Template nên phát **ý định**, owner chuyển ý định thành state mới, rồi template đọc state mới. Luồng này làm đường đi của một thay đổi có thể lần theo được.
 
-```text
-Người dùng nhấn "Hoàn thành"
-             │
-             ▼
-(click) gọi component.completeTask(id)
-             │
-             ▼
-owner gọi _tasks.update(...)
-             │
-             ▼
-state gốc đổi ──► computed bị invalid ──► template đọc và cập nhật DOM
+```d2 title="Owner cập nhật task thay vì mutate từ component con (1/2)"
+direction: right
+
+n0: "Người dùng Hoàn thành" {
+  width: 192
+  height: 58
+}
+
+n1: "(click) gọi\ncomponent.completeTask(id)" {
+  width: 232
+  height: 58
+}
+
+n2: "Owner gọi\n_tasks.update(...)" {
+  width: 168
+  height: 58
+}
+
+n3: "State gốc đổi\nComputed bị invalid" {
+  width: 176
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Owner cập nhật task thay vì mutate từ component con (2/2)"
+direction: right
+
+n3: "State gốc đổi\nComputed bị invalid" {
+  width: 176
+  height: 58
+}
+
+n4: "Template đọc\nCập nhật DOM" {
+  width: 130
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Không để template sửa object trong signal, ví dụ `(click)="tasks()[0].done = true"`. Code này vừa bỏ qua action, vừa khiến thay đổi khó kiểm thử và khó truy vết.
@@ -383,18 +490,34 @@ type LoadState =
   | { kind: 'error'; message: string };
 ```
 
-```text
-             load
- idle ─────────────► loading
-                        │  │
-              success   │  │ failure
-                        ▼  ▼
-                    success  error
-                       │       │
-                       └──reload┘
-                           │
-                           ▼
-                         loading
+```d2 title="State machine tải dữ liệu"
+direction: right
+
+idle: "idle" {
+  width: 130
+  height: 58
+}
+
+loading: "loading" {
+  width: 130
+  height: 58
+}
+
+success: "success" {
+  width: 130
+  height: 58
+}
+
+error: "error" {
+  width: 130
+  height: 58
+}
+
+idle -> loading: "load"
+loading -> success: "success"
+loading -> error: "failure"
+success -> loading: "reload"
+error -> loading: "reload"
 ```
 
 Một value `LoadState` không thể đồng thời là `{ kind: 'loading' }` và `{ kind: 'error' }`. Template thu hẹp kiểu theo `kind`, nên mỗi nhánh chỉ truy cập data tồn tại trong nhánh đó.
@@ -483,13 +606,46 @@ Nâng scope là thay đổi thiết kế, không phải phần thưởng cho fea
 
 Di chuyển từ field của component sang provider cục bộ khi nhiều component trong **cùng một feature** cần xem hoặc yêu cầu thay đổi cùng dữ liệu. Giữ lại action và readonly API gần như không đổi; chỉ đổi nơi owner sống.
 
-```text
-Ban đầu:                       Khi feature lớn hơn:
+```d2 title="Từ state trong component đến store theo feature"
+direction: right
 
-TaskListComponent              TaskPageComponent (providers: [TaskStore])
-  └─ signal(tasks)               ├─ TaskToolbar ─┐
-  └─ toggleTask()                ├─ TaskList ───┼─► cùng TaskStore instance
-                                └─ TaskDetails ─┘
+small: "Ban đầu\nTaskListComponent\nsignal(tasks) +\ntoggleTask()" {
+  width: 160
+  height: 100
+}
+
+page: "Khi feature lớn hơn\nTaskPageComponent\nproviders: TaskStore" {
+  width: 184
+  height: 79
+}
+
+toolbar: "TaskToolbar" {
+  width: 130
+  height: 58
+}
+
+list: "TaskList" {
+  width: 130
+  height: 58
+}
+
+details: "TaskDetails" {
+  width: 130
+  height: 58
+}
+
+store: "Cùng một instance\nTaskStore" {
+  width: 160
+  height: 58
+}
+
+small -> page: "Tách trách nhiệm"
+page -> toolbar
+page -> list
+page -> details
+toolbar -> store
+list -> store
+details -> store
 ```
 
 Đây thường là bước nâng cấp đầu tiên, vì nó vẫn tạo một instance riêng cho mỗi feature. Người dùng rời page thì data tạm và các selection cũ không vô tình ảnh hưởng page khác.

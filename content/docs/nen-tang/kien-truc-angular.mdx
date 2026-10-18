@@ -53,20 +53,48 @@ Angular cung cấp các khối ghép sẵn: component cho UI, template cho cách
 
 Mô hình hữu ích nhất là: **UI là ảnh chụp của trạng thái hiện tại**. Ví dụ, khi danh sách sản phẩm đang tải, trạng thái là `loading`; khi API trả dữ liệu, trạng thái chứa danh sách; khi API lỗi, trạng thái chứa thông báo lỗi. Template đọc trạng thái đó để hiện đúng giao diện.
 
-```text
-Người dùng / URL / phản hồi API
-              │
-              ▼
-   Component hoặc service xử lý sự kiện
-              │
-              ▼
-      Cập nhật trạng thái ứng dụng
-              │
-              ▼
- Template đọc trạng thái và Angular render DOM
-              │
-              ▼
-       Giao diện người dùng nhìn thấy
+```d2 title="Luồng dữ liệu qua component, state và template (1/2)"
+direction: right
+
+n0: "Người dùng / URL / API" {
+  width: 200
+  height: 58
+}
+
+n1: "Component hoặc service\nxử lý sự kiện" {
+  width: 200
+  height: 58
+}
+
+n2: "State ứng dụng đổi" {
+  width: 168
+  height: 58
+}
+
+n3: "Template đọc state\nAngular render DOM" {
+  width: 168
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Luồng dữ liệu qua component, state và template (2/2)"
+direction: right
+
+n3: "Template đọc state\nAngular render DOM" {
+  width: 168
+  height: 58
+}
+
+n4: "Giao diện nhìn thấy" {
+  width: 176
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Bạn không cần tự tìm phần tử rồi đổi `textContent` trong luồng thông thường. Thay vào đó, thay đổi dữ liệu mà template đang đọc. Angular sẽ đồng bộ phần giao diện phụ thuộc vào dữ liệu ấy.
@@ -81,27 +109,67 @@ Vì vậy, đừng sao chép một cấu trúc thư mục chỉ vì thấy nó t
 
 Trước khi đọc mã, hãy biết mỗi khối đứng ở đâu trong luồng. Sơ đồ dưới đây là mô hình đơn giản của ứng dụng Angular chạy ở trình duyệt.
 
-```text
-main.ts
-  │ bootstrapApplication(...)
-  ▼
-Application injector ───────► providers: router, HTTP, service dùng chung
-  │
-  ▼
-AppComponent
-  │ template có <router-outlet>
-  ▼
-Router ─────────────────────► Page component theo URL
-                                  │
-                                  ├──► UI component con
-                                  │         │ input / output
-                                  │         ▼
-                                  │      Template ───► DOM
-                                  │
-                                  └──► Service ───► HTTP API
-                                           │
-                                           ▼
-                                      state cho UI
+```d2 title="Từ bootstrap đến page component"
+direction: right
+
+n0: "main.ts\nbootstrapApplication(...)" {
+  width: 224
+  height: 58
+}
+
+n1: "App injector\nRouter, HTTP, service\nchung" {
+  width: 192
+  height: 79
+}
+
+n2: "AppComponent\n<router-outlet>" {
+  width: 144
+  height: 58
+}
+
+n3: "Router chọn page\nTheo URL" {
+  width: 152
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Page phối hợp UI component và service"
+direction: right
+
+page: "Page component" {
+  width: 136
+  height: 58
+}
+
+child: "UI component con" {
+  width: 152
+  height: 58
+}
+
+template: "Template → DOM" {
+  width: 136
+  height: 58
+}
+
+service: "Service\nState cho UI" {
+  width: 130
+  height: 58
+}
+
+api: "HTTP API" {
+  width: 130
+  height: 58
+}
+
+page -> child
+child -> template: "Input / output"
+page -> service
+service -> api
+service -> page: "State"
 ```
 
 ### Điểm vào và component gốc
@@ -192,17 +260,32 @@ Lợi ích là dễ dự đoán: để biết UI con hiển thị gì, bạn xem
 
 Component con dùng output để báo ý định của người dùng, chẳng hạn “đã bấm xóa” hoặc “đã chọn sản phẩm”. Cha quyết định hành động thực tế: mở hộp thoại, gọi service, cập nhật state hoặc điều hướng.
 
-```text
-ProductListPage
-  │ truyền [product] xuống
-  ▼
-ProductRow
-  │ phát (removeRequested) khi người dùng bấm Xóa
-  ▼
-ProductListPage
-  │ xác nhận, gọi service, cập nhật state
-  ▼
-Template render danh sách mới
+```d2 title="Ý định xóa item được xử lý bởi page"
+direction: right
+
+n0: "ProductListPage" {
+  width: 144
+  height: 58
+}
+
+n1: "ProductRow" {
+  width: 130
+  height: 58
+}
+
+n2: "ProductListPage\nXác nhận + service +\nstate" {
+  width: 184
+  height: 79
+}
+
+n3: "Template render\ndanh sách mới" {
+  width: 144
+  height: 58
+}
+
+n0 -> n1: "[product]"
+n1 -> n2: "(removeRequested)"
+n2 -> n3
 ```
 
 Con không phải lúc nào cũng cần output. Nếu UI quá nhỏ và không tái sử dụng, logic có thể ở cùng page component. Tách component khi nó có trách nhiệm UI rõ ràng hoặc cần được tái sử dụng, không phải chỉ để giảm số dòng trong một tệp.

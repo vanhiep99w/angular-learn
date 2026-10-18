@@ -74,26 +74,48 @@ Ví dụ, `visibleTasks` có thể được tính từ `tasks` và `filter`. N�
 
 Với NgRx Store, UI không sửa state trực tiếp. UI phát một action mô tả điều vừa xảy ra; reducer tạo state mới; selector đưa snapshot phù hợp về cho UI. Nếu action yêu cầu I/O, effect thực hiện I/O và phát action kết quả.
 
-```text
-Người dùng nhấn “Tải lại”
-           │
-           ▼
- component.dispatch(TasksActions.load())
-           │
-           ├──► reducer cập nhật status = "loading"
-           │              │
-           │              ▼
-           │       selector → UI render loading
-           │
-           ▼
- effect gọi TasksApi.getAll()
-           │
-     thành công / thất bại
-           ▼
- TasksActions.loadSuccess(...) / loadFailure(...)
-           │
-           ▼
- reducer tạo state kế tiếp → selector → UI
+```d2 title="Action load cập nhật ngay trạng thái loading"
+direction: right
+
+n0: "Người dùng Tải lại\ncomponent.dispatch\nTasksActions.load()" {
+  width: 176
+  height: 79
+}
+
+n1: "Reducer\nstatus = loading" {
+  width: 152
+  height: 58
+}
+
+n2: "Selector → UI loading" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+```
+
+```d2 title="Cùng action load kích hoạt effect gọi API"
+direction: right
+
+n0: "TasksActions.load()\nEffect:\nTasksApi.getAll()" {
+  width: 176
+  height: 79
+}
+
+n1: "Thành công / thất bại\nloadSuccess /\nloadFailure" {
+  width: 192
+  height: 79
+}
+
+n2: "Reducer tạo state\nSelector → UI" {
+  width: 160
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
 ```
 
 Action là nhật ký sự kiện của ứng dụng, không phải một setter vô danh. Nhờ vậy DevTools có thể hiển thị thứ tự thay đổi; reducer có thể kiểm thử mà không cần Angular; effect có điểm tập trung để quy định retry, hủy request và mapping lỗi.

@@ -45,23 +45,26 @@ Cách phân chia này tạo một **nguồn sự thật duy nhất** (single sou
 
 Luồng mặc định trong Angular là dữ liệu đi xuống, sự kiện đi lên:
 
-```text
-┌──────────────────────────┐
-│ Component cha            │
-│ sở hữu product và cart   │
-└────────────┬─────────────┘
-             │ [product] — dữ liệu xuống
-             ▼
-┌──────────────────────────┐
-│ ProductCardComponent     │
-│ hiển thị và nhận thao tác│
-└────────────┬─────────────┘
-             │ (added) — ý định lên
-             ▼
-┌──────────────────────────┐
-│ Component cha            │
-│ cập nhật cart rồi render │
-└──────────────────────────┘
+```d2 title="Dữ liệu đi xuống, ý định đi lên"
+direction: right
+
+parent: "Component cha\nSở hữu product + cart" {
+  width: 192
+  height: 58
+}
+
+child: "ProductCardComponent\nHiển thị + nhận thao\ntác" {
+  width: 184
+  height: 79
+}
+
+update: "Component cha\nCập nhật cart + render" {
+  width: 200
+  height: 58
+}
+
+parent -> child: "[product]"
+child -> update: "(added)"
 ```
 
 Điều này không có nghĩa mọi dữ liệu phải đi qua nhiều tầng cha-con. Khi hai component xa nhau cùng cần một state, service hoặc store có phạm vi phù hợp sẽ là đường đi ngắn hơn. Phần [Service và shared state](#service-và-shared-state-giao-tiếp-qua-một-nguồn-chung) giải quyết trường hợp đó.
@@ -307,11 +310,21 @@ export class CartLineComponent {
 
 Về mặt khái niệm, `[(quantity)]="quantity"` tương đương truyền giá trị vào và xử lý sự kiện `quantityChange` để ghi lại giá trị mới. Với signal của cha, Angular có thể liên kết trực tiếp signal đó với model input. Bạn **không** tự khai báo thêm `output()` tên `quantityChange` cho cùng model; Angular đã tạo cơ chế thay đổi này.
 
-```text
-CartLineComponent                 QuantityPickerComponent
-quantity signal ── [(quantity)] ─► quantity model
-       ▲                                  │
-       └──── giá trị mới khi update() ────┘
+```d2 title="Model binding đồng bộ quantity"
+direction: right
+
+parent: "CartLineComponent\nquantity signal" {
+  width: 160
+  height: 58
+}
+
+child: "QuantityPickerComponent\nquantity model" {
+  width: 208
+  height: 58
+}
+
+parent -> child: "[(quantity)]"
+child -> parent: "update() phát giá trị mới"
 ```
 
 ### Khi nào model input phù hợp

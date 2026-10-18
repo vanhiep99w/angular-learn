@@ -83,26 +83,60 @@ Angular không làm chậm hay nhanh theo một phép màu riêng. Ứng dụng 
 
 Ví dụ người dùng thay đổi từ khóa tìm kiếm. Một tương tác thường đi theo flow sau:
 
-```text
-Người dùng gõ phím
-      │
-      ▼
-Browser dispatch event `input`
-      │
-      ▼
-Handler Angular cập nhật state / signal
-      │
-      ▼
-Change detection kiểm tra view cần cập nhật
-      │
-      ▼
-Template tính binding, Angular ghi DOM khác biệt
-      │
-      ▼
-Browser tính style → layout → paint → compositing
-      │
-      ▼
-Khung hình mới xuất hiện trên màn hình
+```d2 title="Đường đi từ input event đến khung hình mới (1/2)"
+direction: right
+
+n0: "Người dùng gõ phím" {
+  width: 168
+  height: 58
+}
+
+n1: "Browser dispatch input" {
+  width: 200
+  height: 58
+}
+
+n2: "Angular handler\nCập nhật state /\nsignal" {
+  width: 152
+  height: 79
+}
+
+n3: "Change detection\nKiểm tra view cần cập\nnhật" {
+  width: 192
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Đường đi từ input event đến khung hình mới (2/2)"
+direction: right
+
+n3: "Change detection\nKiểm tra view cần cập\nnhật" {
+  width: 192
+  height: 79
+}
+
+n4: "Template tính binding\nGhi DOM khác biệt" {
+  width: 192
+  height: 58
+}
+
+n5: "Browser style → layout\nPaint → compositing" {
+  width: 200
+  height: 58
+}
+
+n6: "Khung hình mới" {
+  width: 136
+  height: 58
+}
+
+n3 -> n4
+n4 -> n5
+n5 -> n6
 ```
 
 Một input chậm có thể mắc ở bất kỳ mũi tên nào. `debounceTime` có thể giảm số lần gọi API, nhưng không chữa được layout nặng. `OnPush` có thể giảm số view được kiểm tra, nhưng không chữa được một hàm sắp xếp 10.000 phần tử ngay trong event handler. Trace giúp xác định mũi tên nào thực sự tốn thời gian.
@@ -225,19 +259,56 @@ Quy trình điều tra một thao tác tương tác:
 5. Đọc call tree hoặc bottom-up: call tree giữ thứ tự gọi; bottom-up gom thời gian theo hàm và tốt để tìm nơi tiêu tốn tổng thời gian.
 6. Kiểm tra các event `product-search:*` nếu đã đặt mark. Chúng neo trace vào bước nghiệp vụ, tránh suy luận từ timestamp trần.
 
-```text
-input event
-    │
-    ├── 92 ms JavaScript
-    │     ├── filterProducts()        58 ms
-    │     ├── sortByRelevance()       21 ms
-    │     └── template / framework    13 ms
-    │
-    ├── 31 ms Recalculate Style + Layout
-    └── 18 ms Paint
-          │
-          ▼
-    khung hình kết quả mới
+```d2 title="Phân rã thời gian input đến paint"
+direction: right
+
+input: "Input event" {
+  width: 130
+  height: 58
+}
+
+js: "JavaScript\n92 ms" {
+  width: 130
+  height: 58
+}
+
+filter: "filterProducts()\n58 ms" {
+  width: 152
+  height: 58
+}
+
+sort: "sortByRelevance()\n21 ms" {
+  width: 160
+  height: 58
+}
+
+template: "Template / framework\n13 ms" {
+  width: 184
+  height: 58
+}
+
+layout: "Recalculate Style +\nLayout\n31 ms" {
+  width: 176
+  height: 79
+}
+
+paint: "Paint\n18 ms" {
+  width: 130
+  height: 58
+}
+
+frame: "Khung hình kết quả mới" {
+  width: 200
+  height: 58
+}
+
+input -> js
+js -> filter
+js -> sort
+js -> template
+input -> layout
+input -> paint
+paint -> frame
 ```
 
 Trong ví dụ, tối ưu change detection trước `filterProducts()` chưa phải giả thuyết mạnh nhất. Task chính là lọc/sắp xếp đồng bộ. Tuy nhiên, sau khi giảm JavaScript, chi phí layout 31 ms có thể trở thành nút thắt kế tiếp; profiling là vòng lặp, không phải một lần chạy.

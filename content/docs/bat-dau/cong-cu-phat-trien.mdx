@@ -124,20 +124,48 @@ Một cách dùng đơn giản là chọn một component trong panel Components
 
 Có thể đi theo luồng sau:
 
-```text
-Người dùng thao tác
-        │
-        ▼
-Sự kiện trong template có chạy?
-        │ có
-        ▼
-Dữ liệu/state có thay đổi?
-        │ có
-        ▼
-Component và DOM có nhận giá trị mới?
-        │ có
-        ▼
-Kiểm tra CSS, điều kiện hiển thị và dữ liệu đầu vào
+```d2 title="Khoanh vùng lỗi từ thao tác tới giao diện (1/2)"
+direction: right
+
+n0: "Người dùng thao tác" {
+  width: 176
+  height: 58
+}
+
+n1: "Event template\ncó chạy?" {
+  width: 136
+  height: 58
+}
+
+n2: "State có thay đổi?" {
+  width: 168
+  height: 58
+}
+
+n3: "Component và DOM\nnhận giá trị mới?" {
+  width: 160
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2: "Có"
+n2 -> n3: "Có"
+```
+
+```d2 title="Khoanh vùng lỗi từ thao tác tới giao diện (2/2)"
+direction: right
+
+n3: "Component và DOM\nnhận giá trị mới?" {
+  width: 160
+  height: 58
+}
+
+n4: "Kiểm tra CSS, điều\nkiện hiển thị và input" {
+  width: 200
+  height: 58
+}
+
+n3 -> n4: "Có"
 ```
 
 Ở mỗi bước, dùng một bằng chứng nhỏ: breakpoint hoặc log tạm cho event, Network cho HTTP, Angular DevTools cho component, và Elements cho DOM/CSS. Khi một bước đã sai, dừng và sửa ở đó; chưa cần tối ưu hay thay đổi những tầng phía sau.

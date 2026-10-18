@@ -57,34 +57,54 @@ Chất lượng không phải là một lệnh chạy ngay trước khi deploy. 
 
 ### Quality pipeline
 
-```text
-Yêu cầu thay đổi
-      │
-      ▼
-┌──────────────────┐   unit test    ┌──────────────────┐
-│ Logic và service  │ ─────────────► │ Phản hồi nhanh    │
-└──────────────────┘                └────────┬─────────┘
-                                               │
-                                               ▼
-┌──────────────────┐ component test ┌──────────────────┐
-│ Template, input,  │ ─────────────► │ Hành vi UI đúng   │
-│ output, tương tác │                └────────┬─────────┘
-└──────────────────┘                         │
-                                               ▼
-┌──────────────────┐    E2E test    ┌──────────────────┐
-│ Luồng người dùng  │ ─────────────► │ Tích hợp tin cậy  │
-└──────────────────┘                └────────┬─────────┘
-                                               │
-                                               ▼
-┌──────────────────┐   profiling    ┌──────────────────┐
-│ Render, tải,      │ ─────────────► │ Có số liệu nền    │
-│ change detection  │                └────────┬─────────┘
-└──────────────────┘                         │
-                                               ▼
-┌──────────────────┐ build + deploy ┌──────────────────┐
-│ Bundle, SSR,      │ ─────────────► │ Bản phát hành     │
-│ cấu hình runtime  │                │ quan sát được     │
-└──────────────────┘                └──────────────────┘
+```d2 title="Từ kiểm thử đến bản phát hành quan sát được (1/2)"
+direction: right
+
+n0: "Yêu cầu thay đổi" {
+  width: 152
+  height: 58
+}
+
+n1: "Logic + service\nUnit → phản hồi nhanh" {
+  width: 192
+  height: 58
+}
+
+n2: "Template, input/output\nComponent → hành vi UI\nđúng" {
+  width: 200
+  height: 79
+}
+
+n3: "Luồng người dùng\nE2E → tích hợp tin cậy" {
+  width: 200
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Từ kiểm thử đến bản phát hành quan sát được (2/2)"
+direction: right
+
+n3: "Luồng người dùng\nE2E → tích hợp tin cậy" {
+  width: 200
+  height: 58
+}
+
+n4: "Render + tải + CD\nProfiling → số liệu\nnền" {
+  width: 176
+  height: 79
+}
+
+n5: "Bundle, SSR, runtime\nconfig\nBuild/deploy → release\nquan sát được" {
+  width: 200
+  height: 100
+}
+
+n3 -> n4
+n4 -> n5
 ```
 
 Pipeline này không có nghĩa mọi thay đổi đều phải chạy mọi phép kiểm thủ công. Unit test phù hợp để chạy thường xuyên. E2E chậm hơn nên nên tập trung vào hành trình quan trọng, ví dụ đăng nhập hoặc hoàn tất đơn hàng. Profiling cần được chạy khi có tín hiệu chậm hoặc trước một mốc phát hành đáng kể.

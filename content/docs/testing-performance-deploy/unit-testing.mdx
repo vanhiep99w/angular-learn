@@ -34,17 +34,21 @@ description: Viết unit test nhanh, cô lập và đáng tin cậy cho logic, s
 
 Test pyramid giúp phân bổ số lượng test theo chi phí và độ tin cậy:
 
-```text
-                         ┌───────────────┐
-                         │ E2E: ít       │
-                         │ Luồng thật    │
-                    ┌────┴───────────────┴────┐
-                    │ Integration/component   │
-                    │ Vừa phải                │
-              ┌─────┴─────────────────────────┴─────┐
-              │ Unit: nhiều, nhanh, cô lập          │
-              │ Hàm, service, state, validator      │
-              └─────────────────────────────────────┘
+```d2 title="Tháp kiểm thử và mức độ cô lập"
+grid-rows: 3
+vertical-gap: 10
+e2e: "E2E: ít, chậm, chi phí cao\nHành trình người dùng thật" {
+  width: 220
+  height: 58
+}
+component: "Integration / component: vừa phải\nTemplate, trạng thái, tương tác" {
+  width: 290
+  height: 58
+}
+unit: "Unit: nhiều, nhanh, rẻ, cô lập\nHàm, service, state, validator, rule nghiệp vụ" {
+  width: 370
+  height: 58
+}
 ```
 
 - **Unit test** bắt lỗi quy tắc nghiệp vụ sớm nhất. Ví dụ: đơn hàng thành viên vàng được giảm đúng 10%.
@@ -170,20 +174,32 @@ Hai test biên ở trên quan trọng hơn việc lặp lại nhiều ví dụ t
 
 `TestBed` là harness kiểm thử của Angular. Nó tạo injector riêng cho test, áp dụng provider/import giống một phần ứng dụng, sau đó cho phép test lấy dependency bằng `inject()` hoặc tạo component bằng `createComponent()`.
 
-```text
-TestBed.configureTestingModule(...)
-              │
-              ▼
-      Test injector riêng
-       ├── provider thật
-       ├── provider fake/spy
-       └── import standalone component
-              │
-       ┌──────┴──────┐
-       ▼             ▼
-TestBed.inject()  createComponent()
-       │             │
-    service      fixture + DOM
+```d2 title="TestBed tạo injector và fixture riêng cho test"
+direction: right
+
+config: "TestBed\nconfigureTestingModule" {
+  width: 200
+  height: 58
+}
+
+injector: "Test injector riêng\nProvider thật,\nfake/spy\nImport standalone\ncomponent" {
+  width: 176
+  height: 121
+}
+
+inject: "TestBed.inject()\nService" {
+  width: 152
+  height: 58
+}
+
+create: "createComponent()\nFixture + DOM" {
+  width: 160
+  height: 58
+}
+
+config -> injector
+injector -> inject
+injector -> create
 ```
 
 Dùng `TestBed` khi class cần Angular DI, component cần template hoặc test phải dùng provider Angular như `HttpClient`. Không dùng nó cho hàm thuần hay class có thể khởi tạo trực tiếp; setup thừa làm suite chậm và che mờ ý định test.

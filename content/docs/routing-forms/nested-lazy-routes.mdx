@@ -60,16 +60,48 @@ Hai kỹ thuật giải quyết hai vấn đề khác nhau:
 
 Router không chỉ chọn một component duy nhất. Với URL `/workspaces/acme/projects/42/settings`, nó khớp một **cây route đã kích hoạt**. Mỗi node trong cây có thể đóng góp một layout, một tham số hoặc một component.
 
-```text
-/workspaces/acme/projects/42/settings
-│
-├── AppComponent
-│   └── <router-outlet>
-│       └── WorkspaceShellComponent       (workspaceId = "acme")
-│           └── <router-outlet>
-│               └── ProjectShellComponent (projectId = "42")
-│                   └── <router-outlet>
-│                       └── ProjectSettingsPageComponent
+```d2 title="Các shell của route settings lồng nhau (1/2)"
+direction: right
+
+n0: "/workspaces/acme/projects/42/settings" {
+  width: 320
+  height: 58
+}
+
+n1: "AppComponent\n<router-outlet>" {
+  width: 144
+  height: 58
+}
+
+n2: "WorkspaceShellComponent\nworkspaceId = acme\n<router-outlet>" {
+  width: 208
+  height: 79
+}
+
+n3: "ProjectShellComponent\nprojectId = 42\n<router-outlet>" {
+  width: 192
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Các shell của route settings lồng nhau (2/2)"
+direction: right
+
+n3: "ProjectShellComponent\nprojectId = 42\n<router-outlet>" {
+  width: 192
+  height: 79
+}
+
+n4: "ProjectSettingsPageComponent" {
+  width: 248
+  height: 58
+}
+
+n3 -> n4
 ```
 
 `WorkspaceShellComponent` giữ phần khung chung của workspace. `ProjectShellComponent` giữ điều hướng nội bộ của một dự án. Trang cài đặt chỉ là lá của cây. Khi chuyển từ `/projects/42/overview` sang `/projects/42/settings`, hai shell có thể vẫn tồn tại; Router chỉ thay component trong outlet sâu nhất.
@@ -255,13 +287,32 @@ Ví dụ tập trung vào cơ chế Router nên không trình bày `ProjectServi
 
 Trong ví dụ trước, ứng dụng tải `workspace.routes.ts` khi người dùng mở một workspace. Mỗi page lớn bên trong feature vẫn dùng `loadComponent`, nên Dashboard hoặc Settings chỉ được tải khi URL thực sự cần. Đây là lazy loading theo hai tầng:
 
-```text
-Bundle khởi động
-└── app.routes.ts
-    └── khi vào /workspaces/:workspaceId
-        └── workspace.routes.ts + WorkspaceShellComponent
-            ├── khi vào /dashboard  → DashboardPageComponent
-            └── khi vào /projects/* → Project page tương ứng
+```d2 title="Lazy loading route theo hai tầng"
+direction: right
+
+boot: "Bundle khởi động\napp.routes.ts" {
+  width: 152
+  height: 58
+}
+
+workspace: "workspace.routes.ts\nWorkspaceShellComponent" {
+  width: 208
+  height: 58
+}
+
+dashboard: "DashboardPageComponent" {
+  width: 200
+  height: 58
+}
+
+project: "Project page tương ứng" {
+  width: 200
+  height: 58
+}
+
+boot -> workspace: "Vào /workspaces/\n:workspaceId"
+workspace -> dashboard: "Vào /dashboard"
+workspace -> project: "Vào /projects/*"
 ```
 
 Không nhất thiết phải áp dụng hai tầng. Nếu feature rất nhỏ, một `loadComponent` ở route gốc thường đơn giản và đủ tốt. Nếu nhiều page chia sẻ layout, provider theo feature, route con, guard hoặc resolver, `loadChildren` cho một file routes riêng thường dễ bảo trì hơn.

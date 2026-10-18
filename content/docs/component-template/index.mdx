@@ -59,24 +59,42 @@ Nếu chưa vững cả ba phần, hãy đọc chúng trước. Bạn không c�
 
 Một thao tác quen thuộc, chẳng hạn người dùng bấm nút tăng số lượng trong một thẻ sản phẩm, đi qua các phần kiến thức của nhóm này theo luồng sau:
 
-```text
-┌──────────────────┐     (click)      ┌─────────────────────┐
-│ Người dùng bấm   │ ───────────────► │ Template của con    │
-│ nút “Thêm”       │                  │ phát sự kiện        │
-└──────────────────┘                  └──────────┬──────────┘
-                                                   │
-                                                   ▼
-┌──────────────────┐   dữ liệu mới    ┌─────────────────────┐
-│ Template hiển thị │ ◄────────────── │ Component cha       │
-│ danh sách / tổng  │                  │ cập nhật trạng thái │
-└────────┬─────────┘                  └──────────┬──────────┘
-         │                                        │
-         │ @if, @for                              │ input / output
-         ▼                                        ▼
-┌──────────────────┐                  ┌─────────────────────┐
-│ Control flow     │                  │ Giao tiếp component │
-│ quyết định UI    │                  │ giữ ranh giới rõ    │
-└──────────────────┘                  └─────────────────────┘
+```d2 title="Từ sự kiện component con đến giao diện mới"
+direction: right
+
+click: "Người dùng bấm Thêm" {
+  width: 176
+  height: 58
+}
+
+child: "Template con\nPhát sự kiện" {
+  width: 130
+  height: 58
+}
+
+parent: "Component cha\nCập nhật state" {
+  width: 136
+  height: 58
+}
+
+template: "Template hiển thị\nDanh sách / tổng" {
+  width: 160
+  height: 58
+}
+
+flow: "@if, @for\nQuyết định UI" {
+  width: 130
+  height: 58
+}
+
+boundary: "input / output\nGiữ ranh giới rõ" {
+  width: 152
+  height: 58
+}
+
+click -> child -> parent -> template
+parent -> boundary
+template -> flow
 ```
 
 Ở đây, data binding nối trạng thái với template. Control flow quyết định UI nào tồn tại. Giao tiếp component giữ cho từng phần UI có trách nhiệm riêng. Những bài sau bổ sung cách khởi tạo, tái sử dụng, theo dõi vòng đời và tạo kiểu cho các phần đó.

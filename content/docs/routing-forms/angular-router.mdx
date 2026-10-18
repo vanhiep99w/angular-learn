@@ -49,20 +49,48 @@ Thiết kế URL như một trạng thái công khai giúp nút Back/Forward ho�
 
 ### Luồng xử lý một lần điều hướng
 
-```text
-Người dùng bấm liên kết / gọi Router.navigate()
-                     │
-                     ▼
-Router phân tích URL và tìm route khớp đầu tiên
-                     │
-                     ▼
-Áp dụng redirect, kiểm tra guard / resolver (nếu có)
-                     │
-                     ▼
-Kích hoạt component trong RouterOutlet và cập nhật history
-                     │
-                     ▼
-Component đọc params, query params, data và render giao diện
+```d2 title="Router điều phối URL, dữ liệu và UI (1/2)"
+direction: right
+
+n0: "Bấm liên kết /\nnavigate()" {
+  width: 136
+  height: 58
+}
+
+n1: "Phân tích URL\nTìm route khớp đầu\ntiên" {
+  width: 168
+  height: 79
+}
+
+n2: "Redirect + guard /\nresolver\nNếu có" {
+  width: 168
+  height: 79
+}
+
+n3: "Kích hoạt RouterOutlet\nCập nhật history" {
+  width: 200
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Router điều phối URL, dữ liệu và UI (2/2)"
+direction: right
+
+n3: "Kích hoạt RouterOutlet\nCập nhật history" {
+  width: 200
+  height: 58
+}
+
+n4: "Component đọc params,\nquery, data\nRender UI" {
+  width: 192
+  height: 79
+}
+
+n3 -> n4
 ```
 
 Route được xét theo thứ tự khai báo. Vì vậy cấu hình là một phần của hành vi ứng dụng, không chỉ là danh sách đường dẫn.

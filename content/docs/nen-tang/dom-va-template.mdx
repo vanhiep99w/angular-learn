@@ -89,19 +89,48 @@ Một component thường chia trách nhiệm thành hai nửa:
 
 Mô hình tinh thần hữu ích là:
 
-```text
-Người dùng / API
-       │ tạo hoặc thay đổi
-       ▼
-Trạng thái của component
-       │ được template đọc
-       ▼
-Angular render và cập nhật
-       ▼
-DOM thật trong trình duyệt
-       │
-       ▼
-Giao diện người dùng nhìn thấy
+```d2 title="Từ thay đổi state đến giao diện nhìn thấy (1/2)"
+direction: right
+
+n0: "Người dùng / API" {
+  width: 152
+  height: 58
+}
+
+n1: "State component" {
+  width: 144
+  height: 58
+}
+
+n2: "Angular render\nvà cập nhật" {
+  width: 136
+  height: 58
+}
+
+n3: "DOM thật" {
+  width: 130
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Từ thay đổi state đến giao diện nhìn thấy (2/2)"
+direction: right
+
+n3: "DOM thật" {
+  width: 130
+  height: 58
+}
+
+n4: "Giao diện người dùng" {
+  width: 184
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Template không thay thế DOM. Nó là mô tả có quy tắc để Angular tạo và đồng bộ DOM. DOM vẫn là thứ trình duyệt dùng để hiển thị và nhận sự kiện.
@@ -177,12 +206,48 @@ Nói ngắn gọn: hãy để template sở hữu **cấu trúc và trạng thá
 
 Khi Angular tạo một component, framework khởi tạo instance của lớp component, đánh giá template với state hiện tại và tạo các node DOM tương ứng. Nếu template có `{{ user().name }}`, Angular lấy giá trị hiện tại của signal `user` để đặt text node.
 
-```text
-1. Tạo component và state ban đầu
-2. Đọc template, tạo các phần tử/text node cần có
-3. Đánh giá các binding: text, property, attribute, class, style
-4. Gắn listener cho các event như click hoặc input
-5. Chèn DOM kết quả vào vị trí component trong trang
+```d2 title="Các bước render component ban đầu (1/2)"
+direction: right
+
+n0: "Tạo component + state" {
+  width: 192
+  height: 58
+}
+
+n1: "Đọc template\nTạo element / text\nnode" {
+  width: 168
+  height: 79
+}
+
+n2: "Đánh giá binding\nText, property,\nattribute, class,\nstyle" {
+  width: 160
+  height: 100
+}
+
+n3: "Gắn event listener\nClick, input" {
+  width: 168
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Các bước render component ban đầu (2/2)"
+direction: right
+
+n3: "Gắn event listener\nClick, input" {
+  width: 168
+  height: 58
+}
+
+n4: "Chèn DOM vào\nvị trí component" {
+  width: 152
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Các bước là mô hình khái niệm. Chi tiết nội bộ có thể khác theo phiên bản Angular và chế độ render, nhưng trách nhiệm không đổi: template mô tả, Angular đồng bộ, trình duyệt hiển thị.
@@ -193,20 +258,48 @@ Sau lần render đầu, Angular cần biết phần nào phải được kiểm
 
 Luồng của một event đơn giản thường là:
 
-```text
-click trên DOM
-     │
-     ▼
-(click) gọi phương thức component
-     │
-     ▼
-phương thức đổi state, ví dụ signal.set(...)
-     │
-     ▼
-Angular cập nhật binding phụ thuộc vào state đó
-     │
-     ▼
-DOM đổi text / property / class / cấu trúc cần thiết
+```d2 title="Event cập nhật state và binding phụ thuộc (1/2)"
+direction: right
+
+n0: "Click trên DOM" {
+  width: 136
+  height: 58
+}
+
+n1: "(click) gọi method" {
+  width: 168
+  height: 58
+}
+
+n2: "Method đổi state\nsignal.set(...)" {
+  width: 152
+  height: 58
+}
+
+n3: "Angular cập nhật\nbinding phụ thuộc" {
+  width: 160
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Event cập nhật state và binding phụ thuộc (2/2)"
+direction: right
+
+n3: "Angular cập nhật\nbinding phụ thuộc" {
+  width: 160
+  height: 58
+}
+
+n4: "DOM đổi text,\nproperty, class, cấu\ntrúc" {
+  width: 184
+  height: 79
+}
+
+n3 -> n4
 ```
 
 Điều quan trọng là **event không tự sửa giao diện**. Event gọi code của bạn; code thay đổi state; template là nơi nói giao diện cần trở thành gì.
@@ -466,14 +559,32 @@ Khi cần làm việc với DOM, hãy giữ các nguyên tắc sau:
 
 Hãy giữ chuỗi tư duy này khi viết Angular:
 
-```text
-State thay đổi
-    ↓
-Template đọc state qua binding
-    ↓
-Angular đồng bộ phần DOM liên quan
-    ↓
-Trình duyệt hiển thị kết quả và phát event mới
+```d2 title="State, binding và DOM tạo vòng tương tác"
+direction: right
+
+n0: "State thay đổi" {
+  width: 136
+  height: 58
+}
+
+n1: "Template đọc state\nqua binding" {
+  width: 168
+  height: 58
+}
+
+n2: "Đồng bộ DOM liên quan" {
+  width: 192
+  height: 58
+}
+
+n3: "Browser hiển thị\nvà phát event mới" {
+  width: 160
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Trước khi thêm `querySelector`, `classList.add` hoặc `innerHTML`, tự hỏi:

@@ -4,3 +4,6 @@ dist
 .source
 .env*.local
 .wrangler
+.cache/
+*.tsbuildinfo
+next-env.d.ts

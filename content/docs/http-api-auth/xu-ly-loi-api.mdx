@@ -56,16 +56,50 @@ dụng.
 
 ### Từ request đến phản hồi cho người dùng
 
-```text
-┌───────────┐     ┌─────────────┐     ┌─────────────┐     ┌──────────────┐
-│ Component │ ──► │ API service │ ──► │ HttpClient  │ ──► │ API / proxy  │
-│ form, UI  │ ◄── │ map contract│ ◄── │ interceptor │ ◄── │ network      │
-└─────┬─────┘     └──────┬──────┘     └──────┬──────┘     └──────────────┘
-      │                  │                   │
-      │ message/state    │ AppError           │ policy: trace, retry
-      ▼                  ▼                   ▼
-Thông điệp đúng       error contract      metric không nhạy cảm
-ngữ cảnh UI           ổn định             và correlation ID
+```d2 title="Các lớp xử lý lỗi API"
+direction: right
+
+ui: "Component\nForm + UI" {
+  width: 130
+  height: 58
+}
+
+service: "API service\nMap contract" {
+  width: 130
+  height: 58
+}
+
+http: "HttpClient /\ninterceptor" {
+  width: 130
+  height: 58
+}
+
+api: "API / proxy / network" {
+  width: 192
+  height: 58
+}
+
+message: "Thông điệp theo\nngữ cảnh UI" {
+  width: 144
+  height: 58
+}
+
+contract: "AppError\nContract ổn định" {
+  width: 152
+  height: 58
+}
+
+metric: "Trace, retry, metric\nCorrelation ID\nKhông lộ dữ liệu nhạy\ncảm" {
+  width: 192
+  height: 100
+}
+
+ui <-> service
+service <-> http
+http <-> api
+ui -> message: "Message / state"
+service -> contract
+http -> metric: "Policy"
 ```
 
 Luồng này có ba đầu ra khác nhau:
@@ -414,11 +448,45 @@ Khi đã có dữ liệu cũ và thao tác refresh thất bại, có thể giữ
 hiện banner “Không thể làm mới; dữ liệu có thể không mới”. Đây là fallback trung
 thực hơn việc thay bằng danh sách rỗng hoặc che lỗi hoàn toàn.
 
-```text
-Chưa có dữ liệu:  loading ──► ready / empty / error
-Đang có dữ liệu:  ready ──► refreshing ──► ready
-                                  │
-                                  └──► stale data + non-blocking error
+```d2 title="Loading ban đầu và lỗi khi refresh"
+direction: right
+
+loading: "loading\nChưa có dữ liệu" {
+  width: 144
+  height: 58
+}
+
+ready: "ready" {
+  width: 130
+  height: 58
+}
+
+empty: "empty" {
+  width: 130
+  height: 58
+}
+
+error: "error" {
+  width: 130
+  height: 58
+}
+
+refresh: "refreshing\nĐã có dữ liệu" {
+  width: 130
+  height: 58
+}
+
+stale: "Stale data\nNon-blocking error" {
+  width: 168
+  height: 58
+}
+
+loading -> ready
+loading -> empty
+loading -> error
+ready -> refresh
+refresh -> ready: "Thành công"
+refresh -> stale: "Thất bại"
 ```
 
 ## Interceptor: chính sách chung, không phải UI chung

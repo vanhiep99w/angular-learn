@@ -61,20 +61,48 @@ Cú pháp `quantity()` có chủ đích: signal là một hàm không tham số 
 
 Một component thường có state thay đổi theo tương tác: tab đang mở, nội dung ô tìm kiếm hoặc trạng thái tải dữ liệu. Template phải phản ánh state đó mà không cần tự quản lý subscription cho từng giá trị.
 
-```text
-Người dùng click / dữ liệu về
-            │
-            ▼
-      component ghi signal
-            │
-            ▼
-  Angular biết consumer đã đọc signal
-            │
-            ▼
-  View liên quan được đánh dấu để kiểm tra
-            │
-            ▼
-       Binding khác biệt cập nhật DOM
+```d2 title="Signal thông báo view đã đọc giá trị (1/2)"
+direction: right
+
+n0: "Click / dữ liệu về" {
+  width: 168
+  height: 58
+}
+
+n1: "Component ghi signal" {
+  width: 184
+  height: 58
+}
+
+n2: "Angular biết\nconsumer đã đọc signal" {
+  width: 200
+  height: 58
+}
+
+n3: "Đánh dấu view liên\nquan\nđể kiểm tra" {
+  width: 168
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Signal thông báo view đã đọc giá trị (2/2)"
+direction: right
+
+n3: "Đánh dấu view liên\nquan\nđể kiểm tra" {
+  width: 168
+  height: 79
+}
+
+n4: "Binding khác\nCập nhật DOM" {
+  width: 130
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Signal không thay thế DOM renderer hay change detection. Nó cung cấp thông tin chính xác rằng **giá trị nào** đã đổi và **ai đã đọc** giá trị đó. Angular vẫn thực hiện lượt đồng bộ template với DOM khi cần.
@@ -195,11 +223,31 @@ const label = computed(() => {
 
 Khi `showDetails()` là `false`, `label` không đọc `productName()`. Đổi `productName` lúc đó không làm `label` cần tính lại. Sau khi `showDetails.set(true)`, lần đọc `label()` tiếp theo mới tạo dependency tới `productName`.
 
-```text
-showDetails ───────────────► label (computed) ───► template
-                                  ▲
-                                  │ chỉ khi showDetails = true
-productName ──────────────────────┘
+```d2 title="Computed chỉ phụ thuộc productName trong nhánh đọc"
+direction: right
+
+show: "showDetails" {
+  width: 130
+  height: 58
+}
+
+name: "productName" {
+  width: 130
+  height: 58
+}
+
+derived: "label\ncomputed" {
+  width: 130
+  height: 58
+}
+
+template: "Template" {
+  width: 130
+  height: 58
+}
+
+show -> derived -> template
+name -> derived: "Chỉ khi showDetails = true"
 ```
 
 Đừng cố dự đoán dependency chỉ từ mã nguồn. Hãy nhìn vào đường chạy thực tế: signal nào được gọi trong lần render/tính toán đó mới là dependency.
@@ -289,27 +337,43 @@ Mutation có thể khiến thay đổi khó truy vết, phá vỡ kỳ vọng c�
 
 Ví dụ có một nút tăng số lượng. Template đọc `quantity()`, nên component trở thành consumer của signal đó.
 
-```text
-Người dùng nhấn “+”
-        │
-        ▼
-(click) gọi increase()
-        │
-        ▼
-quantity.update(value => value + 1)
-        │
-        ▼
-WritableSignal có giá trị mới
-        │
-        ├──► computed phụ thuộc bị invalid (nếu có)
-        │
-        └──► view đã đọc quantity() được đánh dấu
-                                      │
-                                      ▼
-                         Angular kiểm tra view phù hợp
-                                      │
-                                      ▼
-                         {{ quantity() }} đổi text trong DOM
+```d2 title="quantity.update thông báo computed và view"
+direction: right
+
+click: "Nhấn +\n(click) gọi increase()" {
+  width: 200
+  height: 58
+}
+
+write: "quantity.update\nvalue => value + 1" {
+  width: 168
+  height: 58
+}
+
+signal: "WritableSignal\nGiá trị mới" {
+  width: 136
+  height: 58
+}
+
+computed: "Computed phụ thuộc\nBị invalid nếu có" {
+  width: 168
+  height: 58
+}
+
+view: "View đã đọc quantity()\nĐược đánh dấu" {
+  width: 200
+  height: 58
+}
+
+check: "Kiểm tra view\n{{ quantity() }} đổi\nDOM" {
+  width: 184
+  height: 79
+}
+
+click -> write -> signal
+signal -> computed
+signal -> view
+view -> check
 ```
 
 Có hai ý cần nhớ. Thứ nhất, Angular chỉ theo dõi signal khi template **gọi** nó. Thứ hai, ghi signal không đồng nghĩa render đồng bộ toàn bộ ứng dụng; Angular lên lịch công việc cần thiết rồi cập nhật các binding có giá trị khác.
@@ -340,18 +404,37 @@ Lần render đầu, Angular biết template của `ProfileComponent` đã đọ
 
 Ở lượt kiểm tra, template đã được Angular compile thành các lệnh cập nhật binding. Angular đánh giá các binding của view cần kiểm tra, so sánh giá trị mới với giá trị trước đó và chỉ ghi DOM nơi có khác biệt:
 
-```text
-openCount.update(...)
-        │
-        ▼
-ProfileComponent view được đánh dấu
-        │
-        ▼
-Angular kiểm tra binding trong view
-        │
-        ├── {{ openCount() }}: 0 → 1  → đổi text node thứ nhất
-        │
-        └── {{ userName }}: "An" → "An" → không ghi lại DOM
+```d2 title="View được kiểm tra nhưng chỉ binding đổi mới ghi DOM"
+direction: right
+
+write: "openCount.update(...)" {
+  width: 192
+  height: 58
+}
+
+mark: "ProfileComponent\nView được đánh dấu" {
+  width: 168
+  height: 58
+}
+
+check: "Kiểm tra binding" {
+  width: 152
+  height: 58
+}
+
+count: "{{ openCount() }}\n0 → 1: đổi text thứ\nnhất" {
+  width: 176
+  height: 79
+}
+
+name: "{{ userName }}\nAn → An: không ghi lại\nDOM" {
+  width: 200
+  height: 79
+}
+
+write -> mark -> check
+check -> count
+check -> name
 ```
 
 Vì vậy, câu đúng là: **signal giúp Angular chọn đúng view để kiểm tra; Angular chỉ sửa đúng DOM binding có giá trị đổi.** Nó không có nghĩa Angular luôn chỉ chạy một expression duy nhất, và cũng không có nghĩa Angular dựng lại toàn bộ component.

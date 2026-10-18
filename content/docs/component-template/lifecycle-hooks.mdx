@@ -77,29 +77,85 @@ Angular duyệt mỗi component đúng một lần trong một lượt traversal
 
 Sơ đồ sau là mô hình tinh gọn cho một component có input, projected content và view con. Các hook `Checked` tiếp tục chạy trong những lượt kiểm tra sau; các hook `Init` chỉ chạy một lần.
 
-```text
-Tạo instance
-    │
-    ├── constructor
-    ├── Angular gán input ban đầu
-    ├── ngOnChanges (nếu có input thay đổi, gồm lần đầu)
-    ├── ngOnInit
-    ├── ngDoCheck
-    ├── ngAfterContentInit ──► ngAfterContentChecked
-    ├── ngAfterViewInit ────► ngAfterViewChecked
-    │
-    └── Angular hoàn tất render ──► afterNextRender / afterEveryRender
+```d2 title="Lifecycle lần đầu (1/2)"
+direction: right
 
-Lượt kiểm tra tiếp theo
-    │
-    ├── ngOnChanges (chỉ khi input đổi)
-    ├── ngDoCheck
-    ├── ngAfterContentChecked
-    ├── ngAfterViewChecked
-    └── Angular hoàn tất render ──► afterEveryRender
+n0: "constructor\nAngular gán input ban\nđầu" {
+  width: 192
+  height: 79
+}
 
-Hủy instance ──► ngOnDestroy và callback của DestroyRef
+n1: "ngOnChanges nếu input\nđổi\nGồm lần đầu" {
+  width: 192
+  height: 79
+}
+
+n2: "ngOnInit → ngDoCheck" {
+  width: 184
+  height: 58
+}
+
+n3: "ngAfterContentInit\nngAfterContentChecked" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
+
+```d2 title="Lifecycle lần đầu (2/2)"
+direction: right
+
+n3: "ngAfterContentInit\nngAfterContentChecked" {
+  width: 192
+  height: 58
+}
+
+n4: "ngAfterViewInit\nngAfterViewChecked" {
+  width: 168
+  height: 58
+}
+
+n5: "Render hoàn tất\nafterNextRender /\nafterEveryRender" {
+  width: 160
+  height: 79
+}
+
+n3 -> n4
+n4 -> n5
+```
+
+```d2 title="Lượt kiểm tra tiếp theo"
+direction: right
+
+n0: "ngOnChanges\nChỉ khi input đổi" {
+  width: 160
+  height: 58
+}
+
+n1: "ngDoCheck" {
+  width: 130
+  height: 58
+}
+
+n2: "ngAfterContentChecked\nngAfterViewChecked" {
+  width: 192
+  height: 58
+}
+
+n3: "Render hoàn tất\nafterEveryRender" {
+  width: 152
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+Khi hủy instance, Angular gọi `ngOnDestroy` và callback đã đăng ký với `DestroyRef`.
 
 Thứ tự giữa content và view có ý nghĩa:
 

@@ -201,26 +201,60 @@ directive.appModelChange.subscribe((nextValue) => {
 
 Luồng khi người dùng gõ một email mới:
 
-```text
-Người dùng gõ "new@example.com"
-             │
-             ▼
-Native event input của browser
-             │
-             ▼
-AppModelDirective đọc input.value
-             │
-             ▼
-appModelChange.emit("new@example.com")
-             │
-             ▼
-(user.email = $event) do Angular tạo từ [()]
-             │
-             ▼
-component.user.email có giá trị mới
-             │
-             ▼
-Angular cập nhật những binding đang đọc user.email
+```d2 title="Two-way binding từ input đến state (1/2)"
+direction: right
+
+n0: "Nhập new@example.com" {
+  width: 184
+  height: 58
+}
+
+n1: "Native input event" {
+  width: 168
+  height: 58
+}
+
+n2: "AppModelDirective\nđọc input.value" {
+  width: 160
+  height: 58
+}
+
+n3: "appModelChange.emit\nnew@example.com" {
+  width: 176
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Two-way binding từ input đến state (2/2)"
+direction: right
+
+n3: "appModelChange.emit\nnew@example.com" {
+  width: 176
+  height: 58
+}
+
+n4: "Angular tạo từ [()]\nuser.email = \$event" {
+  width: 176
+  height: 58
+}
+
+n5: "component.user.email\ncó giá trị mới" {
+  width: 184
+  height: 58
+}
+
+n6: "Cập nhật binding\nđọc user.email" {
+  width: 152
+  height: 58
+}
+
+n3 -> n4
+n4 -> n5
+n5 -> n6
 ```
 
 Điểm quan trọng: `[()]` không tự đọc DOM và không tự tạo state. Directive/component phía trong phải có code nhận thao tác UI rồi phát output. `[()]` chỉ nối **input đi vào** với **output đi ra**.

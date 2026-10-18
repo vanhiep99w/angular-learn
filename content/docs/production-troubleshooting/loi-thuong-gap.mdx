@@ -67,24 +67,50 @@ Lưu các dữ kiện không thay đổi trước khi xóa cache, đổi code ho
 
 ### Luồng khoanh vùng
 
-```text
-Triệu chứng
-    │
-    ▼
-Tái hiện nhỏ nhất và ghi release / route / thời điểm
-    │
-    ▼
-Console + Network có exception hoặc request bất thường?
-    │
-    ├── Có ──► kiểm tra source-mapped code, request và contract
-    │
-    └── Không / state đúng ──► kiểm tra template, DOM, CSS và change detection
-                                      │
-                                      ▼
-                         Sửa ở lớp sở hữu nguyên nhân
-                                      │
-                                      ▼
-                     Thêm regression test hoặc guardrail
+```d2 title="Thu thập ngữ cảnh của lỗi"
+direction: right
+
+n0: "Triệu chứng" {
+  width: 130
+  height: 58
+}
+
+n1: "Tái hiện nhỏ nhất\nGhi release, route,\nthời điểm" {
+  width: 176
+  height: 79
+}
+
+n0 -> n1
+```
+
+```d2 title="Khoanh vùng nguyên nhân rồi thêm regression test"
+direction: right
+
+check: "Console / Network\nCó bất thường?" {
+  width: 240
+  height: 90
+  shape: diamond
+}
+
+code: "Source-mapped code\nRequest + contract" {
+  width: 168
+  height: 58
+}
+
+ui: "Template, DOM, CSS\nChange detection" {
+  width: 168
+  height: 58
+}
+
+fix: "Sửa tại lớp sở hữu\nRegression test /\nguardrail" {
+  width: 168
+  height: 79
+}
+
+check -> code: "Có"
+check -> ui: "Không / state đúng"
+code -> fix
+ui -> fix
 ```
 
 Ưu tiên phép đo loại trừ được nhiều giả thuyết: Network trả lời request có tồn tại và response là gì; breakpoint trả lời nhánh TypeScript nào chạy; Elements trả lời phần tử có trong DOM không. Chỉ kết luận lỗi change detection khi state, binding và DOM đã được kiểm tra.

@@ -109,17 +109,32 @@ Dirty không đồng nghĩa DOM chắc chắn đổi. Nó chỉ cho Angular mộ
 
 Hãy hình dung hai cánh cửa: Angular phải biết cần đồng bộ ứng dụng, rồi phải chọn được view cần kiểm tra. **Notification** là tín hiệu báo cho Angular rằng có công việc đồng bộ cần xử lý.
 
-```text
-State đổi
-    │
-    ▼
-Notification hợp lệ: event, signal, AsyncPipe, markForCheck...
-    │
-    ▼
-Angular kiểm tra view cần cập nhật
-    │
-    ▼
-Binding đổi → ghi phần khác biệt vào DOM
+```d2 title="OnPush cần notification để đồng bộ DOM"
+direction: right
+
+n0: "State đổi" {
+  width: 130
+  height: 58
+}
+
+n1: "Notification hợp lệ\nEvent, signal,\nAsyncPipe,\nmarkForCheck" {
+  width: 176
+  height: 100
+}
+
+n2: "Kiểm tra view\ncần cập nhật" {
+  width: 130
+  height: 58
+}
+
+n3: "Binding đổi\nGhi khác biệt vào DOM" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Dòng `this.count = 10` chỉ đổi giá trị trong bộ nhớ. Nó không tự sửa text trong DOM, cũng không tự đánh dấu component OnPush cần kiểm tra. Cùng một dòng gán có thể cho kết quả UI khác nhau tùy nơi nó chạy.
@@ -157,8 +172,32 @@ export class NotificationDemoComponent {
 
 **Trường hợp 1 — bấm “Gán 10 ngay”.** Angular quản lý listener `(click)` này, nên nó đánh dấu view cần kiểm tra. Handler gán `count = 10` ngay trước lượt kiểm tra đó. Template đọc `10` và Angular đổi text trên màn hình từ `0` thành `10`.
 
-```text
-(click) → view được đánh dấu → count = 10 → kiểm tra template → UI hiện 10
+```d2 title="Event đánh dấu view trước khi kiểm tra template"
+direction: right
+
+n0: "(click)\nView được đánh dấu" {
+  width: 168
+  height: 58
+}
+
+n1: "count = 10" {
+  width: 130
+  height: 58
+}
+
+n2: "Kiểm tra template" {
+  width: 160
+  height: 58
+}
+
+n3: "UI hiện 10" {
+  width: 130
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 UI cập nhật nhờ notification từ **event**, không phải vì phép gán field tự có khả năng thông báo.
@@ -354,10 +393,25 @@ Ví dụ bộ đếm đầu bài cho thấy field thường có thể cập nh�
 
 Một event trong component con cũng có thể khiến ancestor OnPush được kiểm tra:
 
-```text
-PageComponent          (OnPush)
-└── EditorComponent    (OnPush)
-    └── SaveButton     ← Angular xử lý (click) ở đây
+```d2 title="Event trong cây OnPush"
+direction: right
+
+page: "PageComponent\nOnPush" {
+  width: 130
+  height: 58
+}
+
+editor: "EditorComponent\nOnPush" {
+  width: 144
+  height: 58
+}
+
+button: "SaveButton\n(click) ở đây" {
+  width: 130
+  height: 58
+}
+
+page -> editor -> button
 ```
 
 Đường liên quan từ `SaveButton` lên `EditorComponent` và `PageComponent` được đánh dấu. Các component OnPush ở nhánh sibling sạch vẫn có thể bị bỏ qua.
@@ -531,11 +585,31 @@ Trong code mới, state signal hoặc AsyncPipe thường giúp tránh bước �
 
 Giả sử ứng dụng đã render lần đầu và không có view nào đang cần cập nhật:
 
-```text
-AppComponent                  (CheckAlways)
-├── HeaderComponent           (OnPush)
-└── MainComponent             (OnPush)
-    └── UserCardComponent     (OnPush)
+```d2 title="Cây component với App CheckAlways"
+direction: right
+
+app: "AppComponent\nCheckAlways" {
+  width: 130
+  height: 58
+}
+
+header: "HeaderComponent\nOnPush" {
+  width: 144
+  height: 58
+}
+
+main: "MainComponent\nOnPush" {
+  width: 130
+  height: 58
+}
+
+card: "UserCardComponent\nOnPush" {
+  width: 160
+  height: 58
+}
+
+app -> header
+app -> main -> card
 ```
 
 `CheckAlways` trong sơ đồ tương ứng với `Default` ở Angular 18 hoặc `Eager` ở v22. Bảng dưới giả định không có notification nào khác xảy ra cùng lúc:
@@ -554,12 +628,37 @@ Không nên suy luận “cha đã chạy thì mọi con đều chạy”. Mỗi
 
 Giả sử chỉ `CounterComponent` dùng OnPush. Các component còn lại đều dùng CheckAlways, không có view nào bị `detach()`:
 
-```text
-AppComponent                 (CheckAlways)
-├── HeaderComponent          (CheckAlways)
-├── MainComponent            (CheckAlways)
-│   └── CounterComponent     (OnPush)
-└── FooterComponent          (CheckAlways)
+```d2 title="Counter OnPush trong cây CheckAlways"
+direction: right
+
+app: "AppComponent\nCheckAlways" {
+  width: 130
+  height: 58
+}
+
+header: "HeaderComponent\nCheckAlways" {
+  width: 144
+  height: 58
+}
+
+main: "MainComponent\nCheckAlways" {
+  width: 130
+  height: 58
+}
+
+counter: "CounterComponent\nOnPush" {
+  width: 152
+  height: 58
+}
+
+footer: "FooterComponent\nCheckAlways" {
+  width: 144
+  height: 58
+}
+
+app -> header
+app -> main -> counter
+app -> footer
 ```
 
 **Trường hợp 1 — click trong Counter, app dùng Zone.js.** Counter có field thường `count = 0` và template:
@@ -581,11 +680,32 @@ Giả sử binding ở các component khác không đổi, kết quả là:
 
 Vì vậy, nói **“các component trong cây trên đều được kiểm tra”** là đúng với lượt cập nhật này. Nhưng nói **“state con đổi làm state cha đổi, rồi kéo state của mọi component đổi”** là sai. State của Counter chỉ nằm trong Counter; không có input, output hay service nào chuyển giá trị mới sang các component khác trong ví dụ này.
 
-```text
-Click trong Counter
-    → Angular chạy lượt change detection
-    → Các view đủ điều kiện được kiểm tra
-    → Chỉ binding có giá trị khác mới làm DOM đổi
+```d2 title="Click không đồng nghĩa toàn bộ DOM được ghi lại"
+direction: right
+
+n0: "Click trong Counter" {
+  width: 176
+  height: 58
+}
+
+n1: "Angular chạy\nchange detection" {
+  width: 152
+  height: 58
+}
+
+n2: "Kiểm tra view\nđủ điều kiện" {
+  width: 130
+  height: 58
+}
+
+n3: "Chỉ binding đổi\nmới ghi DOM" {
+  width: 144
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 <Callout type="info" title="Cha được kiểm tra không có nghĩa state cha thay đổi">
@@ -612,9 +732,20 @@ Không nên mở rộng kết quả của trường hợp signal này thành “
 
 Đổi UserCard sang CheckAlways không làm nó tự chạy xuyên qua một cha OnPush sạch:
 
-```text
-MainComponent        (OnPush, sạch)
-└── UserCard         (CheckAlways)
+```d2 title="Parent OnPush sạch có thể chặn việc duyệt subtree"
+direction: right
+
+main: "MainComponent\nOnPush, sạch" {
+  width: 130
+  height: 58
+}
+
+card: "UserCard\nCheckAlways" {
+  width: 130
+  height: 58
+}
+
+main -> card: "Cây view con"
 ```
 
 Trong một lượt duyệt thông thường, nếu nhánh Main bị bỏ qua và không có descendant notification cần xử lý, Angular không đi tiếp vào UserCard. Chiến lược của con không tự vô hiệu hóa ranh giới của cha.
@@ -717,11 +848,32 @@ Case này dựa trên nhóm `src/app/messages/` của project học `01-starting
 
 Người dùng nhập tin nhắn trong NewMessage rồi bấm **Save**. MessagesList cần hiển thị tin nhắn mới. Nhưng cả hai component đều dùng OnPush và là **sibling** — hai component cùng cha, không phải quan hệ cha con:
 
-```text
-AppComponent                    (CheckAlways)
-└── MessagesComponent           (OnPush)
-    ├── NewMessageComponent     (OnPush) ← event Save
-    └── MessagesListComponent   (OnPush) ← cần hiển thị dữ liệu
+```d2 title="Hai nhánh OnPush chia sẻ dữ liệu messages"
+direction: right
+
+app: "AppComponent\nCheckAlways" {
+  width: 130
+  height: 58
+}
+
+messages: "MessagesComponent\nOnPush" {
+  width: 160
+  height: 58
+}
+
+new: "NewMessageComponent\nOnPush, event Save" {
+  width: 176
+  height: 58
+}
+
+list: "MessagesListComponent\nOnPush, hiển thị dữ\nliệu" {
+  width: 192
+  height: 79
+}
+
+app -> messages
+messages -> new
+messages -> list
 ```
 
 Phần ghép UI trong `messages.component.html` chỉ có:
@@ -840,8 +992,32 @@ export class MessagesService {
 
 Ở lần render đầu, template đọc getter và lần đọc đó đi tới signal trong service:
 
-```text
-Template MessagesList → getter messages → getter allMessages → đọc signal messages()
+```d2 title="Đọc signal gián tiếp vẫn tạo dependency template"
+direction: right
+
+n0: "Template MessagesList" {
+  width: 192
+  height: 58
+}
+
+n1: "getter messages" {
+  width: 144
+  height: 58
+}
+
+n2: "getter allMessages" {
+  width: 168
+  height: 58
+}
+
+n3: "Đọc signal messages()" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Angular theo dõi signal được đọc trong lúc đánh giá template. Lần đọc đi qua các getter đồng bộ vẫn được ghi nhận, nên MessagesList trở thành consumer của signal trong service.

@@ -103,11 +103,26 @@ Cụm “ngữ cảnh chạy” có thể hiểu bằng luồng callback cụ th
 
 Vì thế, Zone.js làm hai việc khác nhau: nó **patch API global lúc polyfills được nạp**, và nó **lưu zone sở hữu cho từng callback lúc callback được đăng ký**. Nó không sửa file TypeScript hay thân callback của bạn.
 
-```text
-Lúc nạp app (một lần)       Lúc gọi setTimeout (mỗi lần)       Khi timer xong
-─────────────────────       ────────────────────────────       ──────────────
-Zone.js thay API global  →  Wrapper nhớ Angular zone + callback → Wrapper chạy callback
-setTimeout bằng wrapper     rồi gọi timer gốc                   trong Angular zone
+```d2 title="Zone.js patch API và giữ context callback"
+direction: right
+
+n0: "Nạp app một lần\nThay global setTimeout\nbằng wrapper" {
+  width: 200
+  height: 79
+}
+
+n1: "Mỗi lần gọi timer\nWrapper nhớ zone +\ncallback, gọi timer\ngốc" {
+  width: 176
+  height: 100
+}
+
+n2: "Timer xong\nWrapper chạy callback\ntrong zone đã nhớ" {
+  width: 192
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
 ```
 
 Có thể hình dung gần đúng bằng mã giả sau:
@@ -141,14 +156,38 @@ Nhưng Zone.js không thể luôn gọi `báoAngularKiểmTraUI()` như vậy. `
 
 Reference được lưu chỉ là reference tới **object zone** — không phải reference tới component, state hay DOM. Object Angular zone chứa các hook Angular dùng để theo dõi task. Khi browser gọi wrapper sau một giây, browser không tự nhớ callback này trước đây được đăng ký ở Angular zone hay ngoài Angular zone; reference đó là thông tin Zone.js cần để khôi phục đúng ngữ cảnh.
 
-```text
-Cùng một patched setTimeout
-        │
-        ├── callback đăng ký trong Angular zone
-        │       └── wrapper nhớ Angular zone → Angular có thể được báo
-        │
-        └── callback đăng ký trong runOutsideAngular()
-                └── wrapper nhớ outer zone → không báo Angular theo Zone.js
+```d2 title="Cùng patched API nhưng khác zone đăng ký"
+direction: right
+
+timer: "Patched setTimeout" {
+  width: 168
+  height: 58
+}
+
+inside: "Đăng ký trong\nAngular zone" {
+  width: 130
+  height: 58
+}
+
+outside: "Đăng ký trong\nrunOutsideAngular()" {
+  width: 176
+  height: 58
+}
+
+notify: "Wrapper nhớ Angular\nzone\nAngular có thể được\nbáo" {
+  width: 176
+  height: 100
+}
+
+silent: "Wrapper nhớ outer zone\nKhông báo Angular qua\nZone.js" {
+  width: 200
+  height: 79
+}
+
+timer -> inside
+timer -> outside
+inside -> notify
+outside -> silent
 ```
 
 Ngay cả khi app thường chỉ có một Angular zone chính, reference vẫn cần thiết vì một callback có thể được đăng ký **ngoài** zone đó. Nó cũng giúp callback con được đăng ký bên trong callback cha tiếp tục kế thừa đúng ngữ cảnh.
@@ -224,16 +263,48 @@ export class StatusComponent implements OnInit {
 
 Trong ứng dụng có Zone.js, luồng khái niệm là:
 
-```text
-1. Angular render <p>Đang chờ</p>
-                │
-2. Timer kết thúc, callback chạy trong Angular zone
-                │
-3. Zone.js báo Angular: async work vừa hoàn thành
-                │
-4. Angular chạy change detection cho các view phù hợp
-                │
-5. {{ message }} có giá trị mới → DOM thành <p>Đã tải xong</p>
+```d2 title="Timer trong Angular zone dẫn tới đồng bộ DOM (1/2)"
+direction: right
+
+n0: "Render <p>Đang chờ</p>" {
+  width: 200
+  height: 58
+}
+
+n1: "Timer callback chạy\ntrong Angular zone" {
+  width: 176
+  height: 58
+}
+
+n2: "Zone.js báo Angular\nAsync work hoàn thành" {
+  width: 192
+  height: 58
+}
+
+n3: "Kiểm tra view phù hợp" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Timer trong Angular zone dẫn tới đồng bộ DOM (2/2)"
+direction: right
+
+n3: "Kiểm tra view phù hợp" {
+  width: 192
+  height: 58
+}
+
+n4: "{{ message }} đổi\nDOM: Đã tải xong" {
+  width: 160
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Change detection mới là bước đọc `{{ message }}` và sửa DOM. Zone.js chỉ tạo điều kiện để bước đó được chạy. Vì vậy, nói “Zone.js cập nhật UI” là cách nói tắt, không hoàn toàn chính xác.
@@ -246,17 +317,32 @@ Change detection mới là bước đọc `{{ message }}` và sửa DOM. Zone.js
 
 `OnPush` giúp thu hẹp lượt kiểm tra hơn nữa: Angular bỏ qua các component `OnPush` sạch, trừ khi chúng nhận input mới, có event trong subtree, `AsyncPipe` phát giá trị, được gọi `markForCheck()` hoặc signal mà template đã đọc thay đổi.
 
-```text
-Người dùng click
-        │
-        ▼
-Zone.js / Angular tạo cơ hội chạy change detection
-        │
-        ▼
-Angular kiểm tra view cần thiết (Default rộng hơn, OnPush hẹp hơn)
-        │
-        ▼
-Chỉ binding khác giá trị mới ghi vào DOM
+```d2 title="Click mở cơ hội kiểm tra, không ghi lại mọi DOM"
+direction: right
+
+n0: "Người dùng click" {
+  width: 152
+  height: 58
+}
+
+n1: "Zone.js / Angular\nTạo cơ hội change\ndetection" {
+  width: 160
+  height: 79
+}
+
+n2: "Kiểm tra view cần\nthiết\nDefault rộng, OnPush\nhẹp" {
+  width: 184
+  height: 100
+}
+
+n3: "Chỉ binding khác\nmới ghi vào DOM" {
+  width: 152
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Vì thế, nên phân biệt: **“Angular kiểm tra nhiều view”** không đồng nghĩa với **“trang bị render lại toàn bộ.”** Signals cải thiện thêm việc biết view nào phụ thuộc vào state nào.

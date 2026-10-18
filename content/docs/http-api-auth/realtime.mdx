@@ -66,17 +66,26 @@ snapshot, nhưng một event đơn lẻ không giúp client mới mở trang bi�
 
 Vì vậy, mô hình đáng tin cậy thường bắt đầu bằng snapshot rồi mới áp dụng event:
 
-```text
-Angular                         API / realtime gateway
-   │ GET /api/orders/A-100                 │
-   ├──────────────────────────────────────►│
-   │◄──── snapshot { version: 41, ... } ───┤
-   │                                       │
-   │ mở SSE / WebSocket, fromVersion=41    │
-   ├──────────────────────────────────────►│
-   │◄── event { id: "e-42", version: 42 }  ┤
-   │ cập nhật state                        │
-   │◄── event { id: "e-43", version: 43 }  ┤
+```d2 title="Snapshot trước, realtime event sau (1/2)"
+shape: sequence_diagram
+
+angular: "Angular"
+api: "API / realtime gateway"
+
+angular -> api: "GET /api/orders/A-100"
+api -> angular: "Snapshot version 41"
+angular -> api: "Mở SSE / WebSocket, fromVersion=41"
+api -> angular: "Event e-42, version 42"
+```
+
+```d2 title="Snapshot trước, realtime event sau (2/2)"
+shape: sequence_diagram
+
+angular: "Angular"
+api: "API / realtime gateway"
+
+angular -> angular: "Cập nhật state"
+api -> angular: "Event e-43, version 43"
 ```
 
 `version` là số thứ tự tăng dần theo aggregate hoặc channel, do server định nghĩa.
@@ -128,16 +137,40 @@ nhận thay đổi hoặc gửi message cần độ trễ thấp.
 
 ### Cây quyết định nhanh
 
-```text
-Có cần client gửi message liên tục trên kênh đang mở?
-│
-├── Có ──► WebSocket (hoặc giao thức hai chiều do backend quy định)
-│
-└── Không
-    │
-    ├── Có cần cập nhật nhanh, server đẩy ngay? ──► SSE
-    │
-    └── Không / cập nhật thưa ──► Polling
+```d2 title="Chọn WebSocket, SSE hay polling"
+direction: right
+
+duplex: "Client cần gửi message\nliên tục trên kênh?" {
+  width: 300
+  height: 90
+  shape: diamond
+}
+
+ws: "WebSocket\nHoặc giao thức hai\nchiều" {
+  width: 168
+  height: 79
+}
+
+push: "Cần server đẩy ngay?" {
+  width: 276
+  height: 90
+  shape: diamond
+}
+
+sse: "SSE" {
+  width: 130
+  height: 58
+}
+
+poll: "Polling\nCập nhật thưa" {
+  width: 130
+  height: 58
+}
+
+duplex -> ws: "Có"
+duplex -> push: "Không"
+push -> sse: "Có"
+push -> poll: "Không"
 ```
 
 Cây này chỉ là điểm bắt đầu. Ví dụ, hạ tầng proxy chỉ hỗ trợ HTTP chuẩn tốt có thể làm
@@ -380,13 +413,55 @@ thêm version hoặc field tương thích thay vì âm thầm đổi nghĩa even
 
 Vòng đời thường có các mốc sau:
 
-```text
-idle ── connect() ──► connecting ── open ──► connected
-  ▲                       │                    │
-  │                       │ error/close         │ close, mạng lỗi, server restart
-  └──── stopped ◄─────────┴──── reconnecting ◄──┘
-                         │
-                         └── backoff + jitter ──► connecting
+```d2 title="Thiết lập kết nối realtime"
+direction: right
+
+n0: "idle" {
+  width: 130
+  height: 58
+}
+
+n1: "connecting" {
+  width: 130
+  height: 58
+}
+
+n2: "connected" {
+  width: 130
+  height: 58
+}
+
+n0 -> n1: "connect()"
+n1 -> n2: "open"
+```
+
+```d2 title="Lỗi kết nối và backoff reconnect"
+direction: right
+
+connecting: "connecting" {
+  width: 130
+  height: 58
+}
+
+connected: "connected" {
+  width: 130
+  height: 58
+}
+
+retry: "reconnecting" {
+  width: 130
+  height: 58
+}
+
+stop: "stopped\nReset → idle" {
+  width: 130
+  height: 58
+}
+
+connecting -> retry: "error / close"
+connected -> retry: "close / mạng lỗi / restart"
+retry -> connecting: "Backoff + jitter"
+retry -> stop: "Dừng reconnect"
 ```
 
 `close` không luôn là lỗi. User logout, component bị destroy, server chủ động deploy
@@ -574,14 +649,32 @@ WebSocket và SSE là stream có thể phát vô hạn. RxJS phù hợp ở ph�
 event: filter theo type, kiểm tra thứ tự, retry, buffer hoặc kết hợp snapshot. Signal
 phù hợp ở biên render, nơi template chỉ cần giá trị hiện tại.
 
-```text
-SSE / WebSocket event
-        │
-        ▼
- Observable pipeline: parse → validate → dedup → order → reduce
-        │
-        ▼
- Signal<TaskState> ─────────────────────────────────────► template
+```d2 title="Realtime event đi qua kiểm tra trước khi vào state"
+direction: right
+
+n0: "SSE / WebSocket event" {
+  width: 192
+  height: 58
+}
+
+n1: "Observable pipeline\nParse → validate →\ndedup → order → reduce" {
+  width: 200
+  height: 79
+}
+
+n2: "Signal<TaskState>" {
+  width: 160
+  height: 58
+}
+
+n3: "Template" {
+  width: 130
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 `toSignal` giữ lần phát gần nhất của Observable. Vì vậy đừng gọi nó ngay trên raw
@@ -810,14 +903,26 @@ Khi connection mất, một quy trình phục hồi rõ ràng có thể là:
 4. Nếu server báo cursor quá cũ hoặc client phát hiện gap, tải snapshot mới nhất.
 5. Đặt state theo snapshot version, sau đó tiếp tục event có version kế tiếp.
 
-```text
-Client có version 41 ── mất mạng ──► server tiến đến 46
-       │                                      │
-       └──── reconnect + afterVersion=41 ────►│
-                                              │
-                         replay 42..46 ───────┘
+```d2 title="Reconnect bằng version, fallback khi hết retention (1/2)"
+shape: sequence_diagram
 
-Nếu 42..46 đã hết retention: GET snapshot version 46, rồi nghe từ 46.
+client: "Client version 41"
+server: "Server version 46"
+
+client -> client: "Mất mạng; server tiến đến 46"
+client -> server: "Reconnect + afterVersion=41"
+server -> client: "Nếu còn retention: replay 42..46"
+client -> server: "Nếu hết retention: GET snapshot"
+```
+
+```d2 title="Reconnect bằng version, fallback khi hết retention (2/2)"
+shape: sequence_diagram
+
+client: "Client version 41"
+server: "Server version 46"
+
+server -> client: "Snapshot version 46"
+client -> server: "Nghe event từ version 46"
 ```
 
 Với optimistic update, gắn một `operationId` do client tạo vào HTTP command. Server

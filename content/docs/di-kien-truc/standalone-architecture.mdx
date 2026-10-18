@@ -66,20 +66,32 @@ import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Một **standalone component** có thể được component khác import trực tiếp hoặc được Router tải trực tiếp. Một **ứng dụng standalone** dùng `bootstrapApplication()` để khởi động root standalone component, rồi đưa provider dùng chung vào `ApplicationConfig`.
 
-```text
-main.ts                         app.config.ts
-   │                                  │
-   │ bootstrapApplication(            │ providers: Router, HTTP,
-   │   AppComponent, appConfig) ◄─────┘ cấu hình và tích hợp toàn cục
-   ▼
-┌─────────────────────────────────────────────┐
-│ AppComponent                                │
-│ <router-outlet />                           │
-└──────────────────────┬──────────────────────┘
-                       │ Router chọn route
-                       ▼
-             feature/page standalone
-             imports + provider theo phạm vi
+```d2 title="Bootstrap ứng dụng standalone và route feature"
+direction: right
+
+config: "app.config.ts\nRouter, HTTP, cấu hình\nchung" {
+  width: 200
+  height: 79
+}
+
+main: "main.ts\nbootstrapApplication\nAppComponent +\nappConfig" {
+  width: 184
+  height: 100
+}
+
+app: "AppComponent\n<router-outlet>" {
+  width: 144
+  height: 58
+}
+
+feature: "Feature / page\nstandalone\nimports + provider\ntheo phạm vi" {
+  width: 168
+  height: 100
+}
+
+config -> main
+main -> app
+app -> feature: "Router chọn route"
 ```
 
 `AppComponent` không cần import tất cả màn hình của hệ thống. Nếu nó chỉ chứa thanh điều hướng và `RouterOutlet`, Router sẽ chọn page phù hợp. Nhờ đó một feature có thể được tải khi người dùng thật sự vào URL của feature đó.
@@ -386,12 +398,42 @@ Các tên như `pages`, `ui`, `data-access` và `model` chỉ là nhãn. Không 
 
 Một quy ước dễ áp dụng là UI phụ thuộc vào logic feature, còn logic feature phụ thuộc vào API dữ liệu hoặc contract; lớp dữ liệu không import page hay component UI.
 
-```text
-CatalogPage ─────► CatalogFacade ─────► CatalogApi ─────► HttpClient
-     │                    │
-     │ imports            └──► Product model
-     ▼
-ProductCard
+```d2 title="Page dùng facade và UI component"
+direction: right
+
+page: "CatalogPage" {
+  width: 130
+  height: 58
+}
+
+facade: "CatalogFacade" {
+  width: 130
+  height: 58
+}
+
+api: "CatalogApi" {
+  width: 130
+  height: 58
+}
+
+http: "HttpClient" {
+  width: 130
+  height: 58
+}
+
+model: "Product model" {
+  width: 130
+  height: 58
+}
+
+card: "ProductCard" {
+  width: 130
+  height: 58
+}
+
+page -> facade -> api -> http
+page -> card: "imports"
+facade -> model
 ```
 
 Ví dụ, `CatalogPageComponent` được phép gọi `facade.load()` khi page khởi tạo và đọc `facade.products()`. `CatalogApi` không nên import `CatalogPageComponent` để quyết định URL hay hiển thị toast. Nếu API cần báo lỗi, nó trả dữ liệu hoặc lỗi theo contract; feature/UI quyết định cách trình bày theo ngữ cảnh.

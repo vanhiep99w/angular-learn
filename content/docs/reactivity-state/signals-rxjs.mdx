@@ -66,18 +66,44 @@ Nếu cần trả lời “**mỗi khi một giá trị đến thì phải biế
 
 **Push** nghĩa là producer chủ động gửi giá trị đến subscriber. Sau khi `subscribe`, mỗi lần Observable phát, callback nhận một notification. Subscriber không cần hỏi lại giá trị; thay vào đó nó phải sẵn sàng xử lý từng lần phát, lỗi và complete.
 
-```text
-Signal: consumer kéo giá trị hiện tại
+```d2 title="Signal kéo giá trị, Observable đẩy các lần phát"
+direction: right
 
-Template / computed ── gọi userName() ──► Signal ── trả về "Mai" ──► consumer
-                                              │
-                                  khi đổi, Angular đánh dấu consumer phụ thuộc
+consumer: "Template / computed" {
+  width: 176
+  height: 58
+}
 
-Observable: producer đẩy các lần phát
+signal: "Signal\nGiá trị hiện tại: Mai" {
+  width: 192
+  height: 58
+}
 
-WebSocket / input ── next("a") ──► Observable pipeline ──► subscriber
-                         next("an") ───────────────────────► subscriber
-                         next("anh") ──────────────────────► subscriber
+mark: "Angular đánh dấu\nConsumer phụ thuộc" {
+  width: 168
+  height: 58
+}
+
+producer: "WebSocket / input" {
+  width: 160
+  height: 58
+}
+
+pipeline: "Observable pipeline" {
+  width: 176
+  height: 58
+}
+
+subscriber: "Subscriber\nNhận a, an, anh" {
+  width: 144
+  height: 58
+}
+
+consumer -> signal: "userName()"
+signal -> consumer: "Trả Mai"
+signal -> mark: "Khi đổi"
+producer -> pipeline: "next(a), next(an), next(anh)"
+pipeline -> subscriber
 ```
 
 Signal vẫn có cơ chế thông báo invalidation cho Angular, còn Observable có thể được đọc gián tiếp qua nhiều operator. Vì vậy, pull/push là mô hình tinh thần hữu ích chứ không phải mô tả toàn bộ implementation. Điểm thực hành quan trọng là: **signal giữ giá trị mới nhất; Observable diễn tả tiến trình các lần phát**.
@@ -96,22 +122,54 @@ Ví dụ, kết quả HTTP thường bắt đầu là Observable vì request có
 
 Interop trong `@angular/core/rxjs-interop` cho phép đi qua ranh giới này mà không tự viết `subscribe()` và `ngOnDestroy()`. Tuy nhiên, chuyển đổi không phải là phép biến đổi trung tính: mỗi phía có contract khác nhau.
 
-```text
-Sự kiện theo thời gian                         State để UI đọc
+```d2 title="Event stream trở thành state để UI đọc"
+direction: right
 
-input / route / HTTP / socket
-             │
-             ▼
- Observable + operators
- debounce · switchMap · retry · combineLatest
-             │
-             │ toSignal()
-             ▼
- Signal<T> ───────────────────────────────────► template / computed
-             │
-             │ toObservable() khi cần quay lại pipeline
-             ▼
- Observable<T> ───────────────────────────────► operator RxJS / API chỉ nhận Observable
+n0: "Input / route / HTTP /\nsocket" {
+  width: 200
+  height: 58
+}
+
+n1: "Observable + operators\ndebounce, switchMap,\nretry, combineLatest" {
+  width: 200
+  height: 79
+}
+
+n2: "Signal<T>" {
+  width: 130
+  height: 58
+}
+
+n3: "Template / computed" {
+  width: 176
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2: "toSignal()"
+n2 -> n3
+```
+
+```d2 title="Đưa signal trở lại RxJS khi API cần Observable"
+direction: right
+
+n0: "Signal<T>" {
+  width: 130
+  height: 58
+}
+
+n1: "Observable<T>" {
+  width: 130
+  height: 58
+}
+
+n2: "RxJS operator / API\nChỉ nhận Observable" {
+  width: 176
+  height: 58
+}
+
+n0 -> n1: "toObservable()"
+n1 -> n2
 ```
 
 ### Chuyển đổi có làm mất thông tin không
@@ -145,17 +203,32 @@ import { toSignal } from '@angular/core/rxjs-interop';
 
 ### Cơ chế và vòng đời
 
-```text
-Observable phát next(value)
-            │
-            ▼
-toSignal subscription ghi value vào Signal
-            │
-            ▼
-template / computed đọc signal khi Angular cần render
-            │
-            ▼
-DestroyRef của context hủy subscription khi component/service bị destroy
+```d2 title="toSignal cập nhật state và hủy subscription theo context"
+direction: right
+
+n0: "Observable next(value)" {
+  width: 200
+  height: 58
+}
+
+n1: "toSignal subscription\nGhi value vào Signal" {
+  width: 192
+  height: 58
+}
+
+n2: "Template / computed\nđọc\nKhi Angular cần render" {
+  width: 200
+  height: 79
+}
+
+n3: "DestroyRef hủy\nsubscription\nKhi context bị destroy" {
+  width: 200
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Mặc định, Angular gắn subscription vào `DestroyRef` của injection context hiện tại. Component bị hủy thì subscription cũng bị hủy. Điều này loại bỏ phần lớn boilerplate `Subscription`, `ngOnDestroy` và `unsubscribe()` mà một bridge thủ công thường phải có.
@@ -548,13 +621,54 @@ Không có quy tắc “ứng dụng mới chỉ dùng Signals” hoặc “đã
 
 Một feature tìm kiếm danh sách có thể tổ chức theo bốn lớp. Mỗi lớp chỉ sở hữu một trách nhiệm:
 
-```text
-1. Ý định UI             2. Chính sách thời gian         3. State để render
+```d2 title="Ý định UI → chính sách thời gian → state render (1/2)"
+direction: right
 
-query: Signal<string> ─► toObservable(query) ─► debounce/switchMap ─► results: Signal<SearchState>
-     ▲                                                                          │
-     │                                                                          ▼
-(input) từ template                                                   template / computed
+n0: "Template (input)" {
+  width: 152
+  height: 58
+}
+
+n1: "query: Signal<string>" {
+  width: 192
+  height: 58
+}
+
+n2: "toObservable(query)" {
+  width: 176
+  height: 58
+}
+
+n3: "debounce / switchMap" {
+  width: 184
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Ý định UI → chính sách thời gian → state render (2/2)"
+direction: right
+
+n3: "debounce / switchMap" {
+  width: 184
+  height: 58
+}
+
+n4: "results:\nSignal<SearchState>" {
+  width: 176
+  height: 58
+}
+
+n5: "Template / computed" {
+  width: 176
+  height: 58
+}
+
+n3 -> n4
+n4 -> n5
 ```
 
 - Template ghi `query` từ event người dùng và đọc `results` để render.
@@ -584,9 +698,30 @@ Quy tắc tương tự áp dụng cho `toObservable`. Đặt bridge thành field
 
 Một vòng lặp thường xuất hiện khi signal được đổi thành Observable, pipeline lại ghi vào chính signal nguồn, rồi `effect` hoặc bridge bắt đầu lại chu trình.
 
-```text
-query Signal ─► toObservable ─► pipeline ─► query.set(...) ─► query Signal
-      ▲_______________________________________________________________│
+```d2 title="Vòng phản hồi khi stream ghi lại signal nguồn"
+direction: right
+
+query: "query Signal" {
+  width: 130
+  height: 58
+}
+
+observable: "toObservable" {
+  width: 130
+  height: 58
+}
+
+pipeline: "Pipeline" {
+  width: 130
+  height: 58
+}
+
+write: "query.set(...)" {
+  width: 136
+  height: 58
+}
+
+query -> observable -> pipeline -> write -> query
 ```
 
 Hãy tách input state khỏi output state. Trong ví dụ tìm kiếm, pipeline đọc `query` nhưng chỉ ghi vào `results`. Nếu cần chuẩn hóa text nhập, làm nó ngay trong handler `setQuery` hoặc tạo `computed` cho giá trị chuẩn hóa; đừng phản hồi pipeline trở lại nguồn trừ khi bạn đã thiết kế rõ điều kiện dừng.

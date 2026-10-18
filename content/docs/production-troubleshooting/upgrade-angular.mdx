@@ -104,34 +104,60 @@ Hãy phân loại mỗi cảnh báo peer dependency thành một quyết định
 
 Flow dưới đây có các cổng dừng. Một cổng đỏ không có nghĩa dự án thất bại; nó nói rằng cần sửa hoặc thu thập thêm bằng chứng trước khi mở rộng phạm vi.
 
-```text
-Chọn current version, target version và cửa sổ release
-                         │
-                         ▼
-Đọc compatibility matrix + kiểm dependency/peer dependency
-                         │
-             không tương thích ──► nâng/thay/cô lập dependency trước
-                         │
-                         ▼
-Tạo branch, artefact rollback, baseline test/build/runtime
-                         │
-                         ▼
-Nâng MỘT major bằng ng update và review migration diff
-                         │
-                build/test đỏ ──► sửa đúng compatibility hoặc dừng
-                         │
-                         ▼
-Smoke + E2E + SSR/accessibility/performance so với baseline
-                         │
-                 regression ──► sửa, rollback chặng hoặc thu hẹp scope
-                         │
-                         ▼
-Deploy preview/canary, quan sát release ID và các tín hiệu
-                         │
-              tín hiệu xấu ──► rollback artefact/cấu hình đã định sẵn
-                         │
-                         ▼
-Mở rộng rollout, chốt checklist và ghi nợ kỹ thuật còn lại
+```d2 title="Nâng Angular theo từng chặng có kiểm soát (1/2)"
+direction: right
+
+n0: "Chọn current / target\nCửa sổ release" {
+  width: 192
+  height: 58
+}
+
+n1: "Compatibility + peer\ndeps\nKhông hợp:\nnâng/thay/cô lập\ndependency" {
+  width: 184
+  height: 121
+}
+
+n2: "Branch + rollback\nartefact\nBaseline\ntest/build/runtime" {
+  width: 168
+  height: 100
+}
+
+n3: "ng update MỘT major\nReview diff; đỏ: sửa\nhoặc dừng" {
+  width: 184
+  height: 79
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Nâng Angular theo từng chặng có kiểm soát (2/2)"
+direction: right
+
+n3: "ng update MỘT major\nReview diff; đỏ: sửa\nhoặc dừng" {
+  width: 184
+  height: 79
+}
+
+n4: "Smoke, E2E, SSR, a11y,\nperf\nRegression:\nsửa/rollback/giảm\nscope" {
+  width: 200
+  height: 121
+}
+
+n5: "Preview / canary\nQuan sát release ID;\nxấu: rollback" {
+  width: 184
+  height: 79
+}
+
+n6: "Mở rộng rollout\nChốt checklist + nợ kỹ\nthuật" {
+  width: 200
+  height: 79
+}
+
+n3 -> n4
+n4 -> n5
+n5 -> n6
 ```
 
 Một baseline là số đo hoặc kết quả trước thay đổi để so sánh sau đó. Ví dụ, “production build thành công” là baseline tối thiểu; hữu ích hơn là thêm thời gian build, kích thước initial bundle, kết quả smoke test luồng thanh toán, error rate và Web Vitals của release hiện tại. Không có baseline, đội chỉ có cảm giác rằng bản mới “có vẻ chậm”.

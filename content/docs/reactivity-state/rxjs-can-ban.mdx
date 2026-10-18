@@ -67,20 +67,48 @@ Một HTTP request Angular trả về `Observable`, dù thường chỉ phát m�
 
 Một pipeline RxJS thường có bốn phần: nguồn phát, các operator biến đổi, subscription tiêu thụ, và cleanup khi không còn cần thiết.
 
-```text
-FormControl.valueChanges
-          │ phát "a", "an", "angular"
-          ▼
-debounceTime(300) ──► distinctUntilChanged()
-          │
-          ▼
- switchMap(query => HTTP request)
-          │
-          ▼
- AsyncPipe / subscribe nhận kết quả
-          │
-          ▼
- component bị hủy → unsubscribe → dọn listener/request còn chạy
+```d2 title="Tìm kiếm qua RxJS và hủy subscription (1/2)"
+direction: right
+
+n0: "FormControl.valueChanges\na, an, angular" {
+  width: 216
+  height: 58
+}
+
+n1: "debounceTime(300)\ndistinctUntilChanged()" {
+  width: 200
+  height: 58
+}
+
+n2: "switchMap(query)\nHTTP request" {
+  width: 152
+  height: 58
+}
+
+n3: "AsyncPipe / subscribe\nNhận kết quả" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Tìm kiếm qua RxJS và hủy subscription (2/2)"
+direction: right
+
+n3: "AsyncPipe / subscribe\nNhận kết quả" {
+  width: 192
+  height: 58
+}
+
+n4: "Component hủy\nUnsubscribe, dọn\nlistener/request" {
+  width: 152
+  height: 79
+}
+
+n3 -> n4
 ```
 
 Mỗi mũi tên là dữ liệu đi một chiều. Thay vì gọi request trong từng event handler và tự quản lý kết quả cũ, hãy để pipeline nói rõ thời điểm xử lý và cách chuyển từ nguồn này sang nguồn khác.
@@ -458,21 +486,39 @@ Tuy nhiên, `finalize` không thay thế một mô hình state tốt. Nếu nhi�
 
 Subscription sở hữu resource: event listener, timer, request đang chờ hoặc kết nối. Nơi tạo subscription phải xác định lúc hủy nó. Trong component, lifecycle thường là ranh giới đúng.
 
-```text
-Component được tạo
-       │
-       ├── template dùng AsyncPipe: Angular subscribe khi render
-       │
-       └── class dùng subscribe: pipeline gắn takeUntilDestroyed()
-       │
-       ▼
-Component bị destroy
-       │
-       ├── AsyncPipe unsubscribe
-       └── takeUntilDestroyed() unsubscribe
-                 │
-                 ▼
-       teardown/finalize của source chạy nếu có
+```d2 title="Subscription được dọn khi component destroy"
+direction: right
+
+created: "Component tạo" {
+  width: 130
+  height: 58
+}
+
+async: "Template AsyncPipe\nSubscribe khi render" {
+  width: 184
+  height: 58
+}
+
+manual: "Class subscribe\ntakeUntilDestroyed()" {
+  width: 184
+  height: 58
+}
+
+destroy: "Component destroy" {
+  width: 160
+  height: 58
+}
+
+cleanup: "Unsubscribe\nTeardown / finalize\nnếu có" {
+  width: 176
+  height: 79
+}
+
+created -> async
+created -> manual
+async -> destroy
+manual -> destroy
+destroy -> cleanup
 ```
 
 ### Ưu tiên AsyncPipe khi template chỉ cần hiển thị

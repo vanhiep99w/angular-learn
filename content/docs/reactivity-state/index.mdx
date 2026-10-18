@@ -99,17 +99,32 @@ export class StatusComponent implements OnInit {
 }
 ```
 
-```text
-setTimeout hoàn tất
-        │
-        ▼
-Zone.js thấy callback vừa chạy
-        │
-        ▼
-Angular chạy change detection
-        │
-        ▼
-Đọc lại {{ message }} → cập nhật <p> thành “Đã tải xong”
+```d2 title="Zone.js giúp Angular biết callback vừa chạy"
+direction: right
+
+n0: "setTimeout hoàn tất" {
+  width: 176
+  height: 58
+}
+
+n1: "Zone.js thấy callback" {
+  width: 192
+  height: 58
+}
+
+n2: "Angular chạy\nchange detection" {
+  width: 152
+  height: 58
+}
+
+n3: "Đọc {{ message }}\n<p> thành Đã tải xong" {
+  width: 192
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Zone.js làm được một việc rất hữu ích: **đánh thức Angular sau các việc async phổ biến**. Nhờ đó, bạn có thể đổi một field thường trong callback và giao diện vẫn được kiểm tra lại.
@@ -153,20 +168,48 @@ setTimeout(() => {
 }, 1_000);
 ```
 
-```text
-Template đọc message()
-        │
-        ▼
-Angular ghi nhớ: StatusComponent phụ thuộc message
-        │
-        ▼
-message.set('Đã tải xong')
-        │
-        ▼
-Angular đánh dấu StatusComponent để cập nhật
-        │
-        ▼
-{{ message() }} đổi text trong DOM
+```d2 title="Signal nối lần đọc template với lần cập nhật (1/2)"
+direction: right
+
+n0: "Template đọc message()" {
+  width: 200
+  height: 58
+}
+
+n1: "Ghi dependency\nStatusComponent dùng\nmessage" {
+  width: 184
+  height: 79
+}
+
+n2: "message.set\nĐã tải xong" {
+  width: 130
+  height: 58
+}
+
+n3: "Đánh dấu component\nđể cập nhật" {
+  width: 168
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Signal nối lần đọc template với lần cập nhật (2/2)"
+direction: right
+
+n3: "Đánh dấu component\nđể cập nhật" {
+  width: 168
+  height: 58
+}
+
+n4: "{{ message() }}\nĐổi text DOM" {
+  width: 144
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Đây là lý do Signals hữu ích cho state giao diện: state tự mang theo khả năng thông báo, còn Angular biết consumer nào đang dùng state đó.
@@ -214,23 +257,48 @@ Ví dụ, `filteredProducts` được tính từ `products` và `query`. Nếu v
 
 Luồng lành mạnh bắt đầu từ một sự kiện hoặc nguồn dữ liệu, đi qua state gốc, rồi mới đến giá trị dẫn xuất và template:
 
-```text
-Người dùng gõ "angular" / HTTP trả kết quả
-                  │
-                  ▼
-          State gốc thay đổi
-    query, products, isLoading, error
-                  │
-                  ▼
-          Dữ liệu dẫn xuất
-     filteredProducts, resultCount
-                  │
-                  ▼
-        Template đọc và hiển thị
-                  │
-                  ▼
-  Side effect có chủ đích (nếu cần)
-  cập nhật URL, lưu lựa chọn, analytics
+```d2 title="State gốc, dữ liệu dẫn xuất và side effect (1/2)"
+direction: right
+
+n0: "Input angular / HTTP\ntrả" {
+  width: 184
+  height: 58
+}
+
+n1: "State gốc\nquery, products,\nisLoading, error" {
+  width: 152
+  height: 79
+}
+
+n2: "Dữ liệu dẫn xuất\nfilteredProducts,\nresultCount" {
+  width: 160
+  height: 79
+}
+
+n3: "Template đọc + hiển\nthị" {
+  width: 176
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="State gốc, dữ liệu dẫn xuất và side effect (2/2)"
+direction: right
+
+n3: "Template đọc + hiển\nthị" {
+  width: 176
+  height: 58
+}
+
+n4: "Side effect khi cần\nURL, lưu lựa chọn,\nanalytics" {
+  width: 176
+  height: 79
+}
+
+n3 -> n4
 ```
 
 Mũi tên nên chủ yếu đi theo một chiều. Template đọc state và phát sự kiện; method hoặc service xử lý sự kiện rồi cập nhật state. Cách này giúp bạn trả lời nhanh câu hỏi: “giá trị trên màn hình này được sinh ra từ đâu?”

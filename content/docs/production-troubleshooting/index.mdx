@@ -65,28 +65,76 @@ Bạn nên đã có một ứng dụng build và deploy được, cùng một fe
 
 ### Vòng phản hồi production
 
-```text
-Thay đổi đã kiểm thử
-         │
-         ▼
-┌───────────────────┐     release/version     ┌────────────────────┐
-│ Build + deploy     │ ──────────────────────► │ Người dùng dùng app │
-│ artifact bất biến  │                         │ trên browser thật   │
-└─────────┬─────────┘                         └─────────┬──────────┘
-          │                                             │
-          │                                             │ error, latency,
-          │                                             │ web vitals, feedback
-          ▼                                             ▼
-┌───────────────────┐     đối chiếu          ┌────────────────────┐
-│ Dashboard, logs,   │ ◄───────────────────── │ Alert hoặc ticket   │
-│ traces, release ID │                         │ có triệu chứng      │
-└─────────┬─────────┘                         └─────────┬──────────┘
-          │
-          ▼
-┌───────────────────┐     test, guardrail     ┌────────────────────┐
-│ Điều tra và sửa    │ ──────────────────────► │ Release an toàn hơn │
-│ hoặc rollback      │                         │ ở vòng tiếp theo    │
-└───────────────────┘                         └────────────────────┘
+```d2 title="Phát hành artefact bất biến tới người dùng"
+direction: right
+
+n0: "Thay đổi đã kiểm thử" {
+  width: 184
+  height: 58
+}
+
+n1: "Build + deploy\nArtefact bất biến" {
+  width: 160
+  height: 58
+}
+
+n2: "Người dùng thật\nBrowser thật" {
+  width: 144
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2: "Release / version"
+```
+
+```d2 title="Từ triệu chứng thực tế đến bằng chứng điều tra"
+direction: right
+
+users: "Người dùng thật" {
+  width: 144
+  height: 58
+}
+
+release: "Build / deploy\nRelease ID" {
+  width: 136
+  height: 58
+}
+
+alert: "Alert / ticket\nCó triệu chứng" {
+  width: 136
+  height: 58
+}
+
+evidence: "Dashboard, logs,\ntraces\nRelease ID" {
+  width: 152
+  height: 79
+}
+
+users -> alert: "Error, latency, vitals, feedback"
+alert -> evidence: "Đối chiếu"
+release -> evidence
+```
+
+```d2 title="Đóng vòng phản hồi bằng test và guardrail"
+direction: right
+
+n0: "Dashboard, logs,\ntraces\nRelease ID" {
+  width: 152
+  height: 79
+}
+
+n1: "Điều tra + sửa\nHoặc rollback" {
+  width: 136
+  height: 58
+}
+
+n2: "Release an toàn hơn" {
+  width: 176
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2: "Test + guardrail"
 ```
 
 Một **artefact bất biến** là bundle đã build được gắn version hoặc commit rõ ràng; cùng artefact đó được đưa qua các môi trường thay vì build lại khác nhau. Một **release ID** là nhãn để nối lỗi quan sát được với artefact cụ thể. Hai thông tin này làm việc rollback và so sánh trước/sau có căn cứ.

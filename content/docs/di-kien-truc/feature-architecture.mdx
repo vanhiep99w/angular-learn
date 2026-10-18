@@ -233,18 +233,39 @@ Layer giúp trả lời: đoạn mã này được phép biết điều gì? Đ�
 
 Một luật thực dụng là dependency đi từ **bên ngoài vào bên trong**, còn dữ liệu trả về theo chiều ngược lại:
 
-```text
-Page/UI ─────► State / application ─────► Data access
-   │                    │                       │
-   │                    └──────────► Domain ◄───┘
-   │
-   └───────────────────► Domain (kiểu hiển thị)
+```d2 title="Hướng dependency giữa các lớp của feature"
+direction: right
+
+ui: "Page / UI" {
+  width: 130
+  height: 58
+}
+
+state: "State / application" {
+  width: 176
+  height: 58
+}
+
+data: "Data access" {
+  width: 130
+  height: 58
+}
+
+domain: "Domain\nKiểu + quy tắc thuần" {
+  width: 184
+  height: 58
+}
+
+ui -> state -> data
+ui -> domain: "Kiểu hiển thị"
+state -> domain
+data -> domain
+```
 
 Không được phép:
 - domain ──► Angular, HTTP, router hoặc UI
 - data-access ──► page, component hoặc state UI
 - feature A ──► tệp private của feature B
-```
 
 Điều này không có nghĩa UI không bao giờ được import model domain. `Product` là dữ liệu cần hiển thị nên page có thể đọc nó. Điều cần tránh là domain import `ProductCardComponent`, hoặc `CatalogApi` gọi `Router.navigate()` để quyết định trải nghiệm UI.
 
@@ -254,20 +275,54 @@ Khi domain cần một khả năng từ bên ngoài, hãy để application laye
 
 Ví dụ người dùng đổi từ khóa tìm kiếm. UI phát event, facade cập nhật state và yêu cầu dữ liệu, data access gọi mạng rồi trả model đã map. UI chỉ quan sát state để render.
 
-```text
-Người dùng nhập "laptop"
-          │
-          ▼
-CatalogPage ── setQuery('laptop') ──► CatalogFacade
-                                           │ cập nhật loading/state
-                                           ▼
-                                      CatalogApi.list('laptop')
-                                           │ HTTP + map DTO → Product
-                                           ▼
-                              products / loading / error signals
-                                           │
-                                           ▼
-                                  CatalogPage và ProductList render
+```d2 title="Use case tìm kiếm qua facade và API (1/2)"
+direction: right
+
+n0: "Người dùng nhập laptop" {
+  width: 200
+  height: 58
+}
+
+n1: "CatalogPage\nsetQuery('laptop')" {
+  width: 168
+  height: 58
+}
+
+n2: "CatalogFacade\nCập nhật loading/state" {
+  width: 200
+  height: 58
+}
+
+n3: "CatalogApi.list\nHTTP + DTO → Product" {
+  width: 184
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Use case tìm kiếm qua facade và API (2/2)"
+direction: right
+
+n3: "CatalogApi.list\nHTTP + DTO → Product" {
+  width: 184
+  height: 58
+}
+
+n4: "products / loading /\nerror\nSignals" {
+  width: 184
+  height: 79
+}
+
+n5: "CatalogPage +\nProductList\nRender" {
+  width: 130
+  height: 79
+}
+
+n3 -> n4
+n4 -> n5
 ```
 
 Lợi ích chính là điểm thay đổi rõ: thay debounce hoặc cache ở facade/data access, thay bố cục ở UI và thay quy tắc lọc thuần ở domain. Không phải mọi event phải đi qua facade; đây là đường đi hữu ích cho state và side effect có ý nghĩa nghiệp vụ.

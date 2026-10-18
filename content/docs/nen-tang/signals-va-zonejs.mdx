@@ -33,9 +33,26 @@ description: Hiểu Angular biết lúc nào phải cập nhật giao diện nh�
 
 Hãy tách ba việc sau. Nếu trộn chúng vào nhau, `Signals`, `Zone.js` và change detection sẽ rất khó hiểu.
 
-```text
-1. State đổi             2. Angular được báo          3. Angular đồng bộ view
-   message = 'Xong'  ───►    “hãy kiểm tra”       ───►   {{ message }} → DOM
+```d2 title="Ba bước từ state đến DOM"
+direction: right
+
+n0: "State đổi\nmessage = 'Xong'" {
+  width: 152
+  height: 58
+}
+
+n1: "Angular được báo\nHãy kiểm tra" {
+  width: 152
+  height: 58
+}
+
+n2: "Angular đồng bộ view\n{{ message }} → DOM" {
+  width: 184
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
 ```
 
 - **State** là dữ liệu trong component hoặc service, ví dụ `message`, `items`, `isLoading`.
@@ -76,12 +93,32 @@ Khi Angular quyết định kiểm tra `StatusComponent`, nó thực hiện gầ
 2. So sánh giá trị mới với giá trị lần kiểm tra trước.
 3. Chỉ ghi vào DOM nếu giá trị khác.
 
-```text
-Giá trị lần trước: "Đang chờ"
-Giá trị hiện tại:  "Đã tải xong"
-                       │
-                       ▼
-            Angular đổi text của <p>
+```d2 title="Binding khác giá trị mới cần ghi DOM"
+direction: right
+
+before: "Lần trước\nĐang chờ" {
+  width: 130
+  height: 58
+}
+
+now: "Hiện tại\nĐã tải xong" {
+  width: 130
+  height: 58
+}
+
+compare: "Angular đối chiếu\nbinding" {
+  width: 160
+  height: 58
+}
+
+dom: "Đổi text của <p>" {
+  width: 152
+  height: 58
+}
+
+before -> compare
+now -> compare
+compare -> dom: "Khác nhau"
 ```
 
 Vì vậy, change detection **không phải** “render lại toàn bộ trang”. Angular kiểm tra các view được chọn, rồi chỉ sửa những binding có giá trị khác. Nhưng Angular vẫn cần một lý do để bắt đầu lượt kiểm tra; nó không chạy liên tục sau mọi dòng JavaScript.
@@ -116,17 +153,32 @@ export class StatusComponent implements OnInit {
 }
 ```
 
-```text
-setTimeout hoàn tất
-        │
-        ▼
-Zone.js thấy callback vừa chạy
-        │
-        ▼
-Angular chạy change detection
-        │
-        ▼
-Đọc lại {{ message }} và đổi text trong <p>
+```d2 title="Zone.js thông báo cơ hội chạy change detection"
+direction: right
+
+n0: "setTimeout hoàn tất" {
+  width: 176
+  height: 58
+}
+
+n1: "Zone.js thấy callback" {
+  width: 192
+  height: 58
+}
+
+n2: "Angular chạy\nchange detection" {
+  width: 152
+  height: 58
+}
+
+n3: "Đọc {{ message }}\nĐổi text <p>" {
+  width: 160
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 Đây là giá trị lớn nhất của Zone.js: bạn không phải tự gọi API cập nhật giao diện sau mỗi timer, Promise, HTTP response hay event phổ biến.
@@ -186,21 +238,48 @@ export class StatusComponent {
 
 Khi Angular render `{{ message() }}`, nó ghi nhận: template của `StatusComponent` đã đọc signal `message`. Khi `message.set(...)` chạy, Angular đã có mối liên kết cần thiết để đánh dấu view đó.
 
-```text
-Lần render đầu
-{{ message() }} được đọc
-        │
-        ▼
-Angular ghi nhớ: StatusComponent dùng message
+```d2 title="Signal ghi nhận consumer rồi đánh dấu view (1/2)"
+direction: right
 
-Lần cập nhật
-message.set('Đã tải xong')
-        │
-        ▼
-Angular đánh dấu StatusComponent cần kiểm tra
-        │
-        ▼
-Change detection đọc lại {{ message() }} rồi cập nhật DOM
+n0: "Render đầu\nĐọc {{ message() }}" {
+  width: 176
+  height: 58
+}
+
+n1: "Ghi dependency\nStatusComponent dùng\nmessage" {
+  width: 184
+  height: 79
+}
+
+n2: "message.set\nĐã tải xong" {
+  width: 130
+  height: 58
+}
+
+n3: "Đánh dấu view\ncần kiểm tra" {
+  width: 130
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Signal ghi nhận consumer rồi đánh dấu view (2/2)"
+direction: right
+
+n3: "Đánh dấu view\ncần kiểm tra" {
+  width: 130
+  height: 58
+}
+
+n4: "Đọc lại binding\nCập nhật DOM" {
+  width: 144
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Signal tạo ra notification dựa trên **dữ liệu thực sự đổi**, không dựa trên việc một timer hay Promise tình cờ vừa kết thúc. Đây là lý do Signals hợp với state đồng bộ của UI, như tab đang chọn, trạng thái tải hoặc danh sách đang hiển thị.
@@ -216,20 +295,48 @@ Signal tạo ra notification dựa trên **dữ liệu thực sự đổi**, kh�
 
 Có thể nhớ flow đầy đủ như sau:
 
-```text
-Người dùng click
-        │
-        ▼
-message.set('Đã lưu')
-        │
-        ▼
-Signal thông báo view đã đọc message()
-        │
-        ▼
-Angular chạy change detection cho view phù hợp
-        │
-        ▼
-DOM hiển thị “Đã lưu”
+```d2 title="Click ghi signal rồi đồng bộ view phụ thuộc (1/2)"
+direction: right
+
+n0: "Người dùng click" {
+  width: 152
+  height: 58
+}
+
+n1: "message.set('Đã lưu')" {
+  width: 192
+  height: 58
+}
+
+n2: "Signal thông báo\nview đã đọc message()" {
+  width: 192
+  height: 58
+}
+
+n3: "Change detection\ncho view phù hợp" {
+  width: 152
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Click ghi signal rồi đồng bộ view phụ thuộc (2/2)"
+direction: right
+
+n3: "Change detection\ncho view phù hợp" {
+  width: 152
+  height: 58
+}
+
+n4: "DOM hiển thị Đã lưu" {
+  width: 176
+  height: 58
+}
+
+n3 -> n4
 ```
 
 Ngoài template, `computed` theo dõi signal nguồn để tạo giá trị dẫn xuất; `effect` chạy side effect như lưu `localStorage`. Chúng là consumer của signal, không phải cơ chế thay thế render.

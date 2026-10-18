@@ -45,18 +45,32 @@ Ví dụ này mới chỉ khai báo nội dung. Nó chưa hiện trên trang vì
 
 Luồng hoạt động có thể hình dung như sau:
 
-```text
-<ng-template>
-  │ khai báo khuôn, chưa tạo node hiển thị
-  ▼
-TemplateRef
-  │ structural directive, NgTemplateOutlet
-  │ hoặc ViewContainerRef yêu cầu render
-  ▼
-Embedded view
-  │ Angular tạo binding và chèn node vào một container
-  ▼
-DOM đang hiển thị
+```d2 title="TemplateRef chỉ tạo DOM khi được yêu cầu"
+direction: right
+
+n0: "<ng-template>\nKhuôn chưa hiển thị" {
+  width: 176
+  height: 58
+}
+
+n1: "TemplateRef\nDirective /\nNgTemplateOutlet /\nViewContainerRef yêu\ncầu render" {
+  width: 184
+  height: 121
+}
+
+n2: "Embedded view\nTạo binding, chèn node" {
+  width: 200
+  height: 58
+}
+
+n3: "DOM đang hiển thị" {
+  width: 160
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
 ```
 
 ### Không phải thẻ bọc DOM

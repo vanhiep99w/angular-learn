@@ -60,22 +60,60 @@ Một request tốt đi qua các lớp có trách nhiệm riêng: component th�
 
 ### Luồng request thông thường
 
-```text
-┌─────────────┐    gọi service     ┌─────────────┐    HttpClient    ┌──────────────┐
-│ Component / │ ─────────────────► │ API service │ ───────────────► │ Interceptor  │
-│ Signal store│                    │  typed DTO  │                   │ chuỗi xử lý  │
-└──────┬──────┘                    └─────────────┘                   └──────┬───────┘
-       │                                                                     │ request
-       │ render state                                                        ▼
-       │                                                           ┌──────────────────┐
-       │                                                           │ Backend API      │
-       │                                                           │ auth + nghiệp vụ │
-       │                                                           └────────┬─────────┘
-       │                                                                    │ response/error
-       ▼                                                                    ▼
-┌─────────────┐   dữ liệu hoặc lỗi chuẩn hóa   ┌─────────────────────────────┐
-│ Giao diện   │ ◄───────────────────────────── │ Interceptor / error handler │
-└─────────────┘                                └─────────────────────────────┘
+```d2 title="Request đi từ component đến backend"
+direction: right
+
+n0: "Component / signal\nstore" {
+  width: 168
+  height: 58
+}
+
+n1: "API service\nTyped DTO" {
+  width: 130
+  height: 58
+}
+
+n2: "HttpClient /\ninterceptor\nChuỗi xử lý" {
+  width: 130
+  height: 79
+}
+
+n3: "Backend API\nAuth + nghiệp vụ" {
+  width: 152
+  height: 58
+}
+
+n0 -> n1
+n1 -> n2
+n2 -> n3
+```
+
+```d2 title="Response được chuẩn hóa trước khi hiển thị"
+direction: right
+
+backend: "Backend API" {
+  width: 130
+  height: 58
+}
+
+handler: "Interceptor / error\nhandler" {
+  width: 176
+  height: 58
+}
+
+view: "Giao diện" {
+  width: 130
+  height: 58
+}
+
+state: "Component / signal\nstore" {
+  width: 168
+  height: 58
+}
+
+backend -> handler: "Response / error"
+handler -> view: "Dữ liệu / lỗi chuẩn hóa"
+state -> view: "Render state"
 ```
 
 1. Component kích hoạt một hành động, ví dụ người dùng mở danh sách công việc.
@@ -88,22 +126,29 @@ Một request tốt đi qua các lớp có trách nhiệm riêng: component th�
 
 ### Luồng đăng nhập và phiên làm việc
 
-```text
-Người dùng                 Angular client                Auth API / Backend
-     │                            │                               │
-     │ gửi email + mật khẩu       │                               │
-     ├───────────────────────────►│ POST /auth/login              │
-     │                            ├──────────────────────────────►│
-     │                            │  access token / cookie phiên  │
-     │                            │◄──────────────────────────────┤
-     │                            │                               │
-     │ mở trang cần đăng nhập     │                               │
-     ├───────────────────────────►│ GET /api/tasks + credentials  │
-     │                            ├──────────────────────────────►│
-     │                            │ dữ liệu, 401 hoặc 403          │
-     │                            │◄──────────────────────────────┤
-     │ xem kết quả / đăng nhập lại│                               │
-     │◄───────────────────────────┤                               │
+```d2 title="Phiên đăng nhập và request có credentials (1/2)"
+shape: sequence_diagram
+
+user: "Người dùng"
+angular: "Angular client"
+api: "Auth API / backend"
+
+user -> angular: "Email + mật khẩu"
+angular -> api: "POST /auth/login"
+api -> angular: "Access token / cookie phiên"
+user -> angular: "Mở trang cần đăng nhập"
+```
+
+```d2 title="Phiên đăng nhập và request có credentials (2/2)"
+shape: sequence_diagram
+
+user: "Người dùng"
+angular: "Angular client"
+api: "Auth API / backend"
+
+angular -> api: "GET /api/tasks + credentials"
+api -> angular: "Dữ liệu / 401 / 403"
+angular -> user: "Kết quả / đăng nhập lại"
 ```
 
 Có hai hướng phổ biến để client mang thông tin phiên: token trong header `Authorization: Bearer <token>`, hoặc cookie phiên do server quản lý. Cả hai đều cần thiết kế từ backend. Với cookie, cần cân nhắc `HttpOnly`, `Secure`, `SameSite`, CORS và lựa chọn `withCredentials`. Với token, cần giới hạn thời gian sống, xử lý hết hạn và tránh lưu bí mật lâu dài ở nơi mã JavaScript có thể đọc khi không cần thiết.
