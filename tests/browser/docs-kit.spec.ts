@@ -41,8 +41,9 @@ for (const theme of ['light', 'dark']) {
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         for (const selector of ['.d2-diagram', '.code-walkthrough', '.code-diff', '.terminal-session', '.protocol-exchange', '.span-waterfall']) {
           for (const element of await page.locator(selector).all()) {
-            const box = await element.boundingBox();
-            expect(box!.width).toBeLessThanOrEqual(width);
+            // Hydration can replace the static fallback between measurements.
+            await expect.poll(async () => (await element.boundingBox())?.width ?? Infinity)
+              .toBeLessThanOrEqual(width);
           }
         }
       }

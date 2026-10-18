@@ -42,11 +42,11 @@ test('migration ledger points to authored D2 captions, including split diagrams'
   }
 });
 
-test('installed 0.9.5, MDX registry, CSS and page layout schema align', async () => {
+test('installed 0.9.6, MDX registry, CSS and page layout schema align', async () => {
   const manifest = JSON.parse(await readFile('package.json', 'utf8'));
   const installed = JSON.parse(await readFile('node_modules/@vanhiep99w/docs-kit/package.json', 'utf8'));
-  assert.equal(manifest.dependencies['@vanhiep99w/docs-kit'], '0.9.5');
-  assert.equal(installed.version, '0.9.5');
+  assert.equal(manifest.dependencies['@vanhiep99w/docs-kit'], '0.9.6');
+  assert.equal(installed.version, '0.9.6');
   const registry = await readFile('mdx-components.tsx', 'utf8');
   const css = await readFile('app/global.css', 'utf8');
   for (const [lang, component] of Object.entries({ ...features, d2: 'D2Diagram', 'd2-interactive': 'D2InteractiveDiagram' })) {
