@@ -3,12 +3,13 @@ import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { compile } from '@mdx-js/mdx';
 import { remarkD2 } from '@vanhiep99w/docs-kit/d2';
+import { d2Options } from '../scripts/docs-plugins.mjs';
 
 async function transform(value, path = 'tests/fixture.mdx') {
   let tree;
   const capture = () => (result) => { tree = result; };
   const compiled = await compile({ value, path }, {
-    remarkPlugins: [remarkD2, capture],
+    remarkPlugins: [[remarkD2, d2Options], capture],
   });
   return { tree, compiled: String(compiled) };
 }

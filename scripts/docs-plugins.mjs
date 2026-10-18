@@ -7,6 +7,8 @@ import { remarkSpanWaterfall } from '@vanhiep99w/docs-kit/span-waterfall';
 
 // Share the exact production pipeline with focused MDX tests. Static stays default.
 export const d2Options = {
+  // Preserve this curriculum's compact SVG dimensions across docs-kit upgrades.
+  scale: 0.75,
   // Pages' documented Next.js cache path; enable Build cache in its dashboard.
   cacheDir: '.next/cache/docs-kit/d2',
   assetsRoot: 'content/images/d2',

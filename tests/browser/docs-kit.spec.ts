@@ -72,10 +72,10 @@ test('walkthrough, diff, HTTP variants, D2 controls, terminal copy and span deta
   await expect(invalid.getByRole('region', { name: 'Body response — Thiếu title' })).toContainText('VALIDATION_ERROR');
   await invalid.getByRole('button', { name: 'Sao chép response — Thiếu title' }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('VALIDATION_ERROR');
-  await page.getByRole('button', { name: 'Explore diagram:' }).click();
+  await expect(page.locator('.d2-viewer')).toBeVisible();
   await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
   await expect(page.locator('.d2-viewer')).toBeVisible();
-  await page.getByRole('button', { name: 'Expand ↗', exact: true }).click();
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
