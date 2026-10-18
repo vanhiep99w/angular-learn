@@ -366,12 +366,13 @@ Alias đặc biệt hữu ích khi lồng vòng lặp. Nếu cả vòng ngoài v
 
 Giả sử danh sách ban đầu là `A`, `B`, `C`, có key tương ứng `1`, `2`, `3`. Sau đó người dùng ghim `C` lên đầu, danh sách thành `C`, `A`, `B`.
 
-```text
-Lần render đầu:    [A key=1] [B key=2] [C key=3]
-Sau khi sắp xếp:   [C key=3] [A key=1] [B key=2]
-                         │         │         │
-Angular nhận ra:   dùng lại C  dùng lại A  dùng lại B
-                   và di chuyển node/view theo thứ tự mới
+```d2 title="track key giữ identity khi đổi thứ tự"
+direction: right
+before: "Lần render đầu\nA key=1 · B key=2 · C key=3"
+after: "Sau khi sắp xếp\nC key=3 · A key=1 · B key=2"
+reuse: "Angular dùng lại C, A, B\nDi chuyển node/view\ntheo thứ tự mới"
+before -> after: "Sắp xếp"
+after -> reuse: "Nhận ra cùng key"
 ```
 
 Với `track product.id`, Angular có thể ghép mỗi item theo ID rồi tạo item mới, hủy item mất đi hoặc di chuyển item đổi vị trí. Nếu ID trùng nhau hoặc thay đổi tùy lần render, phép ghép này không còn đáng tin. Nói ngắn gọn: khóa không chỉ là tối ưu hiệu năng; nó là mô tả danh tính của dữ liệu trong UI.

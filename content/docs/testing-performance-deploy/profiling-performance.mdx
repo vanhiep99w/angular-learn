@@ -91,7 +91,8 @@ n0: "Người dùng gõ phím" {
   height: 58
 }
 
-n1: "Browser dispatch input" {
+n1: "Chrome dispatch input" {
+  icon: ../../images/d2/chrome.svg
   width: 200
   height: 58
 }
@@ -259,57 +260,67 @@ Quy trình điều tra một thao tác tương tác:
 5. Đọc call tree hoặc bottom-up: call tree giữ thứ tự gọi; bottom-up gom thời gian theo hàm và tốt để tìm nơi tiêu tốn tổng thời gian.
 6. Kiểm tra các event `product-search:*` nếu đã đặt mark. Chúng neo trace vào bước nghiệp vụ, tránh suy luận từ timestamp trần.
 
-```d2 title="Phân rã thời gian input đến paint"
-direction: right
+Các giá trị sau là **số liệu giả định để học cách đọc timeline**, không phải trace đã đo hay benchmark Angular. Mốc 0 là lúc handler nhận input; các span con nằm trong 92 ms JavaScript, nên không cộng chúng thêm lần nữa. Sơ đồ phía trên mô tả quan hệ; waterfall này bổ sung vị trí trên trục thời gian.
 
-input: "Input event" {
-  width: 130
-  height: 58
-}
-
-js: "JavaScript\n92 ms" {
-  width: 130
-  height: 58
-}
-
-filter: "filterProducts()\n58 ms" {
-  width: 152
-  height: 58
-}
-
-sort: "sortByRelevance()\n21 ms" {
-  width: 160
-  height: 58
-}
-
-template: "Template / framework\n13 ms" {
-  width: 184
-  height: 58
-}
-
-layout: "Recalculate Style +\nLayout\n31 ms" {
-  width: 176
-  height: 79
-}
-
-paint: "Paint\n18 ms" {
-  width: 130
-  height: 58
-}
-
-frame: "Khung hình kết quả mới" {
-  width: 200
-  height: 58
-}
-
-input -> js
-js -> filter
-js -> sort
-js -> template
-input -> layout
-input -> paint
-paint -> frame
+```span-waterfall
+title: Phân rã thời gian input đến paint
+unit: ms
+provenance:
+  kind: illustrative
+  description: Timeline tổng hợp cho bài học; không lấy từ Chrome hoặc Angular DevTools thực tế.
+spans:
+  - id: input
+    name: Input event đến khung hình kết quả mới
+    service: chrome
+    start: 0
+    duration: 141
+    status: ok
+  - id: js
+    parent: input
+    name: JavaScript
+    service: angular
+    start: 0
+    duration: 92
+    status: ok
+  - id: filter
+    parent: js
+    name: filterProducts()
+    service: angular
+    start: 0
+    duration: 58
+    status: ok
+    attributes: '{"fixture.items":2000,"measured":false}'
+  - id: sort
+    parent: js
+    name: sortByRelevance()
+    service: angular
+    start: 58
+    duration: 21
+    status: ok
+  - id: template
+    parent: js
+    name: Template / framework
+    service: angular
+    start: 79
+    duration: 13
+    status: ok
+  - id: layout
+    parent: input
+    name: Recalculate Style + Layout
+    service: chrome
+    start: 92
+    duration: 31
+    status: ok
+  - id: paint
+    parent: input
+    name: Paint
+    service: chrome
+    start: 123
+    duration: 18
+    status: ok
 ```
+
+Ở mô hình này, 92 + 31 + 18 = 141 ms. Con số input → paint 180 ms ở ca minh họa cuối bài là một kịch bản khác, không phải tổng suy ra từ waterfall này. Thứ tự giả định giúp học cách đọc; với trace thật, đối chiếu timestamp và khoảng chờ trước khi kết luận nhân quả. Giả định parent/child không tự chứng minh critical path.
 
 Trong ví dụ, tối ưu change detection trước `filterProducts()` chưa phải giả thuyết mạnh nhất. Task chính là lọc/sắp xếp đồng bộ. Tuy nhiên, sau khi giảm JavaScript, chi phí layout 31 ms có thể trở thành nút thắt kế tiếp; profiling là vòng lặp, không phải một lần chạy.
 
@@ -467,7 +478,7 @@ Khi số item nhìn thấy vẫn quá lớn, dùng virtual scrolling: chỉ rend
 
 ## Ví dụ hoàn chỉnh: danh sách sản phẩm bị lag
 
-Giả sử route sản phẩm tải 2.000 item. Người dùng gõ vào ô tìm kiếm và cảm thấy ký tự phản hồi chậm.
+Giả sử route sản phẩm tải 2.000 item. Người dùng gõ vào ô tìm kiếm và cảm thấy ký tự phản hồi chậm. Các số đo trước/sau trong ca này và bảng baseline phía trên đều là minh họa, không phải kết quả benchmark đã thực thi.
 
 ### Đo và lập giả thuyết
 

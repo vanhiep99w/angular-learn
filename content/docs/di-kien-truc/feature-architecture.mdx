@@ -263,9 +263,9 @@ data -> domain
 ```
 
 Không được phép:
-- domain ──► Angular, HTTP, router hoặc UI
-- data-access ──► page, component hoặc state UI
-- feature A ──► tệp private của feature B
+- Domain không được phụ thuộc Angular, HTTP, router hoặc UI.
+- Data-access không được phụ thuộc page, component hoặc state UI.
+- Feature A không được phụ thuộc tệp private của feature B.
 
 Điều này không có nghĩa UI không bao giờ được import model domain. `Product` là dữ liệu cần hiển thị nên page có thể đọc nó. Điều cần tránh là domain import `ProductCardComponent`, hoặc `CatalogApi` gọi `Router.navigate()` để quyết định trải nghiệm UI.
 

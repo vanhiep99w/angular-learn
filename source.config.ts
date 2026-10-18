@@ -1,15 +1,14 @@
 import { defineDocs, defineConfig } from 'fumadocs-mdx/config';
-import { remarkD2 } from '@vanhiep99w/docs-kit/d2';
+import { docsPlugins } from './scripts/docs-plugins.mjs';
+import { docsSchema } from './lib/docs-schema.mjs';
 
 export const docs = defineDocs({
   dir: 'content/docs',
+  docs: { schema: docsSchema },
 });
 
 export default defineConfig({
   mdxOptions: {
-    remarkPlugins: [[remarkD2, {
-      // Pages' documented Next.js cache path; enable Build cache in its dashboard.
-      cacheDir: '.next/cache/docs-kit/d2',
-    }]],
+    remarkPlugins: docsPlugins,
   },
 });

@@ -143,12 +143,17 @@ DOM kết quả gần đúng là:
 
 Cây DOM tương ứng:
 
-```text
-app-header                    ← host element của Header
-└── header                    ← node đầu tiên trong template
-    ├── img
-    └── h1
-        └── #text: "Investment Calculator"
+```d2 title="Host element và cây template của Header"
+direction: right
+host: "app-header\nHost element của Header"
+header: "header\nNode đầu tiên trong template"
+img: "img"
+h1: "h1"
+text: "#text: Investment Calculator"
+host -> header
+header -> img
+header -> h1
+h1 -> text
 ```
 
 `<app-header>` không phải nội dung do `header.html` tạo. Nó đã là vị trí trong template của component cha. Angular gắn component `Header` vào vị trí đó.
@@ -209,12 +214,15 @@ Host element không chỉ là một wrapper ngẫu nhiên. Nó là ranh giới A
 
 Mỗi component cần một vị trí ổn định trong cây view để Angular có thể tạo, cập nhật và hủy nó.
 
-```text
-<app-root>
-  ├── <app-header>                 ← Header component sống tại đây
-  ├── <app-user-input>             ← UserInput component sống tại đây
-  └── <app-investment-results>     ← InvestmentResults component sống tại đây
-</app-root>
+```d2 title="Các host element trong AppComponent"
+direction: right
+root: "<app-root>"
+header: "<app-header>\nHeader component sống tại đây"
+input: "<app-user-input>\nUserInput component sống tại đây"
+results: "<app-investment-results>\nInvestmentResults component\nsống tại đây"
+root -> header
+root -> input
+root -> results
 ```
 
 Nếu một điều kiện loại component khỏi template:
@@ -281,9 +289,14 @@ header {
 
 Trong ví dụ này:
 
-```text
-:host   → <app-header>
-header  → <header> nằm bên trong template
+```d2 title="Phần tử mà mỗi CSS selector khớp"
+direction: right
+hostSelector: ":host"
+host: "<app-header>"
+selector: "header"
+inner: "<header>\nNằm bên trong template"
+hostSelector -> host: "Khớp host element"
+selector -> inner: "Khớp node bên trong"
 ```
 
 `ViewEncapsulation` quyết định Angular cô lập style như thế nào. Với chế độ mặc định `Emulated`, DevTools thường hiển thị các attribute do Angular thêm để scope CSS. Dù cơ chế style chi tiết thay đổi theo cấu hình, `:host` vẫn là cách diễn tả rõ “style áp dụng lên phần tử mang component này”.

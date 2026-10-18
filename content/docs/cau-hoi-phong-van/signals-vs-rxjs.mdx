@@ -97,9 +97,14 @@ Observable không tự lưu toàn bộ lịch sử. Signal cũng có thể giữ
 
 **Pull** nghĩa là nơi sử dụng chủ động đọc giá trị, chẳng hạn template gọi `selectedTab()`. **Push** nghĩa là nguồn chủ động phát giá trị tới subscriber, chẳng hạn `saveClicks$.next()`.
 
-```text
-Signal:     template ── đọc selectedTab() ──► giá trị hiện tại
-Observable: nguồn phát ── next(value) ──────► subscriber
+```d2 title="Signal được đọc, Observable phát tới subscriber"
+direction: right
+template: "Signal\nTemplate đọc selectedTab()"
+value: "Giá trị hiện tại"
+source: "Observable\nNguồn phát"
+subscriber: "Subscriber"
+template -> value: "Đọc đồng bộ"
+source -> subscriber: "next(value)"
 ```
 
 Signal vẫn thông báo cho các **consumer** (những nơi đọc nó trong ngữ cảnh reactive) khi giá trị thay đổi. Vì vậy, gọi nó là “pull” không có nghĩa Angular phải liên tục hỏi xem state có đổi không. Đây là mô hình để phân biệt cách nhận giá trị, không phải toàn bộ cơ chế bên trong.
@@ -460,17 +465,17 @@ export class ProductSearchComponent {
 
 ### Luồng xử lý và ranh giới trách nhiệm
 
-```text
-Input ghi query Signal
-        │
-        ▼
-toObservable → debounceTime → distinctUntilChanged → switchMap(HTTP)
-                                                          │
-                                                          ▼
-                                                SearchState Observable
-                                                          │
-                                                          ▼
-                                              toSignal → template đọc
+```d2 title="Biên Signal và Observable trong tìm kiếm"
+direction: right
+input: "Input ghi query Signal"
+operators: "toObservable\ndebounceTime\ndistinctUntilChanged"
+http: "switchMap(HTTP)"
+state: "SearchState Observable"
+view: "toSignal\nTemplate đọc"
+input -> operators
+operators -> http
+http -> state
+state -> view
 ```
 
 Mỗi phần có một nhiệm vụ:
@@ -524,11 +529,15 @@ export class NaiveSearchComponent {
 
 Giả sử request cho `'ang'` chạy chậm, còn request cho `'angular'` chạy nhanh:
 
-```text
-Request A: query = ang       ─────────────────► kết quả A về sau
-Request B: query = angular       ───────► kết quả B về trước
-
-results = B, sau đó A ghi đè B → màn hình hiển thị kết quả query cũ
+```d2 title="Race condition khi request cũ ghi đè kết quả mới"
+direction: right
+send: "Gửi A: query = ang\nSau đó gửi B: query = angular"
+b: "B về trước\nresults = B"
+a: "A về sau\nGhi đè results = A"
+stale: "Màn hình hiển thị\nkết quả query cũ"
+send -> b
+b -> a: "Không hủy/lọc A"
+a -> stale
 ```
 
 Đây là **race condition**: thứ tự tác vụ hoàn thành quyết định kết quả, thay vì quy tắc nghiệp vụ “chỉ dùng query được chọn mới nhất”.

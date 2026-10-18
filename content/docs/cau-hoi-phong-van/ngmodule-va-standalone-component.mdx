@@ -379,20 +379,22 @@ Các scope provider cần nhớ:
 1. **Bootstrap** tạo ứng dụng Angular và render root component, thường là `AppComponent`.
 2. **Router** đọc URL hiện tại, chọn route phù hợp rồi render page vào `<router-outlet>` bên trong root component.
 
-```text
-Trình duyệt tải main.ts
-        │
-        ▼
-Bootstrap tạo ứng dụng và AppComponent
-        │
-        ▼
-AppComponent có <router-outlet>
-        │
-        ▼
-Router khớp URL, ví dụ /users
-        │
-        ▼
-Router tải và render UsersPageComponent vào router-outlet
+```d2 title="Bootstrap và Router tạo page vào outlet (1/2)"
+direction: right
+main: "Trình duyệt tải main.ts"
+bootstrap: "Bootstrap tạo ứng dụng\nvà AppComponent"
+outlet: "AppComponent\ncó <router-outlet>"
+main -> bootstrap
+bootstrap -> outlet
+```
+
+```d2 title="Bootstrap và Router tạo page vào outlet (2/2)"
+direction: right
+outlet: "AppComponent\ncó <router-outlet>"
+router: "Router khớp URL\nVí dụ /users"
+page: "Router tải và render\nUsersPageComponent\nvào router-outlet"
+outlet -> router
+router -> page
 ```
 
 ### Bootstrap chỉ khởi động ứng dụng

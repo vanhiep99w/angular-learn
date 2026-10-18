@@ -94,11 +94,30 @@ npx @angular/cli@latest new cua-hang
 
 ### Xem phiên bản và trợ giúp
 
-```bash
-ng version
-ng help
-ng generate --help
-ng generate component --help
+Trong workspace đã cài dependencies, dùng CLI cục bộ qua `npx --no-install` để tránh tải nhầm bản mới. Phiên dưới đây mô tả thao tác và kết quả cần kiểm tra, **không phải output đã chạy trên máy của bạn**.
+
+```terminal-session
+title: Kiểm tra CLI cục bộ trước khi sinh mã
+context:
+  kind: local
+  cwd: cua-hang
+steps:
+  - id: version
+    title: Đối chiếu phiên bản
+    command: npx --no-install ng version
+    expected: Thấy Angular CLI, Angular và Node.js; đối chiếu Node với yêu cầu của phiên bản Angular trong workspace.
+  - id: help
+    title: Xem nhóm lệnh
+    command: npx --no-install ng help
+    expected: Danh sách lệnh của CLI cục bộ, không phải CLI toàn cục khác phiên bản.
+  - id: generate
+    title: Kiểm tra generator
+    command: npx --no-install ng generate --help
+    expected: Có generator cần dùng trong collection đã cài.
+  - id: component
+    title: Kiểm tra tùy chọn component
+    command: npx --no-install ng generate component --help
+    expected: Đọc các cờ thực sự được phiên bản này hỗ trợ trước khi tạo tệp.
 ```
 
 `ng version` hiển thị Angular, CLI, Node.js và các package liên quan. Khi gặp lỗi khó tái hiện, thông tin này cần có trong báo cáo lỗi. `--help` cho biết cú pháp và các cờ mà bản CLI hiện tại thực sự hỗ trợ.
@@ -243,16 +262,17 @@ ng update @angular/core @angular/cli
 
 `angular.json` là nơi CLI biết workspace có những project nào và mỗi project có các target nào. Một target có thể có `options` dùng chung và các `configurations` cho từng môi trường.
 
-```text
-angular.json
-└── projects
-    └── cua-hang
-        └── architect (hoặc targets)
-            ├── build
-            │   ├── options
-            │   └── configurations.production
-            ├── serve
-            └── test
+```d2 title="Cấu trúc target trong angular.json"
+direction: right
+config: "angular.json\nprojects → cua-hang"
+targets: "architect\n(hoặc targets)"
+build: "build\noptions\nconfigurations.production"
+serve: "serve"
+test: "test"
+config -> targets
+ targets -> build
+ targets -> serve
+ targets -> test
 ```
 
 Tên trường có thể khác giữa các phiên bản và workspace, nhưng ý tưởng không đổi: lệnh `ng <target> <project> --configuration <tên>` chọn một tác vụ và một tập tuỳ chọn đã khai báo. Tránh sửa trực tiếp cấu hình nếu chưa hiểu target nào đang tham chiếu nó; một thay đổi ở `build` có thể ảnh hưởng cả CI/CD và môi trường production.

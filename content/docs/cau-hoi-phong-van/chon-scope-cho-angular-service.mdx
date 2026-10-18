@@ -53,17 +53,19 @@ Muốn tránh chuyện đó, hãy tách bài toán thành hai câu hỏi:
 
 Hai câu hỏi nghe gần giống nhau nhưng thực ra giải quyết hai việc hoàn toàn khác nhau.
 
-```text
-Logic hoặc state mới
-        │
-        ├── chỉ một component dùng, còn gọn
-        │       └── để ngay trong component
-        │
-        └── cần service vì chia sẻ hoặc đủ phức tạp
-                │
-                ├── cả app dùng chung ─────────► root
-                ├── một feature dùng chung ────► route
-                └── một cây UI dùng chung ─────► component
+```d2 title="Chọn nơi sở hữu logic và state mới"
+direction: right
+logic: "Logic hoặc state mới"
+local: "Chỉ một component dùng,\ncòn gọn: để trong component"
+service: "Cần service vì chia sẻ\nhoặc đủ phức tạp"
+root: "Cả app dùng chung\nroot"
+route: "Một feature dùng chung\nroute"
+component: "Một cây UI dùng chung\ncomponent"
+logic -> local
+logic -> service
+service -> root
+service -> route
+service -> component
 ```
 
 Có thể hình dung đơn giản thế này:
@@ -293,14 +295,18 @@ Bạn vẫn có thể truyền input/output nếu cây component còn nông. Loc
 
 Angular tạo hai shell, đồng nghĩa có hai `ElementInjector` và hai `DraftStore`:
 
-```text
-Editor A ──► DraftStore A
-  ├── Toolbar A
-  └── Canvas A
-
-Editor B ──► DraftStore B
-  ├── Toolbar B
-  └── Canvas B
+```d2 title="Mỗi Editor có DraftStore riêng cho cây UI"
+direction: right
+a: "Editor A"
+storeA: "DraftStore A"
+uiA: "Toolbar A\nCanvas A"
+b: "Editor B"
+storeB: "DraftStore B"
+uiB: "Toolbar B\nCanvas B"
+a -> storeA: "Sở hữu"
+a -> uiA: "Component con"
+b -> storeB: "Sở hữu"
+b -> uiB: "Component con"
 ```
 
 Gõ ở editor A không làm editor B “nhảy chữ”. Undo của A cũng không động vào history của B.
@@ -419,11 +425,15 @@ export class CheckoutShellComponent {}
 
 Router tạo shell trước, sau đó render `AddressPage` hoặc `PaymentPage` vào `<router-outlet>` của shell:
 
-```text
-CheckoutShellComponent
-└── <router-outlet>
-    ├── AddressPage
-    └── PaymentPage
+```d2 title="Checkout shell chứa outlet cho các page"
+direction: right
+shell: "CheckoutShellComponent"
+outlet: "<router-outlet>"
+address: "AddressPage"
+payment: "PaymentPage"
+shell -> outlet
+outlet -> address: "Route tương ứng"
+outlet -> payment: "Route tương ứng"
 ```
 
 Nếu chỉ các component đã render cần `CheckoutContext`, đặt provider ở shell như trên là hợp lý. Nhưng guard lại chạy **trước khi Router tạo `CheckoutShellComponent`**. Vì thế guard chưa thể nhìn thấy provider nằm trên component này.
@@ -658,11 +668,15 @@ Mỗi product card có thể sinh một auth context và repository riêng. Tron
 
 Nhiều người ngại component provider vì tưởng mọi dependency bên dưới cũng bị tạo lại. Thực tế Angular chỉ tạo instance cục bộ cho những token được provide ở scope đó.
 
-```text
-EditorShell ElementInjector
-└── DraftStore instance riêng
-    ├── inject(HttpClient) ──► root HttpClient
-    └── inject(Logger) ──────► root Logger
+```d2 title="Store cục bộ vẫn dùng dependency từ root"
+direction: right
+injector: "EditorShell\nElementInjector"
+store: "DraftStore\nInstance riêng"
+http: "root HttpClient"
+logger: "root Logger"
+injector -> store: "Sở hữu"
+store -> http: "inject(HttpClient)"
+store -> logger: "inject(Logger)"
 ```
 
 `DraftStore` là local. `HttpClient` và `Logger` vẫn dùng instance từ root nếu không có provider gần hơn che chúng.
@@ -699,14 +713,19 @@ Thay vì tranh luận “root hay không root” theo cảm giác, hãy đi lầ
 6. **State phải sống qua cả lần reload trình duyệt?** DI scope không giải quyết được; cần storage hoặc server.
 7. **Service stateless hoặc thật sự global?** `providedIn: 'root'` là lựa chọn gọn nhất.
 
-```text
-Chỉ một component dùng?
-├── Có, logic gọn ───────────────► component field
-└── Không / logic đã phức tạp
-    │
-    ├── nhiều UI instance độc lập ► component provider
-    ├── route callbacks cần dùng ─► route provider
-    └── cả app dùng cùng instance ► root provider
+```d2 title="Quyết định scope từ nhu cầu chia sẻ instance"
+direction: right
+question: "Chỉ một component dùng?" {shape: diamond}
+field: "Có, logic gọn\ncomponent field"
+complex: "Không / logic đã phức tạp"
+component: "Nhiều UI instance độc lập\ncomponent provider"
+route: "Route callbacks cần dùng\nroute provider"
+root: "Cả app cùng instance\nroot provider"
+question -> field
+question -> complex
+complex -> component
+complex -> route
+complex -> root
 ```
 
 <Callout type="idea" title="Một câu để tự kiểm tra">

@@ -46,23 +46,18 @@ Khi nói “service được lazy load”, ba hiện tượng khác nhau thườ
 
 Ba lớp này liên quan với nhau nhưng không quyết định thay nhau:
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│ Bundler                                                     │
-│ Static import hay dynamic import quyết định graph/chunk     │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ code đã được tải và evaluate
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Angular DI                                                  │
-│ providedIn / providers quyết định injector sở hữu provider  │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ consumer gọi inject(Token)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Runtime                                                     │
-│ Injector chạy factory, tạo và cache instance                │
-└─────────────────────────────────────────────────────────────┘
+```d2 title="Tách graph tải code, provider scope và runtime instance (1/2)"
+direction: right
+bundler: "Bundler\nStatic / dynamic import\nquyết định graph/chunk"
+di: "Angular DI\nprovidedIn / providers\nquyết định injector sở hữu"
+bundler -> di: "Code đã được tải\nvà evaluate"
+```
+
+```d2 title="Tách graph tải code, provider scope và runtime instance (2/2)"
+direction: right
+di: "Angular DI\nprovidedIn / providers\nquyết định injector sở hữu"
+runtime: "Runtime\nInjector chạy factory,\ntạo và cache instance"
+di -> runtime: "Consumer gọi inject(Token)"
 ```
 
 <Callout type="idea" title="Công thức để nhớ">
@@ -176,17 +171,22 @@ export const routes: Routes = [
 
 Nếu không có đường import eager nào khác tới `ReportStore`, class này thuộc graph lazy của `ReportPage`. Khi người dùng mở `/reports`, Router tải code cần thiết. Sau đó `ReportPage` gọi `inject(ReportStore)`, và **root injector** tạo rồi giữ instance.
 
-```text
-Mở ứng dụng
-  └── chưa cần graph của ReportPage
+```d2 title="Lazy code vẫn có thể tạo instance ở root injector (1/2)"
+direction: right
+open: "Mở ứng dụng\nChưa cần graph ReportPage"
+navigate: "Đi tới /reports\nTải lazy graph"
+page: "ReportPage"
+store: "ReportStore class"
+open -> navigate
+navigate -> page
+navigate -> store
+```
 
-Đi tới /reports
-  └── tải lazy graph
-        ├── ReportPage
-        └── ReportStore class
-              │ inject(ReportStore)
-              ▼
-        root EnvironmentInjector tạo và giữ instance
+```d2 title="Lazy code vẫn có thể tạo instance ở root injector (2/2)"
+direction: right
+store: "ReportStore class"
+root: "root EnvironmentInjector\nTạo và giữ instance"
+store -> root: "inject(ReportStore)"
 ```
 
 Service được tải muộn nhưng vẫn là root-scoped. Lazy loading không tự chuyển nó sang route injector.
@@ -323,13 +323,20 @@ export const CHECKOUT_ROUTES: Routes = [
 
 Route provider gần consumer hơn nên **che** root provider cho subtree đó:
 
-```text
-Component dưới /checkout
-  └── route injector có CheckoutStore → dùng route instance
+```d2 title="Route và root provider có thể giữ hai instance (1/2)"
+direction: right
+inside: "Component dưới /checkout"
+route: "Route injector\nCó CheckoutStore\nDùng route instance"
+inside -> route: "Lookup"
+```
 
-Component ngoài /checkout
-  └── không thấy route injector
-        └── root injector có CheckoutStore → dùng root instance
+```d2 title="Route và root provider có thể giữ hai instance (2/2)"
+direction: right
+outside: "Component ngoài /checkout"
+missing: "Không thấy route injector"
+root: "Root injector\nCó CheckoutStore\nDùng root instance"
+outside -> missing: "Lookup"
+missing -> root: "Lookup ở root"
 ```
 
 Nếu cả hai vùng đều inject token, ứng dụng có thể có hai instance `CheckoutStore`. Nếu chỉ route inject token, root provider tồn tại dưới dạng định nghĩa nhưng root instance có thể chưa bao giờ được tạo.

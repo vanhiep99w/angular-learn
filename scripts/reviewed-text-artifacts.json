@@ -1,0 +1,205 @@
+[
+  {
+    "file": "bat-dau/cau-truc-workspace.mdx",
+    "line": 82,
+    "lang": "text",
+    "sha256": "fbab3faaf82aefebe398159df9b1c0cb6e0be0f44a155cb305b1e139b97bb8e2",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "bat-dau/ung-dung-dau-tien.mdx",
+    "line": 140,
+    "lang": "text",
+    "sha256": "26cf1e81bf4c5699e403cf0050e6776ddf473cc8564472a661f351076220f0ab",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "cau-hoi-phong-van/signals-vs-rxjs.mdx",
+    "line": 114,
+    "lang": "ts",
+    "sha256": "f2f64efbf601b34203249f4d7d3db6e721bfd490125b96ceedaf9c1bee8eb645",
+    "reason": "Executable RxJS snippet with a comment summarizing synchronous console output; arrows are log ordering, not a hand-drawn diagram."
+  },
+  {
+    "file": "component-template/component-standalone.mdx",
+    "line": 672,
+    "lang": "text",
+    "sha256": "442daa3e61eaafa0725172c7ab466a699d04e44653a94d157bb865300dd7bda3",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "component-template/onpush-strategy.mdx",
+    "line": 265,
+    "lang": "text",
+    "sha256": "306db06200357d28d2a0947f8549fea0972470e69068a8a214af5d2bb8677eab",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "component-template/onpush-strategy.mdx",
+    "line": 274,
+    "lang": "text",
+    "sha256": "e23aeb063cf1e84016c6fe8b4bff9425d1211f03e16ca5f1928cfaa630fa0a6b",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "component-template/selector-va-host-element.mdx",
+    "line": 53,
+    "lang": "text",
+    "sha256": "0a78560aec8e3b8ea0bce64ccb3d86b20ee1a30a04a7304dddaaf65d64384c65",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "component-template/selector-va-host-element.mdx",
+    "line": 83,
+    "lang": "text",
+    "sha256": "8ae09afa3194464b714cfa6b9b764d00aad84dd26d593d0dc890c1ab247cb1f1",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "component-template/template-syntax-va-compiler.mdx",
+    "line": 121,
+    "lang": "text",
+    "sha256": "49897ad6993e561206dd769a8bde9a6c3437648225e97a596621636e2fd29724",
+    "reason": "Position-sensitive Angular two-way binding syntax: box/banana character positions must remain text."
+  },
+  {
+    "file": "di-kien-truc/feature-architecture.mdx",
+    "line": 55,
+    "lang": "text",
+    "sha256": "3edccd0a49807ca1d8ed2992f69da86d72df483212545727a1c98459aa560686",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "di-kien-truc/feature-architecture.mdx",
+    "line": 133,
+    "lang": "text",
+    "sha256": "6d64388a105fc026558a46981ef017555865d2ad784c6720cbfb4bcd8985f84a",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "di-kien-truc/feature-architecture.mdx",
+    "line": 170,
+    "lang": "text",
+    "sha256": "3190690364826b5ac8864384aba389e8927a95fda0fdc3a33dc0c4999943be12",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "di-kien-truc/feature-architecture.mdx",
+    "line": 547,
+    "lang": "text",
+    "sha256": "f257bee65f9b94eb76f9d2e02f157dc92d5d6b5c20f60f5b3aa77a66395d9531",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "di-kien-truc/standalone-architecture.mdx",
+    "line": 368,
+    "lang": "text",
+    "sha256": "dafbf9209621f357962ae56cc1c715cfae39b86064a04073a8c5b298fb13ab31",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "http-api-auth/realtime.mdx",
+    "line": 279,
+    "lang": "text",
+    "sha256": "3c62ad3d7f3395a691e8d9f6350fb94d480f0dc8a412398721e95ed108d32464",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "http-api-auth/realtime.mdx",
+    "line": 689,
+    "lang": "ts",
+    "sha256": "f1b2893dfc8924b5f8d58c27c85fda3e8e75af0132d3a1edf3aa7b678aa3c45f",
+    "reason": "Literal TypeScript reducer, including an Error message showing the previous and incoming event version. The arrow is part of the published runtime diagnostic string, not a diagram."
+  },
+  {
+    "file": "http-api-auth/realtime.mdx",
+    "line": 814,
+    "lang": "text",
+    "sha256": "29bdfa8e876b4ccd26eaab18895ff6ae8e097d02326c69221280710b80c606e7",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "nen-tang/kien-truc-angular.mdx",
+    "line": 467,
+    "lang": "text",
+    "sha256": "31e8f651ad02adb3fa3f26d0edf24f0ee167814823ffb5035ec8f2b03bad9edb",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "production-troubleshooting/debugging.mdx",
+    "line": 192,
+    "lang": "text",
+    "sha256": "d4a2ce4eecd21d76b52e009fd65f7cad4ce224c998ca07edbb89ba51b9d53836",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "production-troubleshooting/debugging.mdx",
+    "line": 304,
+    "lang": "text",
+    "sha256": "73001fe444c8e7565cbb700a758e81119579ec13edfe10908c8c81fd21c83cdd",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "production-troubleshooting/debugging.mdx",
+    "line": 310,
+    "lang": "text",
+    "sha256": "5364141098799bdefafc4673d51f9d945eae9742358e27c98fd3c7c375d56ec5",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "routing-forms/angular-router.mdx",
+    "line": 281,
+    "lang": "text",
+    "sha256": "bbc4c20825e10e89973f83939ac4588d3a20636463c3719b7bf6757fb97ac50d",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "routing-forms/angular-router.mdx",
+    "line": 430,
+    "lang": "text",
+    "sha256": "26b039b250ac8f98a1859be1d83b49bd818833893812114aab94eb32ec69c173",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "testing-performance-deploy/deployment.mdx",
+    "line": 241,
+    "lang": "text",
+    "sha256": "595977daa34d6d6cfb41c5b741865434eae1b44c5d95b410e1fe6f198ee1765e",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "testing-performance-deploy/deployment.mdx",
+    "line": 247,
+    "lang": "text",
+    "sha256": "def620ae72cf9d270bdb33469663988c67dd1c61956a6a6d6722a5870e17d6cc",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "testing-performance-deploy/deployment.mdx",
+    "line": 329,
+    "lang": "text",
+    "sha256": "6245b232a27add6ee8999f06168bf53d98b6a36f3a090a3233ffb10f9a5a4c15",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "testing-performance-deploy/e2e-testing.mdx",
+    "line": 208,
+    "lang": "text",
+    "sha256": "362b35d9dd2925f1a73105470d4e2a09659b0fab26df1195591108d6d7100bf7",
+    "reason": "Literal directory/file listing; paths and comments are teaching data, not an architecture diagram."
+  },
+  {
+    "file": "testing-performance-deploy/profiling-performance.mdx",
+    "line": 603,
+    "lang": "text",
+    "sha256": "bd41865ee7c71bfa7f1343225a52364d9dad5524415514ec4fb0a64451ba7286",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  },
+  {
+    "file": "testing-performance-deploy/rendering-angular-va-react.mdx",
+    "line": 47,
+    "lang": "text",
+    "sha256": "dfe690a20579f049fd1d4c78607f2d98db05313c1e8eff90799cbd32d932a471",
+    "reason": "Literal text example (state values, URL, expected observation, configuration or diagnostic output), not a flow diagram."
+  }
+]

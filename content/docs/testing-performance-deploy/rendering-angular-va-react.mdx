@@ -78,11 +78,13 @@ Trong một lượt kiểm tra, Angular đọc `title` và `results().length`. V
 
 Sau khi có giá trị mới, Angular so sánh nó với giá trị ở lượt trước. Angular chỉ ghi DOM khi khác nhau.
 
-```text
-Binding trước: title = "Kết quả đầu tư"
-Binding mới:   title = "Kết quả đầu tư"
-
-→ Không ghi lại text node trong DOM.
+```d2 title="Binding không đổi thì không ghi lại text node"
+direction: right
+previous: "Binding trước\ntitle = \"Kết quả đầu tư\""
+current: "Binding mới\ntitle = \"Kết quả đầu tư\""
+dom: "Không ghi lại text node\ntrong DOM"
+previous -> current: "So sánh: bằng nhau"
+current -> dom: "Giữ nguyên"
 ```
 
 Vì vậy, **một lượt change detection không có nghĩa toàn bộ giao diện bị vẽ lại**. Browser chỉ cần style, layout hoặc paint khi DOM/CSS thực sự thay đổi.

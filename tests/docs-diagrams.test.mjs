@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { compile } from '@mdx-js/mdx';
 import { visit } from 'unist-util-visit';
-import { remarkD2 } from '@vanhiep99w/docs-kit/d2';
+import { docsPlugins } from '../scripts/docs-plugins.mjs';
 
 // Compile the actual MDX, not just extracted fences, to catch MDX syntax,
 // SVG generation, duplicate IDs, and component conversion regressions.
@@ -27,10 +27,12 @@ test('all documentation D2 diagrams compile with valid themed SVGs', { timeout: 
         let count = 0;
         const inspect = () => (tree) => {
           visit(tree, 'mdxJsxFlowElement', (node) => {
-            if (node.name !== 'D2Diagram') return;
+            if (!['D2Diagram', 'D2InteractiveDiagram'].includes(node.name)) return;
             count++;
             const props = Object.fromEntries(node.attributes.map(({ name, value }) => [
-              name, value.data.estree.body[0].expression.value,
+              name, value.data.estree.body[0].expression.type === 'Literal'
+                ? value.data.estree.body[0].expression.value
+                : JSON.parse(value.data.estree.body[0].expression.arguments[0].value),
             ]));
             assert.ok(props.caption.trim(), `${relative}: missing caption`);
             for (const svg of [props.lightSvg, props.darkSvg]) {
@@ -50,7 +52,7 @@ test('all documentation D2 diagrams compile with valid themed SVGs', { timeout: 
           });
           visit(tree, 'code', (node) => assert.notEqual(node.lang, 'd2'));
         };
-        await compile({ value: source, path: file }, { remarkPlugins: [remarkD2, inspect] });
+        await compile({ value: source, path: file }, { remarkPlugins: [...docsPlugins, inspect] });
         assert.equal(count, [...source.matchAll(/^```d2\b/gm)].length, `${relative}: unconverted fence`);
         console.log(`D2 OK: ${relative} (${count})`);
       } catch (error) {

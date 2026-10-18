@@ -7,3 +7,7 @@ dist
 .cache/
 *.tsbuildinfo
 next-env.d.ts
+
+# Browser smoke artifacts
+playwright-report/
+test-results/

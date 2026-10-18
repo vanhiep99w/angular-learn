@@ -1,0 +1,176 @@
+[
+  {
+    "file": "component-template/control-flow.mdx",
+    "line": 369,
+    "title": "track key giữ identity khi đổi thứ tự",
+    "originalSha256": "4ff9bd7f3657811685202de43e07a408a3f5af609a26b588bdc2b3d499f00b04"
+  },
+  {
+    "file": "component-template/styling-component.mdx",
+    "line": 32,
+    "title": "Phạm vi CSS và các tệp của AlertComponent",
+    "originalSha256": "fa74cd9875b0b0108e83019a3c9896ee9c942a16141a7726874a09341abee27e"
+  },
+  {
+    "file": "component-template/styling-component.mdx",
+    "line": 166,
+    "title": "Shadow root bên trong host element",
+    "originalSha256": "0d670b4c47e3f8ded44505e65c04cb449df2ccbe7b9d737e168484743c4f0dfd"
+  },
+  {
+    "file": "component-template/selector-va-host-element.mdx",
+    "line": 146,
+    "title": "Host element và cây template của Header",
+    "originalSha256": "36ac3f98c3dc12489984bc526d86f6c8fe9858a1c769795dce53a0443993dd4c"
+  },
+  {
+    "file": "component-template/selector-va-host-element.mdx",
+    "line": 217,
+    "title": "Các host element trong AppComponent",
+    "originalSha256": "a4893d63bffb80bc95901cd9e632e598454e606d7a9336e7024462d9ed76d6b9"
+  },
+  {
+    "file": "component-template/selector-va-host-element.mdx",
+    "line": 292,
+    "title": "Phần tử mà mỗi CSS selector khớp",
+    "originalSha256": "f101764a8269878af2e78777fc4fabd381f02185256e1a664394f607da9e5312"
+  },
+  {
+    "file": "component-template/content-projection.mdx",
+    "line": 328,
+    "title": "Các slot nội dung được chiếu vào Panel",
+    "originalSha256": "1aa9bc0222e4ea169c0d835593d410b9817e67859cc597dceb4a83c05ad3230a"
+  },
+  {
+    "file": "nen-tang/dom-va-template.mdx",
+    "line": 59,
+    "title": "Mô hình DOM đơn giản của main",
+    "originalSha256": "a8c5b995699e37166d5906af8d00c79098ff6152fbba056a14dc44ed058d5192"
+  },
+  {
+    "file": "reactivity-state/rxjs-can-ban.mdx",
+    "line": 329,
+    "title": "switchMap chỉ chuyển kết quả request mới nhất",
+    "originalSha256": "99cf54050abdeb89760a51ab112eb02b1af1caf02ab0c2148f65187f01fa53c9"
+  },
+  {
+    "file": "cau-hoi-phong-van/signals-vs-rxjs.mdx",
+    "line": 100,
+    "title": "Signal được đọc, Observable phát tới subscriber",
+    "originalSha256": "a57faecab0a980ff0c189bc5406aa4405194d496953ee4fa7ffd05b241aa87c6"
+  },
+  {
+    "file": "cau-hoi-phong-van/signals-vs-rxjs.mdx",
+    "line": 468,
+    "title": "Biên Signal và Observable trong tìm kiếm",
+    "originalSha256": "18fdbf54e175cdfe2c7616ee04d37216f5af6cb3ebbf0a800206426fda73e639"
+  },
+  {
+    "file": "cau-hoi-phong-van/signals-vs-rxjs.mdx",
+    "line": 532,
+    "title": "Race condition khi request cũ ghi đè kết quả mới",
+    "originalSha256": "be930a841cc12ec9e42abb567ffa5811fb7c027cefd1a0ef75fd2e8a03abdd25"
+  },
+  {
+    "file": "cau-hoi-phong-van/code-splitting-lazy-loading-va-deferrable-views.mdx",
+    "line": 54,
+    "title": "Từ source code tới giao diện",
+    "originalSha256": "c701c7139156e546f2a5188040563d50de0ffadeb932074adc94b46c2239e252"
+  },
+  {
+    "file": "cau-hoi-phong-van/code-splitting-lazy-loading-va-deferrable-views.mdx",
+    "line": 170,
+    "title": "Route chunk và defer boundary có vai trò khác nhau",
+    "originalSha256": "979ee74cf32a838f851263a8b754b9495c69eb022188e1e743e28339ef241da0"
+  },
+  {
+    "file": "cau-hoi-phong-van/code-splitting-lazy-loading-va-deferrable-views.mdx",
+    "line": 260,
+    "title": "Các trạng thái tải của defer block",
+    "originalSha256": "5dc44cc969ad6391d829ff549d8c9bfed22bb71db77b16aa14061ebbc89f2302"
+  },
+  {
+    "file": "cau-hoi-phong-van/code-splitting-lazy-loading-va-deferrable-views.mdx",
+    "line": 417,
+    "title": "Tải app shell, route và prefetch chart",
+    "originalSha256": "18e98d07443462dc98660cb64318ad169958f471a8cb53d488060e1fa2c7a4c0"
+  },
+  {
+    "file": "cau-hoi-phong-van/code-splitting-lazy-loading-va-deferrable-views.mdx",
+    "line": 472,
+    "title": "Prefetch code không đồng nghĩa tải API data",
+    "originalSha256": "e461b02f32b6db5879a43f4cd8165bd9504af09a95b09010fd139ef16b2a1b7b"
+  },
+  {
+    "file": "cau-hoi-phong-van/code-splitting-lazy-loading-va-deferrable-views.mdx",
+    "line": 554,
+    "title": "Waterfall logic giữa route, chart và API",
+    "originalSha256": "c8d3a91f6af8b5ac39656ce57d2e7360a949e912c2bbd4955dfb4d2b1f034a0a"
+  },
+  {
+    "file": "cau-hoi-phong-van/ngmodule-va-standalone-component.mdx",
+    "line": 382,
+    "title": "Bootstrap và Router tạo page vào outlet",
+    "originalSha256": "3cdffff05caffe15d0b59f3a309bdd6cd55796c54e55b971b58dcaacc6f7d7da"
+  },
+  {
+    "file": "cau-hoi-phong-van/chon-scope-cho-angular-service.mdx",
+    "line": 56,
+    "title": "Chọn nơi sở hữu logic và state mới",
+    "originalSha256": "a87b4b79b91ede18a46fa8d9cbba9a694cfb2d2d9bffe8208b8db158759780cf"
+  },
+  {
+    "file": "cau-hoi-phong-van/chon-scope-cho-angular-service.mdx",
+    "line": 298,
+    "title": "Mỗi Editor có DraftStore riêng cho cây UI",
+    "originalSha256": "a3dec0f462d6eb681b3d9c638fbee83383a68c8689286111db1fc27dfe3adee6"
+  },
+  {
+    "file": "cau-hoi-phong-van/chon-scope-cho-angular-service.mdx",
+    "line": 428,
+    "title": "Checkout shell chứa outlet cho các page",
+    "originalSha256": "280b004ffc5664acd9e8fb76217d4467986ef18cf22af25f0af5802a9b1c1be4"
+  },
+  {
+    "file": "cau-hoi-phong-van/chon-scope-cho-angular-service.mdx",
+    "line": 671,
+    "title": "Store cục bộ vẫn dùng dependency từ root",
+    "originalSha256": "eb644991f8cf164d52c20eb5c86b889ac6cb9e08f4a49761744df26ba3f70579"
+  },
+  {
+    "file": "cau-hoi-phong-van/chon-scope-cho-angular-service.mdx",
+    "line": 716,
+    "title": "Quyết định scope từ nhu cầu chia sẻ instance",
+    "originalSha256": "49b203b17958c6c40e29559a5c43b9ca772a21967678ed7e5364c9841fa40189"
+  },
+  {
+    "file": "cau-hoi-phong-van/service-lazy-loading-va-provider-scope.mdx",
+    "line": 49,
+    "title": "Tách graph tải code, provider scope và runtime instance",
+    "originalSha256": "5d930287776e101418af5ed5b747bfa378e4adef69b0b10916f55d1b9282c0e6"
+  },
+  {
+    "file": "cau-hoi-phong-van/service-lazy-loading-va-provider-scope.mdx",
+    "line": 169,
+    "title": "Lazy code vẫn có thể tạo instance ở root injector",
+    "originalSha256": "222cf9ebea88c6141e4632a152f6c6598affa2340435a46779a2ef4a899aa8dd"
+  },
+  {
+    "file": "cau-hoi-phong-van/service-lazy-loading-va-provider-scope.mdx",
+    "line": 316,
+    "title": "Route và root provider có thể giữ hai instance",
+    "originalSha256": "6a42b50fe1ad52778a95d4ca7c23cb8f4407313f23f12a2a5e549b8ad8d055f1"
+  },
+  {
+    "file": "bat-dau/angular-cli.mdx",
+    "line": 265,
+    "title": "Cấu trúc target trong angular.json",
+    "originalSha256": "febbe5c502901fc7b7a6a18353a72b54def82f5adab1ae18eb545459f38cafab"
+  },
+  {
+    "file": "testing-performance-deploy/rendering-angular-va-react.mdx",
+    "line": 81,
+    "title": "Binding không đổi thì không ghi lại text node",
+    "originalSha256": "4dff7d8ad3a9117d27995e896c00f36c790aa5fe512c556e16b7930ff50f9763"
+  }
+]

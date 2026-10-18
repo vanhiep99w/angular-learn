@@ -56,14 +56,15 @@ Từ HTML sau:
 
 trình duyệt có thể biểu diễn giao diện bằng mô hình đơn giản sau:
 
-```text
-Document
-└── main
-    ├── h1
-    │   └── #text: "Chào An"
-    └── button
-        ├── disabled: true
-        └── #text: "Theo dõi"
+```d2 title="Mô hình DOM đơn giản của main"
+direction: right
+document: "Document"
+main: "main"
+heading: "h1\n#text: Chào An"
+button: "button\nProperty disabled: true\n#text: Theo dõi"
+document -> main
+main -> heading
+main -> button
 ```
 
 Node `button` không chỉ là một dòng chữ trong tệp HTML. Nó là một object đang sống trong bộ nhớ của trang, có property `disabled`, danh sách class, event listener và trạng thái do trình duyệt quản lý. Khi DOM đổi, trình duyệt có thể phải tính lại bố cục (*layout*) và vẽ lại một phần giao diện (*paint*).

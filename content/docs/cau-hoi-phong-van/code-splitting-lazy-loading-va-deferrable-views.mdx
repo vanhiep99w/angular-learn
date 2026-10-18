@@ -51,20 +51,25 @@ description: Phân biệt code splitting với lazy loading và sử dụng Angu
 
 Một ứng dụng có thể được chia thành nhiều chunk nhưng vẫn tải tất cả ngay khi khởi động. Ngược lại, code chỉ có thể được lazy-load nếu bundler đã tạo ra một ranh giới có thể tải riêng. Vì vậy cần đọc quá trình theo thứ tự:
 
-```text
-Source code
-    │
-    │ Angular compiler + bundler phân tích import và template
-    ▼
-Initial chunks + lazy chunks
-    │
-    │ Router hoặc @defer quyết định thời điểm request
-    ▼
-Trình duyệt tải, parse và evaluate code
-    │
-    │ Angular tạo view/component khi cần
-    ▼
-UI xuất hiện
+```d2 title="Từ source code tới giao diện (1/3)"
+direction: right
+source: "Source code"
+chunks: "Initial chunks\n+ lazy chunks"
+source -> chunks: "Compiler + bundler phân tích\nimport và template"
+```
+
+```d2 title="Từ source code tới giao diện (2/3)"
+direction: right
+chunks: "Initial chunks\n+ lazy chunks"
+browser: "Trình duyệt tải,\nparse và evaluate code"
+chunks -> browser: "Router / @defer quyết định\nthời điểm request"
+```
+
+```d2 title="Từ source code tới giao diện (3/3)"
+direction: right
+browser: "Trình duyệt tải,\nparse và evaluate code"
+ui: "UI xuất hiện"
+browser -> ui: "Angular tạo view/component\nkhi cần"
 ```
 
 ### Code splitting là kết quả build
@@ -172,16 +177,22 @@ Ví dụ một page sản phẩm cần summary ngay, nhưng reviews có thể ch
 
 Route lazy loading và Deferrable Views không loại trừ nhau. Một feature có thể được tải theo URL, rồi tiếp tục hoãn widget nặng bên trong feature.
 
-```text
-Initial application
-└── App shell + route config
+```d2 title="Route chunk và defer boundary có vai trò khác nhau (1/2)"
+direction: right
+initial: "Initial application\nApp shell + route config"
+route: "Đi tới /analytics\nAnalytics route chunk"
+now: "Page shell\nSummary cần ngay"
+boundary: "@defer boundary"
+initial -> route: "Điều hướng"
+route -> now
+route -> boundary
+```
 
-Đi tới /analytics
-└── Analytics route chunk
-    ├── Page shell
-    ├── Summary cần ngay
-    └── @defer boundary
-        └── Chart chunk chỉ tải khi trigger xảy ra
+```d2 title="Route chunk và defer boundary có vai trò khác nhau (2/2)"
+direction: right
+boundary: "@defer boundary"
+chart: "Chart chunk\nChỉ tải khi trigger xảy ra"
+boundary -> chart: "Trigger"
 ```
 
 Cách này giảm initial application bundle và giảm cả chi phí render ban đầu của route `/analytics`. Trade-off là lần mở route có thể có hai pha request. Nếu trigger xảy ra ngay sau navigation, người dùng có thể gặp request waterfall: route chunk tải xong rồi chart chunk mới bắt đầu tải.
@@ -261,20 +272,19 @@ Nói ngắn gọn: `@defer` tạo **khả năng** tách và trì hoãn dependenc
 
 Một block thường đi qua các trạng thái sau:
 
-```text
-Trang render
-    │
-    ▼
-@placeholder hoặc vùng trống
-    │ trigger xảy ra
-    ▼
-Tải deferred dependencies
-    │
-    ├── đang chờ đủ lâu ──► @loading
-    │
-    ├── thành công ───────► nội dung chính của @defer
-    │
-    └── tải thất bại ─────► @error
+```d2 title="Các trạng thái tải của defer block"
+direction: right
+render: "Trang render"
+placeholder: "@placeholder\nhoặc vùng trống"
+load: "Tải deferred\ndependencies"
+loading: "@loading"
+main: "Nội dung chính\ncủa @defer"
+error: "@error"
+render -> placeholder
+placeholder -> load: "Trigger xảy ra"
+load -> loading: "Đang chờ đủ lâu"
+load -> main: "Thành công"
+load -> error: "Tải thất bại"
 ```
 
 ### Placeholder loading content và error
@@ -419,22 +429,22 @@ Giả sử cả hai component con đều standalone:
 
 ### Timeline thực thi
 
-```text
-Khởi động ứng dụng
-  └── tải app shell
+```d2 title="Tải app shell, route và prefetch chart (1/2)"
+direction: right
+startup: "Khởi động ứng dụng\nTải app shell"
+route: "Đi tới /analytics\nTải AnalyticsPage route graph"
+render: "Render heading\nAnalyticsSummaryComponent\nButton placeholder"
+startup -> route
+route -> render
+```
 
-Đi tới /analytics
-  └── tải AnalyticsPage route graph
-      ├── render heading
-      ├── render AnalyticsSummaryComponent
-      └── render button placeholder
-
-Browser idle
-  └── prefetch AnalyticsChart graph, chưa render chart
-
-Người dùng bấm button
-  └── render AnalyticsChartComponent
-      └── component bắt đầu các tác vụ runtime của chính nó
+```d2 title="Tải app shell, route và prefetch chart (2/2)"
+direction: right
+render: "Render heading\nAnalyticsSummaryComponent\nButton placeholder"
+prefetch: "Browser idle\nPrefetch AnalyticsChart graph\nChưa render chart"
+click: "Người dùng bấm button\nRender AnalyticsChartComponent\nBắt đầu tác vụ runtime riêng"
+render -> prefetch
+prefetch -> click: "Render trigger"
 ```
 
 Nếu người dùng bấm trước khi prefetch xong, block có thể đi qua loading state. Nếu prefetch đã hoàn tất, việc chuyển từ placeholder sang chart nhanh hơn.
@@ -479,13 +489,16 @@ Tuy nhiên, block defer không quay lại trạng thái chưa tải khi `showCha
 
 Nếu `AnalyticsChartComponent` gọi API khi được tạo, request dữ liệu bắt đầu sau lúc component render. `prefetch on idle` chỉ tải JavaScript và tài nguyên code liên quan; nó không tự gọi endpoint của chart.
 
-```text
-Prefetch trigger
-  └── tải JavaScript/CSS của component
-
-Render trigger
-  └── tạo component
-      └── logic component có thể bắt đầu tải API data
+```d2 title="Prefetch code không đồng nghĩa tải API data"
+direction: right
+prefetch: "Prefetch trigger"
+code: "Tải JavaScript/CSS\ncủa component"
+render: "Render trigger"
+component: "Tạo component"
+api: "Logic component có thể\nbắt đầu tải API data"
+prefetch -> code
+render -> component
+component -> api
 ```
 
 Muốn chuẩn bị dữ liệu trước, hãy thiết kế riêng bằng Router resolver, resource, cache service hoặc một request có chủ đích. Đừng giả định prefetch code đồng nghĩa prefetch data.
@@ -558,12 +571,18 @@ Placeholder và loading state là UI thật, nên cần semantics thật:
 
 Waterfall xảy ra khi request sau chỉ bắt đầu sau khi request trước hoàn tất:
 
-```text
-Route chunk ───────────────► evaluate page
-                              Defer trigger
-                              Chart chunk ───────────────► render chart
-                                                          API request ─────► data
+```d2 title="Waterfall logic giữa route, chart và API"
+direction: right
+route: "Route chunk\nTải và evaluate page"
+trigger: "Defer trigger"
+chart: "Chart chunk\nTải và render chart"
+api: "API request\nNhận data"
+route -> trigger
+trigger -> chart
+chart -> api: "Logic runtime"
 ```
+
+Các mũi tên biểu diễn phụ thuộc theo thứ tự, không phải duration đã đo. Tải chart muộn rồi mới gọi API có thể tạo waterfall nối tiếp.
 
 Một số cách xử lý:
 

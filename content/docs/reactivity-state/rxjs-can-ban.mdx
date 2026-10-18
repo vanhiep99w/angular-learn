@@ -326,15 +326,25 @@ const results$ = query$.pipe(
 
 Khi query đổi từ `"ang"` sang `"angular"`, `switchMap` ngừng quan tâm request của `"ang"` và chỉ chuyển kết quả mới nhất xuống dưới. Với `HttpClient`, unsubscribe trước khi response về thường hủy request phía client. Server có thể đã bắt đầu xử lý, vì vậy không coi đây là bảo đảm server không nhận request.
 
-```text
-query:      ang ───────────── angular ─────────────►
-             │                  │
-HTTP:        request A          request B
-             │                  │
-             └── unsubscribe ──┘
-                                │
-results:                        kết quả B ─────────►
+```d2 title="switchMap chỉ chuyển kết quả request mới nhất (1/2)"
+direction: right
+old: "query: ang\nRequest A đang chạy"
+next: "query: angular\nSource phát giá trị mới"
+cancel: "Unsubscribe A\nBỏ kết quả cũ"
+old -> next: "Query đổi"
+next -> cancel: "Trước khi thay inner"
 ```
+
+```d2 title="switchMap chỉ chuyển kết quả request mới nhất (2/2)"
+direction: right
+cancel: "Unsubscribe A\nBỏ kết quả cũ"
+request: "Subscribe request B"
+results: "results: kết quả B"
+cancel -> request
+request -> results
+```
+
+Đây là thứ tự subscription, không phải thang thời gian. Unsubscribe phía client không chứng minh server đã dừng xử lý A.
 
 `switchMap` là lựa chọn tốt khi chỉ kết quả mới nhất có ý nghĩa: tìm kiếm, route id đổi hoặc tải chi tiết theo lựa chọn hiện tại.
 

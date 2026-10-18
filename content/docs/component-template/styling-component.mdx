@@ -29,15 +29,19 @@ Mỗi Angular component có template và có thể có stylesheet riêng. CSS tr
 
 Tuy nhiên, “CSS nằm trong file component” không luôn đồng nghĩa với “CSS bị cô lập hoàn toàn”. Mức cô lập do `encapsulation` trong `@Component` quyết định. Angular có ba chế độ: `Emulated` (mặc định), `ShadowDom` và `None`.
 
-```text
-AppComponent
-│
-├── styles.css                         CSS dùng chung toàn ứng dụng
-│
-└── AlertComponent
-    ├── alert.component.ts              khai báo metadata component
-    ├── alert.component.html            template
-    └── alert.component.css             CSS cục bộ của AlertComponent
+```d2 title="Phạm vi CSS và các tệp của AlertComponent"
+direction: right
+app: "AppComponent"
+global: "styles.css\nCSS dùng chung\ntoàn ứng dụng"
+alert: "AlertComponent"
+metadata: "alert.component.ts\nKhai báo metadata"
+template: "alert.component.html\nTemplate"
+css: "alert.component.css\nCSS cục bộ"
+app -> global: "Style toàn cục"
+app -> alert: "Component con"
+alert -> metadata
+alert -> template
+alert -> css
 ```
 
 <Callout type="idea" title="Nguyên tắc khởi đầu">
@@ -159,11 +163,13 @@ import { Component, ViewEncapsulation } from '@angular/core';
 export class RatingStarsComponent {}
 ```
 
-```text
-<app-rating-stars>
-  #shadow-root
-  └── <span class="stars">★★★★★</span>
-</app-rating-stars>
+```d2 title="Shadow root bên trong host element"
+direction: right
+host: "<app-rating-stars>"
+shadowRoot: "#shadow-root"
+span: "<span class=\"stars\">\n★★★★★\n</span>"
+host -> shadowRoot: "Sở hữu shadow tree"
+shadowRoot -> span: "Nội dung template"
 ```
 
 Chế độ này phù hợp khi component cần đóng gói mạnh, ví dụ thư viện widget được nhúng vào nhiều ứng dụng. Đổi lại, các selector CSS toàn cục thông thường không còn dễ dàng tùy chỉnh các node bên trong. Hãy cung cấp custom properties, `part` hoặc API component có chủ đích cho nhu cầu tùy biến.

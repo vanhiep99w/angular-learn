@@ -325,12 +325,17 @@ Consumer chỉ cần đánh dấu vai trò của từng node:
 
 Kết quả trực quan:
 
-```text
-app-panel
-└── section.panel
-    ├── header.panel__header  ← h2[panel-title]
-    ├── div.panel__body      ← form
-    └── footer.panel__footer ← div[panel-actions]
+```d2 title="Các slot nội dung được chiếu vào Panel"
+direction: right
+panel: "app-panel"
+section: "section.panel"
+header: "header.panel__header\nNhận h2[panel-title]"
+body: "div.panel__body\nNhận form"
+footer: "footer.panel__footer\nNhận div[panel-actions]"
+panel -> section
+section -> header
+section -> body
+section -> footer
 ```
 
 Ở đây `form` không khớp `[panel-title]` hay `[panel-actions]`, nên vào slot mặc định. Header và footer có thể rỗng nếu consumer không truyền node phù hợp; phần [Fallback content](#fallback-content) trình bày cách xử lý UI mặc định khi điều đó hợp lý.
