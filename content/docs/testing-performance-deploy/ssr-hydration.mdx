@@ -167,7 +167,23 @@ Các API, tên file và khả năng prerender params có thể khác giữa phi�
 
 Với route SSR, Angular chạy component tree trong tiến trình server. Các provider server-side lấy dữ liệu cần thiết, template sinh HTML và runtime trả HTML cho browser. Khi JavaScript tải xong, Angular client khởi tạo cùng route, đọc thông tin hydration trong HTML và nối lại ứng dụng với DOM hiện hữu.
 
-```d2 title="SSR trả HTML trước, client hydrate để tiếp quản (1/2)"
+> Playback dưới đây minh họa thứ tự các bước do tác giả chọn; không gửi request thật, không mô phỏng concurrency và tốc độ phát không phải latency. Bạn có thể chạy hoặc xem từng bước.
+
+```d2 title="SSR trả HTML trước, client hydrate để tiếp quản (1/2)" mode=flow interactive=true
+# @flow
+# scenarios:
+#   - id: main
+#     label: "Kịch bản minh họa"
+#     steps:
+#       - edge: "(browser -> server)[0]"
+#         description: "Browser → Angular SSR server: Request /products/42"
+#       - edge: "(server -> api)[0]"
+#         description: "Angular SSR server → API / database: Lấy dữ liệu"
+#       - edge: "(api -> server)[0]"
+#         description: "API / database → Angular SSR server: Dữ liệu render"
+#       - edge: "(server -> browser)[0]"
+#         description: "Angular SSR server → Browser: HTML + CSS + hydration metadata"
+# @endflow
 shape: sequence_diagram
 
 browser: "Browser"

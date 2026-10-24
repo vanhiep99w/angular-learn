@@ -139,7 +139,23 @@ Với single-page application, dùng **Authorization Code flow với PKCE**
 redirect. Kèm `state` để liên kết đúng request/response và `nonce` khi ứng dụng
 xác minh ID token. Tránh Implicit flow cũ cho ứng dụng mới.
 
-```d2 title="Authorization Code với PKCE (1/2)"
+> Playback dưới đây minh họa thứ tự các bước do tác giả chọn; không gửi request thật, không mô phỏng concurrency và tốc độ phát không phải latency. Bạn có thể chạy hoặc xem từng bước.
+
+```d2 title="Authorization Code với PKCE (1/2)" mode=flow interactive=true
+# @flow
+# scenarios:
+#   - id: main
+#     label: "Kịch bản minh họa"
+#     steps:
+#       - edge: "(angular -> angular)[0]"
+#         description: "Angular → Angular: Tạo state, nonce, PKCE verifier"
+#       - edge: "(angular -> idp)[0]"
+#         description: "Angular → Identity provider: /authorize + code_challenge"
+#       - edge: "(idp -> angular)[0]"
+#         description: "Identity provider → Angular: Redirect callback?code=..."
+#       - edge: "(angular -> idp)[1]"
+#         description: "Angular → Identity provider: Đổi code + verifier / nhận phiên"
+# @endflow
 shape: sequence_diagram
 
 angular: "Angular"
@@ -177,7 +193,21 @@ guard có thể redirect nhầm về login ngay khi ứng dụng vừa khởi đ
 Ví dụ này giả định backend quản lý session bằng cookie `HttpOnly`; Angular không
 đọc cookie và không nhận session secret trong JSON.
 
-```d2 title="Đăng nhập bằng cookie HttpOnly (1/2)"
+```d2 title="Đăng nhập bằng cookie HttpOnly (1/2)" mode=flow interactive=true
+# @flow
+# scenarios:
+#   - id: main
+#     label: "Kịch bản minh họa"
+#     steps:
+#       - edge: "(user -> angular)[0]"
+#         description: "Người dùng → Angular: Email / mật khẩu"
+#       - edge: "(angular -> auth)[0]"
+#         description: "Angular → Auth API: POST /auth/login"
+#       - edge: "(auth -> angular)[0]"
+#         description: "Auth API → Angular: Set-Cookie: HttpOnly"
+#       - edge: "(user -> angular)[1]"
+#         description: "Người dùng → Angular: Mở /tasks"
+# @endflow
 shape: sequence_diagram
 
 user: "Người dùng"
@@ -191,7 +221,28 @@ auth -> angular: "Set-Cookie: HttpOnly"
 user -> angular: "Mở /tasks"
 ```
 
-```d2 title="Đăng nhập bằng cookie HttpOnly (2/2)"
+```d2 title="Đăng nhập bằng cookie HttpOnly (2/2)" mode=flow interactive=true
+# @flow
+# scenarios:
+#   - id: valid
+#     label: "Session và API hợp lệ"
+#     steps:
+#       - edge: "(angular -> auth)[0]"
+#         description: "Angular → Auth API: GET /auth/session"
+#       - edge: "(auth -> angular)[0]"
+#         description: "Auth API xác nhận session còn hợp lệ."
+#       - edge: "(angular -> api)[0]"
+#         description: "Angular → API: GET /api/tasks + cookie tự gửi"
+#       - edge: "(api -> angular)[0]"
+#         description: "API xác thực request và trả dữ liệu tasks."
+#   - id: expired
+#     label: "Session không còn hợp lệ"
+#     steps:
+#       - edge: "(angular -> auth)[0]"
+#         description: "Angular → Auth API: GET /auth/session"
+#       - edge: "(auth -> angular)[0]"
+#         description: "Auth API trả 401: session không còn hợp lệ; không tải tasks."
+# @endflow
 shape: sequence_diagram
 
 user: "Người dùng"
@@ -204,6 +255,8 @@ auth -> angular: "User tóm tắt hoặc 401"
 angular -> api: "GET /api/tasks + cookie tự gửi"
 api -> angular: "Dữ liệu hoặc 401"
 ```
+
+Kịch bản thành công giả định cả session và quyền gọi API còn hợp lệ. Nếu GET /auth/session trả 401, luồng dừng trước khi tải tasks; API vẫn phải tự xác thực từng request.
 
 Ở lúc khởi động, gọi endpoint như `GET /auth/session` hoặc `GET /me` để server
 xác nhận phiên hiện tại. Không kết luận “đã đăng nhập” chỉ vì client còn một cờ
