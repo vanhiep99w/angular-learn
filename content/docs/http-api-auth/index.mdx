@@ -126,23 +126,7 @@ state -> view: "Render state"
 
 ### Luồng đăng nhập và phiên làm việc
 
-> Playback dưới đây minh họa thứ tự các bước do tác giả chọn; không gửi request thật, không mô phỏng concurrency và tốc độ phát không phải latency. Bạn có thể chạy hoặc xem từng bước.
-
-```d2 title="Phiên đăng nhập và request có credentials (1/2)" mode=flow interactive=true
-# @flow
-# scenarios:
-#   - id: main
-#     label: "Kịch bản minh họa"
-#     steps:
-#       - edge: "(user -> angular)[0]"
-#         description: "Người dùng → Angular client: Email + mật khẩu"
-#       - edge: "(angular -> api)[0]"
-#         description: "Angular client → Auth API / backend: POST /auth/login"
-#       - edge: "(api -> angular)[0]"
-#         description: "Auth API / backend → Angular client: Access token / cookie phiên"
-#       - edge: "(user -> angular)[1]"
-#         description: "Người dùng → Angular client: Mở trang cần đăng nhập"
-# @endflow
+```d2 title="Phiên đăng nhập và request có credentials (1/2)"
 shape: sequence_diagram
 
 user: "Người dùng"
@@ -155,37 +139,7 @@ api -> angular: "Access token / cookie phiên"
 user -> angular: "Mở trang cần đăng nhập"
 ```
 
-```d2 title="Phiên đăng nhập và request có credentials (2/2)" mode=flow interactive=true
-# @flow
-# scenarios:
-#   - id: success
-#     label: "API trả dữ liệu"
-#     steps:
-#       - edge: "(angular -> api)[0]"
-#         description: "Angular client → Auth API / backend: GET /api/tasks + credentials"
-#       - edge: "(api -> angular)[0]"
-#         description: "API trả dữ liệu cho request có credentials hợp lệ."
-#       - edge: "(angular -> user)[0]"
-#         description: "Angular hiển thị kết quả cho người dùng."
-#   - id: unauthenticated
-#     label: "API trả 401"
-#     steps:
-#       - edge: "(angular -> api)[0]"
-#         description: "Angular client → Auth API / backend: GET /api/tasks + credentials"
-#       - edge: "(api -> angular)[0]"
-#         description: "API trả 401: credential thiếu hoặc hết hạn."
-#       - edge: "(angular -> user)[0]"
-#         description: "Angular yêu cầu xác thực lại theo policy."
-#   - id: forbidden
-#     label: "API trả 403"
-#     steps:
-#       - edge: "(angular -> api)[0]"
-#         description: "Angular client → Auth API / backend: GET /api/tasks + credentials"
-#       - edge: "(api -> angular)[0]"
-#         description: "API trả 403: danh tính hợp lệ nhưng không có quyền."
-#       - edge: "(angular -> user)[0]"
-#         description: "Angular hiển thị thiếu quyền; không retry đăng nhập để vượt authorization."
-# @endflow
+```d2 title="Phiên đăng nhập và request có credentials (2/2)"
 shape: sequence_diagram
 
 user: "Người dùng"
@@ -196,8 +150,6 @@ angular -> api: "GET /api/tasks + credentials"
 api -> angular: "Dữ liệu / 401 / 403"
 angular -> user: "Kết quả / đăng nhập lại"
 ```
-
-Dữ liệu, 401 và 403 là ba kết quả thay thế: 401 cần xác thực lại; 403 là đã xác thực nhưng thiếu quyền, không được tự động retry đăng nhập như cách cấp thêm quyền.
 
 Có hai hướng phổ biến để client mang thông tin phiên: token trong header `Authorization: Bearer <token>`, hoặc cookie phiên do server quản lý. Cả hai đều cần thiết kế từ backend. Với cookie, cần cân nhắc `HttpOnly`, `Secure`, `SameSite`, CORS và lựa chọn `withCredentials`. Với token, cần giới hạn thời gian sống, xử lý hết hạn và tránh lưu bí mật lâu dài ở nơi mã JavaScript có thể đọc khi không cần thiết.
 

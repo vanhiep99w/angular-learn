@@ -272,21 +272,7 @@ TTL quyết định **khi nào hỏi lại**. `ETag` hoặc `Last-Modified` giú
 **có gì thay đổi không** với chi phí body thấp. Client có thể lưu ETag cùng entry
 và gửi `If-None-Match` khi entry stale.
 
-> Playback dưới đây minh họa thứ tự các bước do tác giả chọn; không gửi request thật, không mô phỏng concurrency và tốc độ phát không phải latency. Bạn có thể chạy hoặc xem từng bước.
-
-```d2 title="HTTP revalidation bằng ETag" mode=flow interactive=true
-# @flow
-# scenarios:
-#   - id: main
-#     label: "Kịch bản minh họa"
-#     steps:
-#       - edge: "(cache -> api)[0]"
-#         description: "Angular cache → API: GET /api/tasks; If-None-Match: v42"
-#       - edge: "(api -> cache)[0]"
-#         description: "API → Angular cache: 304 Not Modified"
-#       - edge: "(cache -> cache)[0]"
-#         description: "Angular cache → Angular cache: Gia hạn TTL, giữ body cũ"
-# @endflow
+```d2 title="HTTP revalidation bằng ETag"
 shape: sequence_diagram
 
 cache: "Angular cache"

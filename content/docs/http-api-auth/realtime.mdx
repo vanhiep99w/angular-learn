@@ -66,23 +66,7 @@ snapshot, nhưng một event đơn lẻ không giúp client mới mở trang bi�
 
 Vì vậy, mô hình đáng tin cậy thường bắt đầu bằng snapshot rồi mới áp dụng event:
 
-> Playback dưới đây minh họa thứ tự các bước do tác giả chọn; không gửi request thật, không mô phỏng concurrency và tốc độ phát không phải latency. Bạn có thể chạy hoặc xem từng bước.
-
-```d2 title="Snapshot trước, realtime event sau (1/2)" mode=flow interactive=true
-# @flow
-# scenarios:
-#   - id: main
-#     label: "Kịch bản minh họa"
-#     steps:
-#       - edge: "(angular -> api)[0]"
-#         description: "Angular → API / realtime gateway: GET /api/orders/A-100"
-#       - edge: "(api -> angular)[0]"
-#         description: "API / realtime gateway → Angular: Snapshot version 41"
-#       - edge: "(angular -> api)[1]"
-#         description: "Angular → API / realtime gateway: Mở SSE / WebSocket, fromVersion=41"
-#       - edge: "(api -> angular)[1]"
-#         description: "API / realtime gateway → Angular: Event e-42, version 42"
-# @endflow
+```d2 title="Snapshot trước, realtime event sau (1/2)"
 shape: sequence_diagram
 
 angular: "Angular"
@@ -919,28 +903,7 @@ Khi connection mất, một quy trình phục hồi rõ ràng có thể là:
 4. Nếu server báo cursor quá cũ hoặc client phát hiện gap, tải snapshot mới nhất.
 5. Đặt state theo snapshot version, sau đó tiếp tục event có version kế tiếp.
 
-```d2 title="Reconnect bằng version, fallback khi hết retention (1/2)" mode=flow interactive=true
-# @flow
-# scenarios:
-#   - id: replay
-#     label: "Còn retention: replay"
-#     steps:
-#       - edge: "(client -> client)[0]"
-#         description: "Client version 41 → Client version 41: Mất mạng; server tiến đến 46"
-#       - edge: "(client -> server)[0]"
-#         description: "Client version 41 → Server version 46: Reconnect + afterVersion=41"
-#       - edge: "(server -> client)[0]"
-#         description: "Server version 46 → Client version 41: Nếu còn retention: replay 42..46"
-#   - id: snapshot
-#     label: "Hết retention: lấy snapshot"
-#     steps:
-#       - edge: "(client -> client)[0]"
-#         description: "Client version 41 → Client version 41: Mất mạng; server tiến đến 46"
-#       - edge: "(client -> server)[0]"
-#         description: "Client version 41 → Server version 46: Reconnect + afterVersion=41"
-#       - edge: "(client -> server)[1]"
-#         description: "Client version 41 → Server version 46: Nếu hết retention: GET snapshot"
-# @endflow
+```d2 title="Reconnect bằng version, fallback khi hết retention (1/2)"
 shape: sequence_diagram
 
 client: "Client version 41"
@@ -951,8 +914,6 @@ client -> server: "Reconnect + afterVersion=41"
 server -> client: "Nếu còn retention: replay 42..46"
 client -> server: "Nếu hết retention: GET snapshot"
 ```
-
-Replay và lấy snapshot là hai cách phục hồi thay thế, không chạy nối tiếp trong cùng một lần reconnect. Phần snapshot và đăng ký lại stream được trình bày ở sơ đồ kế tiếp.
 
 ```d2 title="Reconnect bằng version, fallback khi hết retention (2/2)"
 shape: sequence_diagram
